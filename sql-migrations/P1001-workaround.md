@@ -1,83 +1,63 @@
-16 Sep
-i had so much trouble doing the migration and then finally found it was due to not having IPv6 which is a paid add on. 
-i did find a way around it which meant pushing script and migration to github
+Prisma P1001 Workaround (Supabase Free Tier)
 
-How we worked around Prisma P1001 (Supabase free tier)
+Issue (16 Sep):
+Prisma migration failed with:
 
-Problem:
-P1001: Can't reach database server when Prisma tries to use Supabase’s direct connection (db.<project>.supabase.co:5432). On the free tier this endpoint is typically IPv6-only, so many laptops/ISPs can’t reach it.
+P1001: Can't reach database server
 
-What works:
-The PgBouncer pooler (aws-1-<region>.pooler.supabase.com:6543) is IPv4 and reachable. We use it for runtime and db push.
 
-What we changed
+Supabase free tier only provides direct connections (5432) over IPv6, which isn’t supported everywhere (and is a paid add-on).
 
-Use pooler URL in .env
+✅ Workaround
+
+Use PgBouncer pooler (IPv4)
+In .env:
 
 DATABASE_URL="postgresql://postgres.<PROJECT_REF>:<PASSWORD>@aws-1-<region>.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1&sslmode=require"
 
 
-Username must include project ref: postgres.<PROJECT_REF>.
-connection_limit=1 helps with PgBouncer.
+Username must include project ref (postgres.<PROJECT_REF>).
 
-IP allow-list
+connection_limit=1 is required for PgBouncer.
 
-Get current IP: curl -4 ifconfig.me
+Allow-list IP
 
-Add it in Supabase → Settings → Database → Networking → IP Allow List
+curl -4 ifconfig.me
 
-Re-add when network/VPN changes.
 
-Avoid direct (5432) for migrations/introspection
+Add your IP in Supabase → Database → Networking → IP Allow List.
+Re-add if your IP changes (VPN, new network).
 
-We don’t rely on DIRECT_URL (5432) locally (this is what caused P1001).
+Skip direct introspection (5432)
+We don’t use DIRECT_URL. Instead, migrations are generated in CI.
 
-Instead of migrate dev / db pull, we generate SQL diffs in CI.
-
-CI workflow to generate migration SQL (no DB needed)
-
-GitHub Action runs on changes to prisma/schema.prisma.
-
-It executes:
+GitHub Action for migrations
+On changes to schema.prisma, CI runs:
 
 npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script > sql-migrations/<timestamp>.sql
 
 
-(or from previous schema to current)
+→ SQL is committed into sql-migrations/.
 
-The SQL file is committed to sql-migrations/.
+Apply manually in Supabase
+Copy latest SQL file → paste into Supabase SQL Editor → Run.
+Then locally:
 
-Apply SQL manually in Supabase
+npx prisma generate
 
-Copy latest sql-migrations/*.sql → Supabase SQL Editor → Run.
-
-Then locally: npx prisma generate.
-
-Day-to-day workflow
+🔄 Workflow Summary
 
 Edit prisma/schema.prisma.
 
-npx prisma db push (optional; quick local check via pooler).
+(Optional) npx prisma db push locally with pooler.
 
-Commit & push → GitHub Action generates sql-migrations/<timestamp>.sql.
+Commit & push → GitHub Action generates .sql.
 
-Paste/run that SQL in Supabase SQL Editor.
+Apply SQL in Supabase SQL Editor.
 
-npx prisma generate (update Prisma Client).
+Run npx prisma generate locally.
 
-(Optional) npx prisma studio to inspect data.
-
-Quick troubleshooting
-
-P1001 (again): You’re hitting 5432 (direct). Remove DIRECT_URL, stick to pooler.
-
-Allow-list error: Add your current IP (VPN off helps).
-
-Auth failed (P1000): Ensure username is postgres.<PROJECT_REF> and password matches Supabase DB password.
-
-Hangs on push: Close extra DB clients, keep VPN off, ensure pooler URL has ?pgbouncer=true&connection_limit=1.
-
-Need introspection (db pull): Run it in a cloud shell that can reach 5432, or keep designing via schema + CI SQL diffs.
+Use npx prisma studio to browse data.
 
 Bottom line:
-We bypassed the IPv4 limitation on Supabase’s direct connection by using the pooler for runtime and a Git-based SQL migration workflow (CI-generated diffs + manual apply in Supabase). This keeps us on the free tier with a reliable, versioned migration process.
+We bypassed the P1001 error by avoiding direct IPv6 connections and moving migrations to GitHub Actions + manual SQL in Supabase. This keeps everything working on the free tier.
