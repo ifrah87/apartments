@@ -1,0 +1,82 @@
+id,name,building,property_id,unit,monthly_rent,due_day,reference
+1,Jamie Adams #1,Taleex,T1,101,1400,1,T1-101
+2,Taylor Adams #2,Taleex,T1,102,1100,5,T1-102
+3,Jordan Adams #3,Taleex,T1,103,1200,3,T1-103
+4,Morgan Adams #4,Taleex,T1,104,1200,1,T1-104
+5,Casey Adams #5,Taleex,T1,105,1400,10,T1-105
+6,Riley Adams #6,Taleex,T1,106,1100,10,T1-106
+7,Avery Adams #7,Taleex,T1,107,1300,1,T1-107
+8,Quinn Adams #8,Taleex,T1,108,1100,1,T1-108
+9,Skyler Adams #9,Taleex,T1,109,1200,3,T1-109
+10,Dakota Adams #10,Taleex,T1,110,1350,10,T1-110
+11,Rowan Adams #11,Taleex,T1,111,1100,10,T1-111
+12,Emerson Adams #12,Taleex,T1,112,1200,10,T1-112
+13,Elliot Adams #13,Taleex,T1,113,1300,3,T1-113
+14,Finley Adams #14,Taleex,T1,114,1300,10,T1-114
+15,Parker Adams #15,Taleex,T1,115,1250,1,T1-115
+16,Cameron Adams #16,Taleex,T1,116,1200,7,T1-116
+17,Devon Adams #17,Taleex,T1,117,1250,5,T1-117
+18,Logan Adams #18,Taleex,T1,118,1200,3,T1-118
+19,Spencer Adams #19,Taleex,T1,119,1250,1,T1-119
+20,Noah Adams #20,Taleex,T1,120,1100,7,T1-120
+21,Liam Adams #21,Taleex,T1,121,1100,5,T1-121
+22,Emma Adams #22,Taleex,T1,122,1250,10,T1-122
+23,Olivia Adams #23,Taleex,T1,123,1250,1,T1-123
+24,Ava Adams #24,Taleex,T1,124,1400,7,T1-124
+25,Sophia Adams #25,Taleex,T1,125,1350,1,T1-125
+26,Isabella Adams #26,Taleex,T1,126,1300,1,T1-126
+27,Mia Adams #27,Taleex,T1,127,1350,5,T1-127
+28,Charlotte Adams #28,Taleex,T1,128,1400,10,T1-128
+29,Amelia Adams #29,Taleex,T1,129,1250,10,T1-129
+30,Ethan Adams #30,Taleex,T1,130,1200,1,T1-130
+31,Maya Adams #31,Taleex,T1,131,1100,3,T1-131
+32,Nora Adams #32,Taleex,T1,132,1250,1,T1-132
+33,Leo Adams #33,Taleex,T1,133,1200,1,T1-133
+34,Aria Adams #34,Taleex,T1,134,1300,5,T1-134
+35,Luca Adams #35,Taleex,T1,135,1300,5,T1-135
+36,Isla Adams #36,Taleex,T1,136,1200,5,T1-136
+37,Mila Adams #37,Taleex,T1,137,1250,3,T1-137
+38,Ivy Adams #38,Taleex,T1,138,1400,5,T1-138
+39,Zoe Adams #39,Taleex,T1,139,1400,1,T1-139
+40,Hana Adams #40,Taleex,T1,140,1350,3,T1-140
+41,Owen Adams #41,Taleex,T1,141,1350,3,T1-141
+42,Ezra Adams #42,Taleex,T1,142,1200,7,T1-142
+43,Nia Adams #43,Taleex,T1,143,1300,5,T1-143
+44,Kian Adams #44,Taleex,T1,144,1400,10,T1-144
+45,Lara Adams #45,Taleex,T1,145,1200,5,T1-145
+46,Milo Adams #46,Taleex,T1,146,1100,3,T1-146
+47,Vera Adams #47,Taleex,T1,147,1100,5,T1-147
+48,Wren Adams #48,Taleex,T1,148,1300,5,T1-148
+49,Zane Adams #49,Taleex,T1,149,1100,3,T1-149
+50,Alex Baker #50,Taleex,T1,150,1350,5,T1-150
+51,Jamie Baker #51,Taleex,T1,151,1200,7,T1-151
+52,Taylor Baker #52,Taleex,T1,152,1300,7,T1-152
+53,Jordan Baker #53,Taleex,T1,153,1200,5,T1-153
+54,Morgan Baker #54,Taleex,T1,154,1200,3,T1-154
+55,Casey Baker #55,Taleex,T1,155,1400,10,T1-155
+56,Riley Baker #56,Taleex,T1,156,1350,5,T1-156
+57,Avery Baker #57,Taleex,T1,157,1400,10,T1-157
+58,Quinn Baker #58,Taleex,T1,158,1300,10,T1-158
+59,Skyler Baker #59,Taleex,T1,159,1300,5,T1-159
+60,Dakota Baker #60,Taleex,T1,160,1200,3,T1-160
+61,Rowan Baker #61,Taleex,T1,161,1350,7,T1-161
+62,Emerson Baker #62,Taleex,T1,162,1100,1,T1-162
+63,Elliot Baker #63,Taleex,T1,163,1100,3,T1-163
+64,Finley Baker #64,Taleex,T1,164,1400,3,T1-164
+65,Parker Baker #65,Taleex,T1,165,1400,7,T1-165
+66,Cameron Baker #66,Taleex,T1,166,1350,1,T1-166
+67,Devon Baker #67,Laba Dhagax 1,LD1,201,1100,10,LD1-201
+68,Logan Baker #68,Laba Dhagax 1,LD1,202,1150,10,LD1-202
+69,Spencer Baker #69,Laba Dhagax 1,LD1,203,1150,8,LD1-203
+70,Noah Baker #70,Laba Dhagax 1,LD1,204,1150,1,LD1-204
+71,Liam Baker #71,Laba Dhagax 1,LD1,205,950,8,LD1-205
+72,Emma Baker #72,Laba Dhagax 2,LD2,301,1050,1,LD2-301
+73,Olivia Baker #73,Laba Dhagax 2,LD2,302,1050,10,LD2-302
+74,Ava Baker #74,Laba Dhagax 2,LD2,303,1000,10,LD2-303
+75,Sophia Baker #75,Laba Dhagax 2,LD2,304,950,8,LD2-304
+76,Isabella Baker #76,Laba Dhagax 2,LD2,305,1150,5,LD2-305
+77,Mia Baker #77,Laba Dhagax 3,LD3,401,1150,1,LD3-401
+78,Charlotte Baker #78,Laba Dhagax 3,LD3,402,1050,5,LD3-402
+79,Amelia Baker #79,Laba Dhagax 3,LD3,403,1000,8,LD3-403
+80,Ethan Baker #80,Laba Dhagax 3,LD3,404,1000,1,LD3-404
+81,Maya Baker #81,Laba Dhagax 3,LD3,405,1150,8,LD3-405
