@@ -15,6 +15,8 @@ import {
   HelpCircle,
   Ellipsis,
   ChevronDown,
+  Store,
+  Coffee,
 } from "lucide-react";
 
 /* ---------- Types & helpers ---------- */
@@ -67,6 +69,8 @@ const NAV: Item[] = [
   { kind: "leaf", label: "Dashboard", href: "/dashboard", icon: Home },
   { kind: "leaf", label: "Properties", href: "/properties", icon: Building2 },
   { kind: "leaf", label: "Reports", href: "/reports", icon: FileText },
+  { kind: "leaf", label: "Commercial Space", href: "/commercial Space", icon: Store},
+  { kind: "leaf", label: "Sky Cafe", href: "/skycafe", icon: Coffee},
   {
     kind: "group",
     label: "Find Tenants",

@@ -1,4 +1,6 @@
-// app/dashboard/page.tsx
-export default function DashboardPage() {
-  return <div style={{ padding: 55 }}>✅ Dashboard route is working</div>;
+// app/page.tsx
+import { redirect } from "next/navigation";
+
+export default function Home() {
+  redirect("/dashboard");
 }
