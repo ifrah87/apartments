@@ -2,7 +2,7 @@
 
 import React from "react";
 
-export default function TopbarLS(): JSX.Element {
+export default function Topbar(): JSX.Element {
   return (
     <div className="sticky top-0 z-30 h-14 bg-white border-b border-slate-200 flex items-center justify-end px-4">
       <div className="flex items-center gap-2 pl-3 border-l">
