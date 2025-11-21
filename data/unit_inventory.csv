@@ -1,0 +1,13 @@
+property_id,unit,unit_type,beds,floor,rent,status
+T1,101,2 Bed,2,1,1400,Occupied
+T1,102,3 Bed,3,1,1650,Vacant
+T1,103,1 Bed,1,2,1200,Occupied
+T1,104,Studio,0,2,950,Vacant
+LD1,201,2 Bed,2,3,1300,Occupied
+LD1,202,2 Bed,2,3,1300,Vacant
+LD2,301,3 Bed,3,4,1800,Occupied
+LD2,302,2 Bed,2,4,1500,Vacant
+LD3,401,3 Bed,3,5,1750,Occupied
+LD3,402,2 Bed,2,5,1500,Vacant
+T1,105,Studio,0,6,900,Vacant
+LD2,303,1 Bed,1,2,1100,Occupied

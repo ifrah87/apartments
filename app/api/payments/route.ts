@@ -1,28 +1,30 @@
 import { NextResponse } from "next/server";
-import { query } from "../../../lib/db";
+import fs from "fs";
+import path from "path";
+import papa from "papaparse";
 
 export async function GET() {
-  const { rows } = await query(`
-    SELECT p.id, p.paid_on, p.amount, p.method,
-           t.full_name AS tenant, pr.name AS property
-    FROM payments p
-    JOIN leases l ON l.id = p.lease_id
-    JOIN tenants t ON t.id = l.tenant_id
-    JOIN properties pr ON pr.id = l.property_id
-    ORDER BY p.paid_on DESC, p.id DESC
-  `);
-  return NextResponse.json(rows);
-}
+  try {
+    const filePath = path.join(process.cwd(), "data", "bank_all_buildings_simple.csv");
+    const csvText = fs.readFileSync(filePath, "utf8");
+    const parsed = papa.parse(csvText, { header: true, skipEmptyLines: true });
+    const rows = (parsed.data as any[]).filter(Boolean);
 
-export async function POST(req: Request) {
-  const { lease_id, paid_on, amount, method } = await req.json();
-  if (!lease_id || !paid_on || !amount) {
-    return NextResponse.json({ error: "missing fields" }, { status: 400 });
+    const normalized = rows.map((r) => ({
+      date: r.date,
+      description: r.description,
+      amount: Number(r.amount || 0),
+      type: r.type,
+      property_id: r.property_id,
+      tenant_id: r.tenant_id,
+    }));
+
+    return NextResponse.json(normalized);
+  } catch (err: any) {
+    console.error("❌ /api/payments failed:", err);
+    return NextResponse.json(
+      { error: "Failed to load payments CSV" },
+      { status: 500 }
+    );
   }
-  const { rows } = await query(
-    `INSERT INTO payments (lease_id, paid_on, amount, method)
-     VALUES ($1,$2,$3,$4) RETURNING id`,
-    [lease_id, paid_on, amount, method ?? null]
-  );
-  return NextResponse.json(rows[0], { status: 201 });
 }

@@ -1,109 +1,132 @@
 // app/dashboard/page.tsx
-import { query } from "../../lib/db";
+import Link from "next/link";
+import SectionCard from "@/components/ui/SectionCard";
+import StatCard from "@/components/ui/StatCard";
+import CashflowWidget, { CashflowPoint } from "@/components/CashflowWidget";
+import { calculateRentSummary } from "@/lib/reports/rentReports";
+import { calculateOccupancySummary } from "@/lib/reports/occupancyReports";
+import { calculateBankSummary, fetchLedger } from "@/lib/reports/ledger";
 
-export const runtime = "nodejs"; // ensure Node runtime
 
-// ----------------- KPI helpers -----------------
-
-// Rent Collected (MTD)
-async function rentCollectedMTD() {
-  const { rows } = await query<{ total: string }>(`
-    SELECT COALESCE(SUM(amount),0)::text AS total
-    FROM payments
-    WHERE date_trunc('month', paid_on) = date_trunc('month', CURRENT_DATE)
-  `);
-  return rows[0]?.total ?? '0';
-}
-
-// Upcoming Payments (next 7 days)
-async function upcomingPayments7d() {
-  const { rows } = await query<{ count: string }>(`
-    WITH t AS (SELECT EXTRACT(DAY FROM CURRENT_DATE)::int AS today)
-    SELECT COUNT(*)::text AS count
-    FROM leases, t
-    WHERE status='ACTIVE'
-      AND (
-        (rent_day_of_month BETWEEN t.today AND t.today+7)
-        OR (t.today+7 > 31 AND rent_day_of_month <= (t.today+7-31))
-      )
-  `);
-  return rows[0]?.count ?? '0';
-}
-
-// Overdue Rent (no payment this month AND rent_day_of_month passed)
-async function overdueRentCount() {
-  const { rows } = await query<{ count: string }>(`
-    WITH paid_this_month AS (
-      SELECT DISTINCT l.id
-      FROM payments p
-      JOIN leases l ON l.id = p.lease_id
-      WHERE date_trunc('month', p.paid_on) = date_trunc('month', CURRENT_DATE)
-    ),
-    t AS (SELECT EXTRACT(DAY FROM CURRENT_DATE)::int AS today)
-    SELECT COUNT(*)::text AS count
-    FROM leases l, t
-    WHERE l.status='ACTIVE'
-      AND l.rent_day_of_month < t.today
-      AND l.id NOT IN (SELECT id FROM paid_this_month)
-  `);
-  return rows[0]?.count ?? '0';
-}
-
-// At-Risk Tenants (due day within last 3 days, unpaid this month)
-async function atRiskTenantsCount() {
-  const { rows } = await query<{ count: string }>(`
-    WITH paid_this_month AS (
-      SELECT DISTINCT l.id
-      FROM payments p
-      JOIN leases l ON l.id = p.lease_id
-      WHERE date_trunc('month', p.paid_on) = date_trunc('month', CURRENT_DATE)
-    ),
-    t AS (SELECT EXTRACT(DAY FROM CURRENT_DATE)::int AS today)
-    SELECT COUNT(*)::text AS count
-    FROM leases l, t
-    WHERE l.status='ACTIVE'
-      AND l.rent_day_of_month BETWEEN GREATEST(t.today-3,1) AND t.today
-      AND l.id NOT IN (SELECT id FROM paid_this_month)
-  `);
-  return rows[0]?.count ?? '0';
-}
-
-// ----------------- Page -----------------
+export const runtime = "nodejs";
 
 export default async function DashboardPage() {
-  const [mtd, upcoming, overdue, atRisk] = await Promise.all([
-    rentCollectedMTD(),
-    upcomingPayments7d(),
-    overdueRentCount(),
-    atRiskTenantsCount(),
+  const [rent, occupancy, bank, ledgerEntries] = await Promise.all([
+    calculateRentSummary(),
+    calculateOccupancySummary(),
+    calculateBankSummary({}),
+    fetchLedger(),
   ]);
+  const cashflowSeries = buildMonthlyCashflow(ledgerEntries);
+
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+  const qs = new URLSearchParams({ start, end, unreconciled: "1" }).toString();
+
+  const ledgerLink = `/reports/ledger?${qs}`;
+
+  const topStats = [
+    {
+      label: "Rent Collected (MTD)",
+      value: `$${Math.round(rent.rentCollectedMTD).toLocaleString()}`,
+      href: ledgerLink,
+    },
+    {
+      label: "Upcoming Payments",
+      value: `$${Math.round(rent.upcomingTotal).toLocaleString()}`,
+      subtitle: `${rent.upcomingPayments} payments due in 7d`,
+      href: ledgerLink,
+    },
+    {
+      label: "Overdue Rent",
+      value: `$${Math.round(rent.overdueTotal).toLocaleString()}`,
+      subtitle: `${rent.overdueTenants} tenants overdue`,
+      href: ledgerLink,
+    },
+  ];
+
+  const lastUpdated = bank.lastUpdatedISO ? new Date(bank.lastUpdatedISO) : null;
+  const lastUpdatedText = lastUpdated
+    ? `${lastUpdated.toLocaleDateString("en", { month: "short", day: "numeric" })} at ${lastUpdated.toLocaleTimeString(
+        "en",
+        { hour: "numeric", minute: "2-digit" },
+      )}`
+    : "Never";
 
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-semibold">Dashboard</h1>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-        <div className="rounded-xl border bg-white p-4 shadow">
-          <p className="text-sm text-slate-500">Rent Collected (MTD)</p>
-          <p className="mt-2 text-2xl font-bold">£{mtd}</p>
-        </div>
-
-        <div className="rounded-xl border bg-white p-4 shadow">
-          <p className="text-sm text-slate-500">Upcoming Payments (7d)</p>
-          <p className="mt-2 text-2xl font-bold">{upcoming}</p>
-        </div>
-
-        <div className="rounded-xl border bg-white p-4 shadow">
-          <p className="text-sm text-slate-500">Overdue Rent</p>
-          <p className="mt-2 text-2xl font-bold">{overdue}</p>
-        </div>
-
-        <div className="rounded-xl border bg-white p-4 shadow">
-          <p className="text-sm text-slate-500">At-Risk Tenants</p>
-          <p className="mt-2 text-2xl font-bold">{atRisk}</p>
-        </div>
+    <div className="w-full space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <SectionCard className="p-4">
+          <div className="flex items-center justify-between text-slate-700">
+            <span>Bank balance</span>
+            <Link href="/reports/bank-summary" className="text-xs text-indigo-600 hover:underline">
+              View report
+            </Link>
+          </div>
+          <div className="mt-4 text-3xl font-semibold text-slate-900">${Math.round(bank.bankBalance).toLocaleString()}</div>
+          <Link
+            href="/reports/bank-summary?view=unreconciled"
+            className="mt-3 inline-flex text-sm font-semibold text-rose-600 hover:underline"
+          >
+            {bank.unreconciledCount} unreconciled {bank.unreconciledCount === 1 ? "item" : "items"}
+          </Link>
+          <div className="text-xs text-slate-400">Last synced: {lastUpdatedText}</div>
+        </SectionCard>
+        {topStats.map((card) => (
+          <StatCard
+            key={card.label}
+            label={card.label}
+            value={card.value}
+            subtitle={card.subtitle}
+            href={card.href}
+          />
+        ))}
       </div>
+
+      <SectionCard className="p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">Cash In & Out</p>
+            <h2 className="text-lg font-semibold text-slate-900">Monthly cashflow</h2>
+          </div>
+        </div>
+        <div className="mt-6">
+          <CashflowWidget points={cashflowSeries} link="/reports/bank-summary" />
+        </div>
+      </SectionCard>
+
     </div>
   );
+}
+
+type InternalCashflowPoint = CashflowPoint;
+
+function buildMonthlyCashflow(transactions: Awaited<ReturnType<typeof fetchLedger>>): CashflowPoint[] {
+  const now = new Date();
+  const buckets: CashflowPoint[] = [];
+  for (let i = 11; i >= 0; i--) {
+    const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    buckets.push({
+      key: date.toISOString(),
+      label: date.toLocaleString("en", { month: "short" }),
+      inflow: 0,
+      outflow: 0,
+      monthIndex: date.getMonth(),
+    });
+  }
+
+  transactions.forEach((txn) => {
+    const date = new Date(txn.date);
+    const label = date.toLocaleString("en", { month: "short" });
+    const bucket = buckets.find((b) => b.label === label);
+    if (!bucket) return;
+    if (txn.amount >= 0) {
+      bucket.inflow += txn.amount;
+    } else {
+      bucket.outflow += txn.amount;
+    }
+  });
+
+  return buckets;
 }

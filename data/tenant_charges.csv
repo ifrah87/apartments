@@ -1,0 +1,11 @@
+tenant_id,date,amount,paid_amount,description,category,communal,property_id
+1,2024-09-05,45,45,Water charges,utilities,false,T1
+1,2024-09-05,25,0,Electricity surcharge,utilities,false,T1
+3,2024-09-10,60,60,Parking pass,parking,false,LD2
+7,2024-09-15,30,30,Maintenance fee,maintenance,false,T1
+15,2024-09-20,55,0,Elevator assessment,maintenance,false,T1
+32,2024-09-12,40,40,Water charges,utilities,false,T1
+36,2024-09-18,35,20,Trash service,utilities,false,LD1
+46,2024-09-08,20,0,Bulk laundry credit,services,false,T1
+47,2024-09-11,25,25,Key replacement,maintenance,false,T1
+60,2024-09-25,50,0,Generator fee,utilities,true,T1

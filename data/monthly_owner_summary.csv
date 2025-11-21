@@ -1,0 +1,5 @@
+property_id,month,rent_collected,operating_expenses,net_income,occupancy_rate,arrears_total
+T1,2024-09,42000,12000,30000,95,3200
+LD1,2024-09,28000,9500,18500,92,2100
+LD2,2024-09,31000,10500,20500,90,4500
+LD3,2024-09,33000,11000,22000,88,3600

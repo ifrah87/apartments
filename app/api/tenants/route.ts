@@ -1,16 +1,26 @@
 import { NextResponse } from "next/server";
-import { query } from "@/lib/db";
+import fs from "fs";
+import path from "path";
+import papa from "papaparse";
 
 export async function GET() {
-  const { rows } = await query("SELECT * FROM tenants ORDER BY id DESC");
-  return NextResponse.json(rows);
-}
+  try {
+    const filePath = path.join(process.cwd(), "data", "tenants_all_buildings_simple_unique.csv");
+    console.log("🔍 reading tenants CSV from:", filePath);
 
-export async function POST(req: Request) {
-  const { full_name, email, phone } = await req.json();
-  const { rows } = await query(
-    "INSERT INTO tenants (full_name, email, phone) VALUES ($1,$2,$3) RETURNING *",
-    [full_name, email, phone]
-  );
-  return NextResponse.json(rows[0], { status: 201 });
+    const csvText = fs.readFileSync(filePath, "utf8");
+    console.log("📄 first 200 chars:", csvText.slice(0, 200));
+
+    const parsed = papa.parse(csvText, { header: true });
+    const rows = (parsed.data as any[]).filter(Boolean);
+    console.log("👤 sample tenant row:", rows[0]);
+
+    return NextResponse.json(rows);
+  } catch (err: any) {
+    console.error("❌ /api/tenants failed:", err);
+    return NextResponse.json(
+      { error: "Failed to load tenants CSV" },
+      { status: 500 }
+    );
+  }
 }

@@ -1,0 +1,32 @@
+tenant_id,date,type,amount,note
+1,2024-01-05,charge,1400,Lease start deposit
+1,2024-01-10,received,1400,Bank transfer
+3,2024-02-01,charge,1200,Lease start deposit
+3,2024-02-05,received,1200,Bank transfer
+3,2024-11-01,damage,-200,Door repair deduction
+7,2024-03-12,charge,650,Lease start deposit
+7,2024-03-15,received,650,Bank transfer
+7,2024-10-02,release,-200,Partial refund
+15,2024-05-01,charge,1250,
+15,2024-05-03,received,1250,
+15,2024-11-04,release,-1250,Move-out refund
+32,2024-06-01,charge,1250,
+32,2024-06-05,received,1250,
+36,2024-07-01,charge,1200,
+36,2024-07-04,received,1200,
+46,2024-08-01,charge,1100,
+46,2024-08-03,received,1100,
+47,2024-08-01,charge,1100,
+47,2024-08-04,received,1100,
+60,2024-09-01,charge,1200,
+60,2024-09-03,received,1200,
+62,2024-09-01,charge,1100,
+62,2024-09-04,received,1100,
+63,2024-09-01,charge,1100,
+63,2024-09-05,received,1100,
+66,2024-09-01,charge,337.5,
+66,2024-09-02,received,337.5,
+72,2024-09-01,charge,1050,
+72,2024-09-04,received,1050,
+77,2024-09-01,charge,1150,
+77,2024-09-05,received,1150,

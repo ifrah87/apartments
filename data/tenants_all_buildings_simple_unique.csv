@@ -1,0 +1,82 @@
+id,name,building,property_id,unit,monthly_rent,due_day,reference
+1,Sahra Awad,Taleex,T1,101,1400,1,T1-101
+2,Mustaf Hersi,Taleex,T1,102,1100,5,T1-102
+3,Abdirahman Dirie,Taleex,T1,103,1200,3,T1-103
+4,Anas Guleid,Taleex,T1,104,1200,1,T1-104
+5,Abdirahman Yare,Taleex,T1,105,1400,10,T1-105
+6,Khadar Warsame,Taleex,T1,106,1100,10,T1-106
+7,Degan Awad,Taleex,T1,107,1300,1,T1-107
+8,Khadar Yare,Taleex,T1,108,1100,1,T1-108
+9,Mustaf Osman,Taleex,T1,109,1200,3,T1-109
+10,Degan Warsame,Taleex,T1,110,1350,10,T1-110
+11,Asli Sugulle,Taleex,T1,111,1100,10,T1-111
+12,Nimco Mohamud,Taleex,T1,112,1200,10,T1-112
+13,Ruqiya Hersi,Taleex,T1,113,1300,3,T1-113
+14,Guled Dirie,Taleex,T1,114,1300,10,T1-114
+15,Samira Farah,Taleex,T1,115,1250,1,T1-115
+16,Rahma Hersi,Taleex,T1,116,1200,7,T1-116
+17,Ayaan Ibrahim,Taleex,T1,117,1250,5,T1-117
+18,Asli Awad,Taleex,T1,118,1200,3,T1-118
+19,Hamdi Osman,Taleex,T1,119,1250,1,T1-119
+20,Aden Hirsi,Taleex,T1,120,1100,7,T1-120
+21,Sahra Ibrahim,Taleex,T1,121,1100,5,T1-121
+22,Abukar Abdulle,Taleex,T1,122,1250,10,T1-122
+23,Abukar Ibrahim,Taleex,T1,123,1250,1,T1-123
+24,Hodan Awad,Taleex,T1,124,1400,7,T1-124
+25,Hodan Mohamud,Taleex,T1,125,1350,1,T1-125
+26,Aden Osman,Taleex,T1,126,1300,1,T1-126
+27,Asli Osman,Taleex,T1,127,1350,5,T1-127
+28,Samira Yare,Taleex,T1,128,1400,10,T1-128
+29,Aden Fiidow,Taleex,T1,129,1250,10,T1-129
+30,Sharmarke Yare,Taleex,T1,130,1200,1,T1-130
+31,Liban Hersi,Taleex,T1,131,1100,3,T1-131
+32,Abukar Guleid,Taleex,T1,132,1250,1,T1-132
+33,Hussein Mahad,Taleex,T1,133,1200,1,T1-133
+34,Maryan Warsame,Taleex,T1,134,1300,5,T1-134
+35,Fardowsa Barre,Taleex,T1,135,1300,5,T1-135
+36,Guled Farah,Taleex,T1,136,1200,5,T1-136
+37,Fardowsa Ali,Taleex,T1,137,1250,3,T1-137
+38,Anas Abdulle,Taleex,T1,138,1400,5,T1-138
+39,Hamdi Ibrahim,Taleex,T1,139,1400,1,T1-139
+40,Ubax Guleid,Taleex,T1,140,1350,3,T1-140
+41,Shukri Mahad,Taleex,T1,141,1350,3,T1-141
+42,Ubax Abdulle,Taleex,T1,142,1200,7,T1-142
+43,Khadar Cilmi,Taleex,T1,143,1300,5,T1-143
+44,Ubax Dirie,Taleex,T1,144,1400,10,T1-144
+45,Fardowsa Awad,Taleex,T1,145,1200,5,T1-145
+46,Khadar Awad,Taleex,T1,146,1100,3,T1-146
+47,Samira Ibrahim,Taleex,T1,147,1100,5,T1-147
+48,Abshir Fiidow,Taleex,T1,148,1300,5,T1-148
+49,Maryan Mohamud,Taleex,T1,149,1100,3,T1-149
+50,Sharmarke Farah,Taleex,T1,150,1350,5,T1-150
+51,Faysal Dirie,Taleex,T1,151,1200,7,T1-151
+52,Mustaf Fiidow,Taleex,T1,152,1300,7,T1-152
+53,Anas Farah,Taleex,T1,153,1200,5,T1-153
+54,Mustaf Farah,Taleex,T1,154,1200,3,T1-154
+55,Liban Hirsi,Taleex,T1,155,1400,10,T1-155
+56,Ayaan Cilmi,Taleex,T1,156,1350,5,T1-156
+57,Shukri Fiidow,Taleex,T1,157,1400,10,T1-157
+58,Guled Hirsi,Taleex,T1,158,1300,10,T1-158
+59,Shukri Guleid,Taleex,T1,159,1300,5,T1-159
+60,Sharmarke Fiidow,Taleex,T1,160,1200,3,T1-160
+61,Rahma Osman,Taleex,T1,161,1350,7,T1-161
+62,Anas Mohamud,Taleex,T1,162,1100,1,T1-162
+63,Hodan Osman,Taleex,T1,163,1100,3,T1-163
+64,Hodan Yare,Taleex,T1,164,1400,3,T1-164
+65,Abshir Guleid,Taleex,T1,165,1400,7,T1-165
+66,Sulekha Ibrahim,Taleex,T1,166,1350,1,T1-166
+67,Ayaan Warsame,Laba Dhagax 1,LD1,201,1100,10,LD1-201
+68,Shukri Osman,Laba Dhagax 1,LD1,202,1150,10,LD1-202
+69,Degan Osman,Laba Dhagax 1,LD1,203,1150,8,LD1-203
+70,Fardowsa Yare,Laba Dhagax 1,LD1,204,1150,1,LD1-204
+71,Maryan Osman,Laba Dhagax 1,LD1,205,950,8,LD1-205
+72,Ayaan Hirsi,Laba Dhagax 2,LD2,301,1050,1,LD2-301
+73,Anas Cilmi,Laba Dhagax 2,LD2,302,1050,10,LD2-302
+74,Rahma Barre,Laba Dhagax 2,LD2,303,1000,10,LD2-303
+75,Rahma Guleid,Laba Dhagax 2,LD2,304,950,8,LD2-304
+76,Abshir Abdulle,Laba Dhagax 2,LD2,305,1150,5,LD2-305
+77,Abukar Yare,Laba Dhagax 3,LD3,401,1150,1,LD3-401
+78,Rahma Dirie,Laba Dhagax 3,LD3,402,1050,5,LD3-402
+79,Nimco Ali,Laba Dhagax 3,LD3,403,1000,8,LD3-403
+80,Hodan Ali,Laba Dhagax 3,LD3,404,1000,1,LD3-404
+81,Anas Dirie,Laba Dhagax 3,LD3,405,1150,8,LD3-405

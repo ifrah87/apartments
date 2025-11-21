@@ -1,0 +1,6 @@
+property_id,date,description,amount,type
+T1,2024-09-01,Check #102 pending,-250,outstanding_payment
+T1,2024-09-03,Rent deposit in transit,1200,in_transit
+LD1,2024-09-04,Vendor payment pending,-480,outstanding_payment
+LD2,2024-09-06,Rent deposit in transit,1500,in_transit
+LD3,2024-09-10,Bank fee unrecorded,-35,outstanding_payment

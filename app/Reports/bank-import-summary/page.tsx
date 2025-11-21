@@ -1,0 +1,69 @@
+import Link from "next/link";
+import SectionCard from "@/components/ui/SectionCard";
+import { loadBankImportSummary } from "@/lib/reports/bankReports";
+
+const number = new Intl.NumberFormat("en-US");
+
+export const runtime = "nodejs";
+
+export default async function BankImportSummaryPage() {
+  const report = await loadBankImportSummary();
+
+  return (
+    <div className="space-y-6 p-6">
+      <header className="space-y-1">
+        <p className="text-sm text-slate-500">
+          <Link href="/reports" className="text-indigo-600 hover:underline">
+            Reports
+          </Link>{" "}/ Bank Import Summary
+        </p>
+        <h1 className="text-3xl font-semibold text-slate-900">Bank Import Summary</h1>
+        <p className="text-sm text-slate-500">Review the results of each bank statement import and outstanding matches.</p>
+      </header>
+
+      <div className="grid gap-4 sm:grid-cols-4">
+        <SummaryCard label="Total lines" value={number.format(report.totals.totalLines)} />
+        <SummaryCard label="Matched" value={number.format(report.totals.matched)} />
+        <SummaryCard label="Unmatched" value={number.format(report.totals.unmatched)} emphasize />
+        <SummaryCard label="Reconciled" value={number.format(report.totals.reconciled)} />
+      </div>
+
+      <SectionCard className="overflow-hidden">
+        <div className="border-b border-slate-100 px-4 py-3">
+          <h2 className="text-lg font-semibold text-slate-900">Imports</h2>
+        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-2">Import date</th>
+              <th className="px-4 py-2 text-right">Total lines</th>
+              <th className="px-4 py-2 text-right">Matched</th>
+              <th className="px-4 py-2 text-right">Unmatched</th>
+              <th className="px-4 py-2 text-right">Reconciled</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.rows.map((row) => (
+              <tr key={row.date} className="border-t border-slate-100">
+                <td className="px-4 py-2 text-slate-900">{new Date(row.date).toLocaleDateString()}</td>
+                <td className="px-4 py-2 text-right">{number.format(row.totalLines)}</td>
+                <td className="px-4 py-2 text-right text-emerald-600">{number.format(row.matched)}</td>
+                <td className="px-4 py-2 text-right text-rose-600">{number.format(row.unmatched)}</td>
+                <td className="px-4 py-2 text-right">{number.format(row.reconciled)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </SectionCard>
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, emphasize }: { label: string; value: string; emphasize?: boolean }) {
+  return (
+    <SectionCard className={`p-4 ${emphasize ? "ring-1 ring-rose-100" : ""}`}>
+      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
+      <p className={`mt-2 text-2xl font-semibold ${emphasize ? "text-rose-600" : "text-slate-900"}`}>{value}</p>
+    </SectionCard>
+  );
+}

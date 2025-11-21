@@ -1,0 +1,8 @@
+ticket_id,property_id,unit,category,priority,status,opened_at,closed_at,vendor,cost,description
+MT-1001,T1,101,Plumbing,High,Open,2024-09-01,,City Plumbing,250,Kitchen sink leak reported by tenant.
+MT-1002,T1,104,Painting,Medium,In Progress,2024-08-20,,FreshCo Painters,400,Turnover painting before next tenant.
+MT-1003,LD1,202,Electrical,High,Open,2024-09-15,,Bright Sparks,325,Outlet shorting in bedroom.
+MT-1004,LD2,301,HVAC,Low,Completed,2024-07-05,2024-07-08,Northwind HVAC,180,Seasonal filter replacement.
+MT-1005,LD3,402,Roof,High,In Progress,2024-09-28,,Skyline Roofing,600,Leak detected after storm.
+MT-1006,LD1,201,Cleaning,Low,Completed,2024-08-02,2024-08-04,Sparkle Services,150,Annual hallway deep clean.
+MT-1007,LD2,303,Appliances,Medium,Open,2024-10-02,,Appliance Pros,275,Washer not draining.

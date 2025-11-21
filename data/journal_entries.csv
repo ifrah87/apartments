@@ -1,0 +1,21 @@
+entry_id,property_id,date,account_id,description,debit,credit
+JE-1001,T1,2024-09-01,1010,Rent received cash,0,1400
+JE-1001,T1,2024-09-01,4000,Rent income,1400,0
+JE-1002,T1,2024-09-03,6000,Utilities expense,450,0
+JE-1002,T1,2024-09-03,1010,Cash,0,450
+JE-1003,LD1,2024-09-05,1010,Rent received cash,0,1300
+JE-1003,LD1,2024-09-05,4000,Rent income,1300,0
+JE-1004,LD1,2024-09-07,5050,Cleaning expense,0,200
+JE-1004,LD1,2024-09-07,1010,Cash,200,0
+JE-1005,LD2,2024-09-10,1200,Accounts receivable,900,0
+JE-1005,LD2,2024-09-10,4000,Rent income,0,900
+JE-1006,LD2,2024-09-15,2000,Accounts payable,0,600
+JE-1006,LD2,2024-09-15,5060,Boiler maintenance,600,0
+JE-1007,LD3,2024-09-21,1010,Rent received cash,0,1750
+JE-1007,LD3,2024-09-21,4000,Rent income,1750,0
+JE-1008,T1,2024-09-25,2100,Security deposits liability,0,500
+JE-1008,T1,2024-09-25,1015,Deposits cash,500,0
+JE-1009,LD3,2024-09-27,1500,Furniture & equipment,1200,0
+JE-1009,LD3,2024-09-27,1010,Cash,0,1200
+JE-1010,ALL,2024-09-30,3100,Owner equity contribution,0,3000
+JE-1010,ALL,2024-09-30,1010,Cash,3000,0
