@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { Suspense } from "react";
 import SectionCard from "@/components/ui/SectionCard";
 import { fetchLedger } from "@/lib/reports/ledger";
@@ -25,7 +24,7 @@ function formatMoney(value: number) {
 }
 
 async function getProperties(): Promise<PropertyOption[]> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const res = await fetch(`${baseUrl}/api/properties`, { cache: "no-store" });
   if (!res.ok) return [];
   const payload = await res.json();
@@ -38,15 +37,16 @@ export const runtime = "nodejs";
 export default async function LedgerPage({
   searchParams,
 }: {
-  searchParams: SearchParams;
+  searchParams: Promise<SearchParams>;
 }) {
+  const sp = await searchParams;
   const today = new Date();
   const defaultStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
   const defaultEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
 
-  const start = searchParams.start || defaultStart;
-  const end = searchParams.end || defaultEnd;
-  const property = searchParams.property || "";
+  const start = sp.start || defaultStart;
+  const end = sp.end || defaultEnd;
+  const property = sp.property || "";
 
   const [entries, properties] = await Promise.all([
     fetchLedger({ start, end, propertyId: property || undefined }),

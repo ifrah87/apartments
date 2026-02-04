@@ -25,15 +25,17 @@ function normalizeDay(date: Date) {
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { tenantId: string } },
+  { params }: { params: Promise<{ tenantId: string }> },
 ) {
   try {
-    const tenantId = normalizeId(params.tenantId);
-    let tenant = await tenantsRepo.getTenant(tenantId);
+    const { tenantId } = await params;
+    const normalizedTenantId = normalizeId(tenantId);
+    const tenantIdValue = normalizedTenantId;
+    let tenant = await tenantsRepo.getTenant(tenantIdValue);
 
     if (!tenant) {
       const allTenants = await tenantsRepo.listTenants();
-      tenant = allTenants.find((t) => normalizeId(t.reference) === tenantId) || null;
+      tenant = allTenants.find((t) => normalizeId(t.reference) === tenantIdValue) || null;
     }
 
     if (!tenant) {
@@ -72,7 +74,7 @@ export async function GET(
         const normalizedId = normalizeId(row.tenant_id);
         const desc = (row.description || "").toLowerCase();
         return (
-          normalizedId === tenantId ||
+          normalizedId === tenantIdValue ||
           (unitRef && desc.includes(unitRef)) ||
           (tenantName && desc.includes(tenantName))
         );
@@ -92,7 +94,7 @@ export async function GET(
 
     const manualPayments = await listManualPayments();
     const manualEntries: PaymentEntry[] = manualPayments
-      .filter((entry) => normalizeId(entry.tenant_id) === tenantId)
+      .filter((entry) => normalizeId(entry.tenant_id) === tenantIdValue)
       .map((entry) => ({
         description: entry.description || "Manual payment",
         amount: Number(entry.amount || 0),
@@ -135,7 +137,7 @@ export async function GET(
       return new NextResponse(csv, {
         headers: {
           "Content-Type": "text/csv",
-          "Content-Disposition": `attachment; filename=\"tenant-statement-${tenantId}-${payload.period.start}-to-${payload.period.end}.csv\"`,
+          "Content-Disposition": `attachment; filename=\"tenant-statement-${tenantIdValue}-${payload.period.start}-to-${payload.period.end}.csv\"`,
         },
       });
     }

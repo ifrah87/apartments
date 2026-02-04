@@ -1,5 +1,4 @@
 import { CUSTOM_DATASETS, type ColumnDefinition, type CustomDatasetMetadata } from "@/lib/constants/customReports";
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { serverFetch } from "@/lib/utils/serverFetch";
 
@@ -34,7 +33,7 @@ function normalizeRow(row: Record<string, unknown>, columns: ColumnDefinition[])
 }
 
 export async function loadCustomReportDatasets(): Promise<HydratedDataset[]> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const datasetPromises = CUSTOM_DATASETS.map(async (dataset) => {
     try {
       const url = `${baseUrl}${dataset.sourcePath.startsWith("/") ? dataset.sourcePath : `/${dataset.sourcePath}`}`;

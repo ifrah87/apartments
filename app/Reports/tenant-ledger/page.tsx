@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import SectionCard from "@/components/ui/SectionCard";
 import { fetchPropertyOptions } from "@/lib/reports/propertyHelpers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
@@ -66,7 +65,7 @@ function defaultDates() {
 
 async function fetchTenants(): Promise<Tenant[]> {
   try {
-    const baseUrl = getRequestBaseUrl(headers());
+    const baseUrl = await getRequestBaseUrl();
     const res = await fetch(`${baseUrl}/api/tenants`, { cache: "no-store" });
     if (!res.ok) return [];
     const payload = await res.json();
@@ -80,7 +79,7 @@ async function fetchTenants(): Promise<Tenant[]> {
 
 async function fetchStatement(tenantId: string, start: string, end: string): Promise<StatementResponse | null> {
   if (!tenantId) return null;
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const res = await fetch(`${baseUrl}/api/tenants/${tenantId}/statement?start=${start}&end=${end}`, {
     cache: "no-store",
   });

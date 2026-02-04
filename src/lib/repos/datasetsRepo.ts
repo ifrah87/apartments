@@ -42,12 +42,13 @@ export async function getDataset<T>(key: DatasetKey, fallback: T): Promise<T> {
 
 export async function setDataset<T>(key: DatasetKey, data: T): Promise<T> {
   const normalized = normalizeKey(key);
+  const json = JSON.stringify(data);
   try {
     await query(
       `INSERT INTO app_datasets (key, data)
-       VALUES ($1, $2)
+       VALUES ($1, $2::jsonb)
        ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
-      [normalized, data],
+      [normalized, json],
     );
   } catch (err: any) {
     const code = err?.code;
@@ -56,9 +57,9 @@ export async function setDataset<T>(key: DatasetKey, data: T): Promise<T> {
       await ensureDatasetsTable();
       await query(
         `INSERT INTO app_datasets (key, data)
-         VALUES ($1, $2)
+         VALUES ($1, $2::jsonb)
          ON CONFLICT (key) DO UPDATE SET data = EXCLUDED.data, updated_at = now()`,
-        [normalized, data],
+        [normalized, json],
       );
     } else {
       throw err;

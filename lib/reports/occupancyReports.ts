@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { fetchPropertyOptions } from "@/lib/reports/propertyHelpers";
 import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
@@ -61,7 +60,7 @@ export type OccupancySummary = {
 };
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to fetch ${path}`);

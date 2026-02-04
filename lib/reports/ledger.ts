@@ -1,5 +1,4 @@
 // lib/reports/ledger.ts
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
 export type Txn = {
@@ -27,7 +26,7 @@ function toISOMaybe(s: string) {
 }
 
 export async function fetchLedger(filter: LedgerFilter = {}): Promise<Txn[]> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const params = new URLSearchParams();
   if (filter.start) params.set("start", filter.start);
   if (filter.end) params.set("end", filter.end);

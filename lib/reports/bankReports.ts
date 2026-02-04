@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { calculateBankSummary } from "@/lib/reports/ledger";
 
@@ -25,7 +24,7 @@ export type BankImportReport = {
 };
 
 export async function loadBankImportSummary(): Promise<BankImportReport> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const res = await fetch(`${baseUrl}/api/bank-import-summary`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch bank import summary");
   const payload = await res.json();

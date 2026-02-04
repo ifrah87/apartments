@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
 export type RentSummary = {
@@ -10,7 +9,7 @@ export type RentSummary = {
 };
 
 export async function calculateRentSummary(): Promise<RentSummary> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const [tenantsRes, paymentsRes] = await Promise.all([
     fetch(`${baseUrl}/api/tenants`, { cache: "no-store" }),
     fetch(`${baseUrl}/api/payments`, { cache: "no-store" }),

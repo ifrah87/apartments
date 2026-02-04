@@ -1,6 +1,5 @@
 import Link from "next/link";
 import SectionCard from "@/components/ui/SectionCard";
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { fetchPropertyOptions } from "@/lib/reports/propertyHelpers";
 import ReportControlsBar from "@/components/reports/ReportControlsBar";
@@ -157,7 +156,7 @@ function SummaryCard({ label, value, emphasize }: { label: string; value: string
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {

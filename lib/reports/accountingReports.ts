@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { ACCOUNTING_CHART, findAccount, type AccountCategory } from "@/lib/reports/accountingChart";
 
@@ -74,7 +73,7 @@ export type GeneralLedgerRow = {
 };
 
 async function fetchJournalEntries(): Promise<JournalEntryRow[]> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const res = await fetch(`${baseUrl}/api/journal-entries`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to load journal entries");
   const payload = await res.json();
