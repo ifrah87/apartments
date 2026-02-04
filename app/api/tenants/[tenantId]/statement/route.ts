@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import path from "path";
-import fs from "fs";
-import papa from "papaparse";
 import { ChargeEntry, PaymentEntry, StatementRow, createStatement, normalizeId } from "@/lib/reports/tenantStatement";
 import { listManualPayments } from "@/lib/reports/manualPayments";
+import { bankTransactionsRepo, tenantsRepo, RepoError } from "@/lib/repos";
 
-function readCsv<T = any>(fileName: string): T[] {
-  const filePath = path.join(process.cwd(), "data", fileName);
-  const csvText = fs.readFileSync(filePath, "utf8");
-  const parsed = papa.parse(csvText, { header: true, skipEmptyLines: true });
-  return (parsed.data as T[]).filter(Boolean);
+function handleError(err: unknown) {
+  const status = err instanceof RepoError ? err.status : 500;
+  const message = err instanceof Error ? err.message : "Unexpected error.";
+  return NextResponse.json({ ok: false, error: message }, { status });
 }
 
 function parseDate(value: string | null): Date | null {
@@ -32,13 +29,15 @@ export async function GET(
 ) {
   try {
     const tenantId = normalizeId(params.tenantId);
-    const tenants = readCsv<any>("tenants_all_buildings_simple_unique.csv");
-    const tenant =
-      tenants.find((t) => normalizeId(t.id) === tenantId) ||
-      tenants.find((t) => normalizeId(t.reference) === tenantId);
+    let tenant = await tenantsRepo.getTenant(tenantId);
 
     if (!tenant) {
-      return NextResponse.json({ error: "Tenant not found" }, { status: 404 });
+      const allTenants = await tenantsRepo.listTenants();
+      tenant = allTenants.find((t) => normalizeId(t.reference) === tenantId) || null;
+    }
+
+    if (!tenant) {
+      return NextResponse.json({ ok: false, error: "Tenant not found" }, { status: 404 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -55,15 +54,14 @@ export async function GET(
     const start = normalizeDay(startRaw);
 
     if (start > end) {
-      return NextResponse.json({ error: "Start date must be before end date" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "Start date must be before end date" }, { status: 400 });
     }
 
     const tenantName = (tenant.name || "").toLowerCase();
     const unitRef = (tenant.reference || "").toLowerCase();
-    const paymentsRaw = readCsv<any>("bank_all_buildings_simple.csv");
-    const manualPayments = listManualPayments();
-    const chargeRows = readCsv<any>("tenant_charges.csv");
-    const payments: PaymentEntry[] = paymentsRaw
+
+    const bankTransactions = await bankTransactionsRepo.listTransactions();
+    const payments: PaymentEntry[] = bankTransactions
       .map((row) => ({
         amount: Number(row.amount || 0),
         date: row.date,
@@ -92,6 +90,7 @@ export async function GET(
         source: "bank",
       }));
 
+    const manualPayments = await listManualPayments();
     const manualEntries: PaymentEntry[] = manualPayments
       .filter((entry) => normalizeId(entry.tenant_id) === tenantId)
       .map((entry) => ({
@@ -107,20 +106,7 @@ export async function GET(
         return normalized >= start && normalized <= end;
       });
 
-    const additionalCharges: ChargeEntry[] = chargeRows
-      .filter((entry) => normalizeId(entry.tenant_id) === tenantId)
-      .map((entry) => ({
-        date: entry.date,
-        amount: Number(entry.amount || 0),
-        description: entry.description || "Charge",
-        category: entry.category,
-      }))
-      .filter((entry) => {
-        const d = parseDate(entry.date);
-        if (!d) return false;
-        const normalized = normalizeDay(d);
-        return normalized >= start && normalized <= end;
-      });
+    const additionalCharges: ChargeEntry[] = [];
 
     const { rows, totals } = createStatement({
       tenant,
@@ -135,7 +121,7 @@ export async function GET(
         id: tenant.id,
         name: tenant.name,
         property: tenant.building || tenant.property_id,
-        unit: tenant.unit,
+        unit: tenant.unit ?? undefined,
         monthlyRent: Number(tenant.monthly_rent || 0),
         dueDay: Number(tenant.due_day || 1),
       },
@@ -154,10 +140,10 @@ export async function GET(
       });
     }
 
-    return NextResponse.json(payload);
+    return NextResponse.json({ ok: true, data: payload });
   } catch (err) {
     console.error("❌ failed to build tenant statement", err);
-    return NextResponse.json({ error: "Failed to build statement" }, { status: 500 });
+    return handleError(err);
   }
 }
 

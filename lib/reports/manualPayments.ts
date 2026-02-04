@@ -1,6 +1,5 @@
-import fs from "fs";
-import path from "path";
 import { randomUUID } from "crypto";
+import { datasetsRepo } from "@/lib/repos";
 
 export type ManualPayment = {
   id: string;
@@ -10,37 +9,26 @@ export type ManualPayment = {
   description?: string;
 };
 
-const FILE_PATH = path.join(process.cwd(), "data", "manual_payments.json");
+const DATASET_KEY = "manual_payments";
 
-function ensureFile() {
-  if (!fs.existsSync(FILE_PATH)) {
-    fs.writeFileSync(FILE_PATH, "[]", "utf8");
-  }
+export async function listManualPayments(): Promise<ManualPayment[]> {
+  return datasetsRepo.getDataset<ManualPayment[]>(DATASET_KEY, []);
 }
 
-export function listManualPayments(): ManualPayment[] {
-  ensureFile();
-  const text = fs.readFileSync(FILE_PATH, "utf8");
-  try {
-    return JSON.parse(text);
-  } catch {
-    return [];
-  }
-}
-
-function writePayments(payments: ManualPayment[]) {
-  fs.writeFileSync(FILE_PATH, JSON.stringify(payments, null, 2), "utf8");
-}
-
-export function addManualPayment(data: Omit<ManualPayment, "id">): ManualPayment {
-  const payments = listManualPayments();
+export async function addManualPayment(data: Omit<ManualPayment, "id">): Promise<ManualPayment> {
   const entry: ManualPayment = { id: randomUUID(), ...data };
-  payments.push(entry);
-  writePayments(payments);
+  await datasetsRepo.updateDataset<ManualPayment[]>(
+    DATASET_KEY,
+    (current) => [...(current || []), entry],
+    [],
+  );
   return entry;
 }
 
-export function deleteManualPayment(id: string) {
-  const payments = listManualPayments().filter((entry) => entry.id !== id);
-  writePayments(payments);
+export async function deleteManualPayment(id: string) {
+  await datasetsRepo.updateDataset<ManualPayment[]>(
+    DATASET_KEY,
+    (current) => (current || []).filter((entry) => entry.id !== id),
+    [],
+  );
 }

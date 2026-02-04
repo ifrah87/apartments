@@ -3,10 +3,11 @@ import { getTransactionCategories, setTransactionCategory } from "@/lib/reports/
 
 export async function GET() {
   try {
-    return NextResponse.json(getTransactionCategories());
+    const data = await getTransactionCategories();
+    return NextResponse.json({ ok: true, data });
   } catch (err) {
     console.error("Failed to read transaction categories", err);
-    return NextResponse.json({ error: "Failed to read categories" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "Failed to read categories" }, { status: 500 });
   }
 }
 
@@ -16,12 +17,12 @@ export async function POST(req: NextRequest) {
     const id = String(body?.id || "").trim();
     const accountId = String(body?.accountId || "").trim();
     if (!id || !accountId) {
-      return NextResponse.json({ error: "id and accountId are required" }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "id and accountId are required" }, { status: 400 });
     }
-    setTransactionCategory(id, accountId);
-    return NextResponse.json({ success: true });
+    await setTransactionCategory(id, accountId);
+    return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("Failed to update transaction category", err);
-    return NextResponse.json({ error: "Failed to update category" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "Failed to update category" }, { status: 500 });
   }
 }

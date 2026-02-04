@@ -1,8 +1,9 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { Suspense } from "react";
 import SectionCard from "@/components/ui/SectionCard";
 import { fetchLedger } from "@/lib/reports/ledger";
-import { buildApiUrl } from "@/lib/utils/baseUrl";
+import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
 type SearchParams = {
   start?: string;
@@ -24,10 +25,12 @@ function formatMoney(value: number) {
 }
 
 async function getProperties(): Promise<PropertyOption[]> {
-  const res = await fetch(buildApiUrl("/api/properties"), { cache: "no-store" });
+  const baseUrl = getRequestBaseUrl(headers());
+  const res = await fetch(`${baseUrl}/api/properties`, { cache: "no-store" });
   if (!res.ok) return [];
-  const json = await res.json();
-  return json || [];
+  const payload = await res.json();
+  if (payload?.ok === false) return [];
+  return (payload?.ok ? payload.data : payload) || [];
 }
 
 export const runtime = "nodejs";

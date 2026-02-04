@@ -1,26 +1,32 @@
-import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-import papa from "papaparse";
+import { NextRequest, NextResponse } from "next/server";
+import { tenantsRepo, RepoError } from "@/lib/repos";
 
-export async function GET() {
+function handleError(err: unknown) {
+  const status = err instanceof RepoError ? err.status : 500;
+  const message = err instanceof Error ? err.message : "Unexpected error.";
+  return NextResponse.json({ ok: false, error: message }, { status });
+}
+
+export async function GET(req: NextRequest) {
   try {
-    const filePath = path.join(process.cwd(), "data", "tenants_all_buildings_simple_unique.csv");
-    console.log("🔍 reading tenants CSV from:", filePath);
-
-    const csvText = fs.readFileSync(filePath, "utf8");
-    console.log("📄 first 200 chars:", csvText.slice(0, 200));
-
-    const parsed = papa.parse(csvText, { header: true });
-    const rows = (parsed.data as any[]).filter(Boolean);
-    console.log("👤 sample tenant row:", rows[0]);
-
-    return NextResponse.json(rows);
-  } catch (err: any) {
+    const { searchParams } = new URL(req.url);
+    const propertyId = searchParams.get("propertyId") ?? undefined;
+    const search = searchParams.get("search") ?? undefined;
+    const data = await tenantsRepo.listTenants({ propertyId, search });
+    return NextResponse.json({ ok: true, data });
+  } catch (err) {
     console.error("❌ /api/tenants failed:", err);
-    return NextResponse.json(
-      { error: "Failed to load tenants CSV" },
-      { status: 500 }
-    );
+    return handleError(err);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const payload = await req.json();
+    const data = await tenantsRepo.createTenant(payload);
+    return NextResponse.json({ ok: true, data }, { status: 201 });
+  } catch (err) {
+    console.error("❌ /api/tenants POST failed:", err);
+    return handleError(err);
   }
 }

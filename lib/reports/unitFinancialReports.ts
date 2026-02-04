@@ -1,4 +1,5 @@
-import { buildApiUrl } from "@/lib/utils/baseUrl";
+import { headers } from "next/headers";
+import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { listManualPayments } from "@/lib/reports/manualPayments";
 import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
 
@@ -62,9 +63,13 @@ export type UnitFinancialReportResult = {
 };
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const res = await fetch(buildApiUrl(path), { cache: "no-store" });
+  const baseUrl = getRequestBaseUrl(headers());
+  const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to fetch ${path}`);
-  return res.json();
+  const payload = await res.json();
+  if (payload?.ok === false) throw new Error(payload.error || `Failed to fetch ${path}`);
+  return (payload?.ok ? payload.data : payload) as T;
 }
 
 function toNumber(value: string | number | undefined | null) {
@@ -122,7 +127,7 @@ export async function buildUnitFinancialReport(
     fetchJson<RawExpense[]>("/api/unit-expenses").catch(() => [] as RawExpense[]),
   ]);
 
-  const manualPayments = listManualPayments();
+  const manualPayments = await listManualPayments();
   const normalizedBank = rawPayments
     .map(normalizeBankPayment)
     .filter((payment): payment is NormalizedPayment => Boolean(payment));

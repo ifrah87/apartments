@@ -1,5 +1,6 @@
 // lib/reports/ledger.ts
-import { buildApiUrl } from "@/lib/utils/baseUrl";
+import { headers } from "next/headers";
+import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
 export type Txn = {
   date: string;
@@ -26,9 +27,17 @@ function toISOMaybe(s: string) {
 }
 
 export async function fetchLedger(filter: LedgerFilter = {}): Promise<Txn[]> {
-  const res = await fetch(buildApiUrl("/api/ledger"), { cache: "no-store" });
+  const baseUrl = getRequestBaseUrl(headers());
+  const params = new URLSearchParams();
+  if (filter.start) params.set("start", filter.start);
+  if (filter.end) params.set("end", filter.end);
+  if (filter.propertyId) params.set("propertyId", filter.propertyId);
+  const url = params.toString() ? `/api/ledger?${params.toString()}` : "/api/ledger";
+  const res = await fetch(`${baseUrl}${url}`, { cache: "no-store" });
   if (!res.ok) return [];
-  const all: Txn[] = await res.json();
+  const payload = await res.json();
+  if (payload?.ok === false) return [];
+  const all: Txn[] = payload?.ok ? payload.data : payload;
 
   const start = filter.start ? new Date(toISOMaybe(filter.start)) : undefined;
   const end = filter.end ? new Date(toISOMaybe(filter.end)) : undefined;

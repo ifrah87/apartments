@@ -16,9 +16,9 @@
 
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"],
-      "@/components/*": ["components/*"],
-      "@/lib/*": ["lib/*"],
+      "@/*": ["./*", "src/*"],
+      "@/components/*": ["components/*", "src/components/*"],
+      "@/lib/*": ["src/lib/*", "lib/*"],
       "@/app/*": ["app/*"]
     },
 

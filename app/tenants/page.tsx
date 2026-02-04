@@ -59,7 +59,8 @@ export default function TenantPortalPage() {
   useEffect(() => {
     fetch(`/api/tenants?ts=${Date.now()}`, { cache: "no-store" })
       .then((res) => res.json())
-      .then((data) => {
+      .then((payload) => {
+        const data = payload?.ok === false ? [] : payload?.ok ? payload.data : payload;
         setTenants(data || []);
         if (data?.length) {
           setSelectedTenant(data[0]);
@@ -87,7 +88,7 @@ export default function TenantPortalPage() {
         if (!res.ok) throw new Error("Failed to load statement");
         return res.json();
       })
-      .then((data: StatementResponse) => setStatement(data))
+      .then((payload) => setStatement((payload?.ok ? payload.data : payload) as StatementResponse))
       .catch((err) => {
         if (err.name === "AbortError") return;
         setStatementError("Unable to fetch tenant statement. Try another range.");

@@ -1,30 +1,23 @@
-import fs from "fs";
-import path from "path";
-
-const CATEGORY_FILE_PATH = path.join(process.cwd(), "data", "transaction-categories.json");
+import { datasetsRepo } from "@/lib/repos";
 
 export type CategoryMap = Record<string, string>;
 
-function ensureFile() {
-  if (!fs.existsSync(CATEGORY_FILE_PATH)) {
-    fs.writeFileSync(CATEGORY_FILE_PATH, "{}", "utf8");
-  }
-}
+const DATASET_KEY = "transaction_categories";
 
-export function getTransactionCategories(): CategoryMap {
-  ensureFile();
+export async function getTransactionCategories(): Promise<CategoryMap> {
   try {
-    const text = fs.readFileSync(CATEGORY_FILE_PATH, "utf8");
-    return JSON.parse(text);
+    return await datasetsRepo.getDataset<CategoryMap>(DATASET_KEY, {});
   } catch (err) {
     console.error("Failed to read transaction categories", err);
     return {};
   }
 }
 
-export function setTransactionCategory(id: string, accountId: string) {
+export async function setTransactionCategory(id: string, accountId: string) {
   if (!id) return;
-  const map = getTransactionCategories();
-  map[id] = accountId;
-  fs.writeFileSync(CATEGORY_FILE_PATH, JSON.stringify(map, null, 2), "utf8");
+  await datasetsRepo.updateDataset<CategoryMap>(
+    DATASET_KEY,
+    (current) => ({ ...(current || {}), [id]: accountId }),
+    {},
+  );
 }

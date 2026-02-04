@@ -1,4 +1,5 @@
-import { buildApiUrl } from "@/lib/utils/baseUrl";
+import { headers } from "next/headers";
+import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { calculateBankSummary } from "@/lib/reports/ledger";
 
 type BankImportRow = {
@@ -24,9 +25,12 @@ export type BankImportReport = {
 };
 
 export async function loadBankImportSummary(): Promise<BankImportReport> {
-  const res = await fetch(buildApiUrl("/api/bank-import-summary"), { cache: "no-store" });
+  const baseUrl = getRequestBaseUrl(headers());
+  const res = await fetch(`${baseUrl}/api/bank-import-summary`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch bank import summary");
-  const raw: BankImportRow[] = await res.json();
+  const payload = await res.json();
+  if (payload?.ok === false) throw new Error(payload.error || "Failed to fetch bank import summary");
+  const raw: BankImportRow[] = (payload?.ok ? payload.data : payload) as BankImportRow[];
   const rows = raw
     .map((row) => ({
       date: row.import_date,

@@ -6,6 +6,7 @@ type Property = {
   property_id: string;
   name?: string;
   total_units?: number;
+  units?: number;
 };
 
 type Tenant = {
@@ -25,14 +26,18 @@ export default function PropertiesPage() {
   useEffect(() => {
     fetch(`/api/properties?ts=${Date.now()}`, { cache: "no-store" })
       .then((res) => res.json())
-      .then((data) => setProperties(data || []))
+      .then((payload) =>
+        setProperties(payload?.ok === false ? [] : (payload?.ok ? payload.data : payload) || []),
+      )
       .catch(() => setProperties([]));
   }, []);
 
   useEffect(() => {
     fetch(`/api/tenants?ts=${Date.now()}`, { cache: "no-store" })
       .then((res) => res.json())
-      .then((data) => setTenants(data || []))
+      .then((payload) =>
+        setTenants(payload?.ok === false ? [] : (payload?.ok ? payload.data : payload) || []),
+      )
       .catch(() => setTenants([]));
   }, []);
 
@@ -94,7 +99,7 @@ function PropertyPanel({
   const [tab, setTab] = useState<"overview" | "units" | "tenants">("overview");
   const [unitsOpen, setUnitsOpen] = useState(true);
   const [tenantsOpen, setTenantsOpen] = useState(true);
-  const totalUnits = property.total_units ?? tenants.length;
+  const totalUnits = property.total_units ?? property.units ?? tenants.length;
   const occupied = tenants.length;
   const vacant = Math.max(totalUnits - occupied, 0);
   const rent = tenants.reduce((sum, tenant) => sum + Number(tenant.monthly_rent || 0), 0);

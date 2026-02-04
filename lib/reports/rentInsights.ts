@@ -1,4 +1,5 @@
-import { buildApiUrl } from "@/lib/utils/baseUrl";
+import { headers } from "next/headers";
+import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { listManualPayments, type ManualPayment } from "@/lib/reports/manualPayments";
 import { createStatement, normalizeId, type ChargeEntry, type PaymentEntry, type StatementRow, type TenantRecord } from "@/lib/reports/tenantStatement";
 
@@ -74,11 +75,15 @@ function toNumber(value: unknown, fallback = 0) {
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const res = await fetch(buildApiUrl(path), { cache: "no-store" });
+  const baseUrl = getRequestBaseUrl(headers());
+  const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`Failed to fetch ${path}`);
   }
-  return res.json();
+  const payload = await res.json();
+  if (payload?.ok === false) throw new Error(payload.error || `Failed to fetch ${path}`);
+  return (payload?.ok ? payload.data : payload) as T;
 }
 
 function normalizeManual(entry: ManualPayment): NormalizedPayment {
@@ -183,7 +188,7 @@ async function loadContext(): Promise<ReportingContext> {
     fetchJson<ChargeRecord[]>("/api/tenant-charges").catch(() => [] as ChargeRecord[]),
   ]);
 
-  const manualPayments = listManualPayments();
+  const manualPayments = await listManualPayments();
   const normalizedBank = rawPayments
     .map(normalizeBank)
     .filter((p): p is NormalizedPayment => Boolean(p && p.tenantId));

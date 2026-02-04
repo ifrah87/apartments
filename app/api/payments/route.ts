@@ -1,30 +1,33 @@
-import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-import papa from "papaparse";
+import { NextRequest, NextResponse } from "next/server";
+import { bankTransactionsRepo, RepoError } from "@/lib/repos";
 
-export async function GET() {
+function handleError(err: unknown) {
+  const status = err instanceof RepoError ? err.status : 500;
+  const message = err instanceof Error ? err.message : "Unexpected error.";
+  return NextResponse.json({ ok: false, error: message }, { status });
+}
+
+export async function GET(req: NextRequest) {
   try {
-    const filePath = path.join(process.cwd(), "data", "bank_all_buildings_simple.csv");
-    const csvText = fs.readFileSync(filePath, "utf8");
-    const parsed = papa.parse(csvText, { header: true, skipEmptyLines: true });
-    const rows = (parsed.data as any[]).filter(Boolean);
+    const { searchParams } = new URL(req.url);
+    const start = searchParams.get("start") ?? undefined;
+    const end = searchParams.get("end") ?? undefined;
+    const propertyId = searchParams.get("propertyId") ?? undefined;
+    const tenantId = searchParams.get("tenantId") ?? undefined;
 
-    const normalized = rows.map((r) => ({
-      date: r.date,
-      description: r.description,
-      amount: Number(r.amount || 0),
-      type: r.type,
-      property_id: r.property_id,
-      tenant_id: r.tenant_id,
+    const transactions = await bankTransactionsRepo.listTransactions({ start, end, propertyId, tenantId });
+    const normalized = transactions.map((txn) => ({
+      date: txn.date,
+      description: txn.description,
+      amount: txn.amount,
+      type: txn.type ?? (txn.amount >= 0 ? "credit" : "debit"),
+      property_id: txn.property_id,
+      tenant_id: txn.tenant_id,
     }));
 
-    return NextResponse.json(normalized);
-  } catch (err: any) {
+    return NextResponse.json({ ok: true, data: normalized });
+  } catch (err) {
     console.error("❌ /api/payments failed:", err);
-    return NextResponse.json(
-      { error: "Failed to load payments CSV" },
-      { status: 500 }
-    );
+    return handleError(err);
   }
 }
