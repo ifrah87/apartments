@@ -46,7 +46,9 @@ export default function ManualPaymentsManager({ initialPayments }: { initialPaym
         }),
       });
       if (!res.ok) throw new Error("Failed to save payment");
-      const entry: ManualPayment = await res.json();
+      const payload = await res.json();
+      if (payload?.ok === false) throw new Error(payload.error || "Failed to save payment");
+      const entry: ManualPayment = payload?.ok ? payload.data : payload;
       setPayments((prev) => [entry, ...prev]);
       setForm(defaultForm());
     } catch (err) {
@@ -61,7 +63,8 @@ export default function ManualPaymentsManager({ initialPayments }: { initialPaym
     if (!confirmed) return;
     try {
       const res = await fetch(`/api/manual-payments?id=${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to delete payment");
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || payload?.ok === false) throw new Error(payload?.error || "Failed to delete payment");
       setPayments((prev) => prev.filter((p) => p.id !== id));
     } catch (err) {
       setError((err as Error).message);

@@ -1,0 +1,12 @@
+[
+  {
+    "id": "91542693-e381-4fc7-a927-8af5a515da3d",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "startDate": "2026-01-26",
+    "endDate": "2026-01-26",
+    "rentAmount": 500,
+    "dueDay": 4,
+    "graceDays": 5,
+    "currency": "USD"
+  }
+]

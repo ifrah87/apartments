@@ -1,0 +1,28 @@
+[
+  {
+    "tenantOrgId": "1025f784-8198-49dc-9137-4b135535164c",
+    "leaseUploaded": true,
+    "invoicesEnabled": false,
+    "depositOrGuaranteeConfirmed": true,
+    "portalInviteSent": false,
+    "firstLogin": false,
+    "contactsConfirmed": false,
+    "updatedAt": "2026-01-27T08:52:24.692Z",
+    "accessCardsIssued": true,
+    "idCopyTaken": true,
+    "houseRulesConfirmed": true
+  },
+  {
+    "tenantOrgId": "629bf7a8-b2c4-47a9-bdda-a0508958985e",
+    "leaseUploaded": false,
+    "invoicesEnabled": false,
+    "depositOrGuaranteeConfirmed": false,
+    "houseRulesConfirmed": false,
+    "idCopyTaken": false,
+    "accessCardsIssued": false,
+    "portalInviteSent": false,
+    "firstLogin": false,
+    "contactsConfirmed": false,
+    "updatedAt": "2026-01-28T17:01:02.173Z"
+  }
+]

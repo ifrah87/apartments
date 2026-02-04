@@ -1,0 +1,32 @@
+[
+  {
+    "id": "1025f784-8198-49dc-9137-4b135535164c",
+    "name": "Testing",
+    "billingEmail": "",
+    "billingPhone": "0617348954",
+    "financeContactName": "xxx",
+    "facilitiesContactName": "xxx",
+    "facilitiesContactEmail": "ifrahawaale@gmail.com",
+    "unitIds": [
+      "101"
+    ],
+    "propertyId": "OT",
+    "status": "active",
+    "createdAt": "2026-01-26T16:09:28.193Z",
+    "updatedAt": "2026-01-27T09:59:09.964Z"
+  },
+  {
+    "id": "629bf7a8-b2c4-47a9-bdda-a0508958985e",
+    "name": "Ifrah",
+    "billingEmail": "",
+    "financeContactName": "ifrah",
+    "facilitiesContactEmail": "ifrahawaale@gmail.com",
+    "unitIds": [
+      "1102"
+    ],
+    "propertyId": "OT",
+    "status": "draft",
+    "createdAt": "2026-01-28T17:01:02.173Z",
+    "updatedAt": "2026-01-28T17:01:02.173Z"
+  }
+]

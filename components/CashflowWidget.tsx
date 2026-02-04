@@ -65,33 +65,33 @@ export default function CashflowWidget({ points, link }: Props) {
   const activePoint = hoveredIndex != null ? displayPoints[hoveredIndex] : null;
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="rounded-2xl border border-white/10 bg-surface/80 p-6 shadow-card-soft backdrop-blur">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-medium text-slate-600">Cash in and out</p>
-          <div className="mt-2 flex gap-6 text-xl font-semibold text-slate-900">
+          <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Cash in and out</p>
+          <div className="mt-3 flex gap-6 text-xl font-semibold text-slate-100">
             <div>
-              <div className="text-xs uppercase text-slate-500">Cash in</div>
+              <div className="text-[11px] uppercase text-slate-400">Cash in</div>
               ${formatNumber(totals.in)}
             </div>
             <div>
-              <div className="text-xs uppercase text-slate-500">Cash out</div>
+              <div className="text-[11px] uppercase text-slate-400">Cash out</div>
               ${formatNumber(totals.out)}
             </div>
             <div>
-              <div className="text-xs uppercase text-slate-500">Difference</div>
+              <div className="text-[11px] uppercase text-slate-400">Difference</div>
               ${formatNumber(totals.in - totals.out)}
             </div>
           </div>
         </div>
-        <div className="flex gap-2 rounded-full border border-slate-200 bg-slate-50 p-1 text-sm font-medium text-slate-500">
+        <div className="flex gap-2 rounded-full border border-white/10 bg-surface/70 p-1 text-sm font-medium text-slate-300">
           {(["monthly", "quarterly", "yearly"] as const).map((option) => (
             <button
               key={option}
               type="button"
               onClick={() => setRange(option)}
-              className={`rounded-full px-3 py-1 ${
-                range === option ? "bg-white text-slate-900 shadow-sm" : ""
+              className={`rounded-full px-3 py-1 transition ${
+                range === option ? "bg-white/10 text-slate-100 shadow-sm" : "hover:text-white"
               }`}
             >
               {option === "monthly" ? "Monthly" : option === "quarterly" ? "Quarterly" : "Yearly"}
@@ -100,37 +100,37 @@ export default function CashflowWidget({ points, link }: Props) {
         </div>
       </div>
 
-      <div className="relative mt-6 flex h-72 items-end gap-4 rounded-2xl bg-gradient-to-b from-slate-50 to-white px-6 py-8">
+      <div className="relative mt-6 flex h-72 items-end gap-4 rounded-2xl bg-gradient-to-b from-white/5 to-transparent px-6 py-8">
         {displayPoints.map((point, idx) => (
           <div
             key={point.key}
-            className="relative flex w-24 flex-col items-center gap-2 text-xs text-slate-500"
+            className="relative flex w-24 flex-col items-center gap-2 text-xs text-slate-400"
             onMouseEnter={() => setHoveredIndex(idx)}
             onMouseLeave={() => setHoveredIndex(null)}
           >
             <div className="flex h-44 w-full items-end gap-3">
               <div
-                className="w-5 rounded-sm bg-[#4a92ff] shadow-[0_2px_6px_rgba(74,146,255,0.25)]"
+                className="w-5 rounded-sm bg-cyan-400 shadow-[0_2px_6px_rgba(34,211,238,0.35)]"
                 style={{ height: `${Math.max((point.inflow / maxValue) * 100, 4)}%` }}
               />
               <div
-                className="w-5 rounded-sm bg-slate-300 shadow-[0_2px_6px_rgba(148,163,184,0.4)]"
+                className="w-5 rounded-sm bg-slate-600/70 shadow-[0_2px_6px_rgba(15,23,42,0.5)]"
                 style={{ height: `${Math.max((Math.abs(point.outflow) / maxValue) * 100, 4)}%` }}
               />
             </div>
-            <span className="text-[11px] font-medium text-slate-600">{point.label}</span>
+            <span className="text-[11px] font-medium text-slate-300">{point.label}</span>
             {hoveredIndex === idx && (
-              <div className="absolute -top-32 left-1/2 w-48 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white/95 p-4 text-xs shadow-lg">
-                <p className="text-[11px] uppercase tracking-wide text-slate-500">{point.label}</p>
-                <div className="mt-2 flex justify-between text-slate-700">
+              <div className="absolute -top-32 left-1/2 w-48 -translate-x-1/2 rounded-2xl border border-white/10 bg-surface/95 p-4 text-xs shadow-lg">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">{point.label}</p>
+                <div className="mt-2 flex justify-between text-slate-100">
                   <span>In</span>
                   <strong>${formatNumber(point.inflow)}</strong>
                 </div>
-                <div className="flex justify-between text-slate-700">
+                <div className="flex justify-between text-slate-100">
                   <span>Out</span>
                   <strong>${formatNumber(Math.abs(point.outflow))}</strong>
                 </div>
-                <div className="flex justify-between text-slate-700">
+                <div className="flex justify-between text-slate-100">
                   <span>Diff</span>
                   <strong>${formatNumber(point.inflow - Math.abs(point.outflow))}</strong>
                 </div>
@@ -140,18 +140,21 @@ export default function CashflowWidget({ points, link }: Props) {
         ))}
       </div>
 
-      <div className="mt-3 flex gap-4 text-xs text-slate-500">
+      <div className="mt-3 flex gap-4 text-xs text-slate-400">
         <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-[#4a92ff]" />
+          <span className="h-2 w-2 rounded-full bg-cyan-400" />
           Cash in
         </span>
         <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-slate-300" />
+          <span className="h-2 w-2 rounded-full bg-slate-600/70" />
           Cash out
         </span>
       </div>
       <div className="mt-4 flex justify-end">
-        <Link href={link} className="rounded-full border border-indigo-100 px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:border-indigo-200">
+        <Link
+          href={link}
+          className="rounded-full border border-cyan-400/30 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:border-cyan-300/60"
+        >
           View detailed cashflow →
         </Link>
       </div>

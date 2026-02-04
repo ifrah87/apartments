@@ -1,0 +1,16 @@
+[
+  {
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "leaseUploaded": true,
+    "leaseAcknowledged": false,
+    "depositExpected": 500,
+    "depositReceived": false,
+    "firstRentExpected": 500,
+    "firstRentReceived": false,
+    "portalInviteSent": false,
+    "tenantFirstLogin": false,
+    "contactConfirmed": false,
+    "moveInConditionConfirmed": false,
+    "updatedAt": "2026-01-26T10:00:24.866Z"
+  }
+]

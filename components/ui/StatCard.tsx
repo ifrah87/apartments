@@ -5,33 +5,46 @@ import React from "react";
 
 type Props = {
   label: string;
-  value: string | number;
-  subtitle?: string;
+  value: React.ReactNode;
+  subtitle?: React.ReactNode;
   span?: number;
   href?: string;
+  accent?: "cyan" | "orange" | "purple" | "green" | "red";
+  className?: string;
 };
 
-export default function StatCard({ label, value, subtitle, span, href }: Props) {
+const ACCENTS: Record<NonNullable<Props["accent"]>, string> = {
+  cyan: "border-l-cyan-400/80",
+  orange: "border-l-amber-400/80",
+  purple: "border-l-purple-400/80",
+  green: "border-l-emerald-400/80",
+  red: "border-l-rose-400/80",
+};
+
+export default function StatCard({ label, value, subtitle, span, href, accent = "cyan", className = "" }: Props) {
+  const accentClass = ACCENTS[accent];
   const card = (
     <div
       className={`
-        rounded-2xl border border-slate-200 bg-white
-        p-5 shadow-sm transition-all duration-300 ease-in-out
-        hover:shadow-lg hover:border-indigo-200 hover:-translate-y-1
-        flex flex-col justify-between
-        ${span ? `col-span-${span}` : ""}
-        ${href ? "cursor-pointer" : ""}
+        relative overflow-hidden rounded-2xl border border-white/10 bg-surface/80 bg-gradient-to-br from-white/5 to-transparent
+        p-6 shadow-card-soft transition-all duration-300 ease-in-out
+        hover:-translate-y-0.5 hover:border-white/20 hover:shadow-card-glow
+        flex flex-col justify-between gap-2 border-l-4 ${accentClass}
+        ${span ? `col-span-${span}` : ""} ${href ? "cursor-pointer" : ""} ${className}
       `}
     >
-      <p className="text-sm font-medium text-slate-500">{label}</p>
-      <h2 className="mt-2 text-2xl font-semibold text-slate-800">{value}</h2>
-      {subtitle && <p className="mt-1 text-xs text-slate-400 italic">{subtitle}</p>}
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{label}</p>
+      <h2 className="text-3xl font-semibold text-slate-100">{value}</h2>
+      {subtitle && <p className="text-xs text-slate-400">{subtitle}</p>}
     </div>
   );
 
   if (href) {
     return (
-      <Link href={href} className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 rounded-2xl">
+      <Link
+        href={href}
+        className="block rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+      >
         {card}
       </Link>
     );

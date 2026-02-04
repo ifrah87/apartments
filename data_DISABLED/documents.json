@@ -1,0 +1,98 @@
+[
+  {
+    "id": "c9aab038-9cc3-4b38-82c6-29e709987c59",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "lease",
+    "name": "Lease",
+    "url": "",
+    "uploadedAt": "2026-01-26T09:37:33.016Z"
+  },
+  {
+    "id": "7d25a3c4-e727-4e99-bdd5-298c8eb818f7",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "lease",
+    "name": "Lease",
+    "url": "",
+    "uploadedAt": "2026-01-26T09:37:36.609Z"
+  },
+  {
+    "id": "804c4cbb-83de-4498-95ac-f4920e235756",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "house_rules",
+    "name": "House Rules",
+    "url": "",
+    "uploadedAt": "2026-01-26T09:41:18.842Z"
+  },
+  {
+    "id": "983bd4d7-aa51-42e0-8da6-e92f479d0446",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "house_rules",
+    "name": "House Rules",
+    "url": "",
+    "uploadedAt": "2026-01-26T09:41:22.565Z"
+  },
+  {
+    "id": "446bb3c5-239b-4f2c-a5a9-32fc5ff9dec1",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "house_rules",
+    "name": "House Rules",
+    "url": "",
+    "uploadedAt": "2026-01-26T09:41:23.899Z"
+  },
+  {
+    "id": "38a77b8b-86b8-474a-8f7d-247439651e98",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "lease",
+    "name": "Lease",
+    "url": "",
+    "uploadedAt": "2026-01-26T09:41:25.743Z"
+  },
+  {
+    "id": "4cc60217-1b1c-4d96-bf71-03ca73c8d793",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "lease",
+    "name": "Lease",
+    "url": "",
+    "uploadedAt": "2026-01-26T09:41:27.666Z"
+  },
+  {
+    "id": "b9d08a02-67a4-4f2e-b9c6-dd885760b6da",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "lease",
+    "name": "Lease",
+    "url": "",
+    "uploadedAt": "2026-01-26T09:49:18.465Z"
+  },
+  {
+    "id": "9bac8697-4794-46b4-9a50-d72278a26b8a",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "house_rules",
+    "name": "House Rules",
+    "url": "",
+    "uploadedAt": "2026-01-26T09:49:33.851Z"
+  },
+  {
+    "id": "fc1521f6-2ea0-4914-9ae5-7a73ecb1ab39",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "house_rules",
+    "name": "House Rules",
+    "url": "",
+    "uploadedAt": "2026-01-26T10:00:22.004Z"
+  },
+  {
+    "id": "77fb892f-37d2-4098-ab10-7a39c0b87e75",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "house_rules",
+    "name": "House Rules",
+    "url": "",
+    "uploadedAt": "2026-01-26T10:00:23.662Z"
+  },
+  {
+    "id": "110538e9-5c25-45be-800a-b844347cce32",
+    "tenantId": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "type": "lease",
+    "name": "Lease",
+    "url": "",
+    "uploadedAt": "2026-01-26T10:00:24.865Z"
+  }
+]
