@@ -1,30 +1,18 @@
 import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-import papa from "papaparse";
+import { propertiesRepo, RepoError } from "@/lib/repos";
 
-export const runtime = "nodejs";
+function handleError(err: unknown) {
+  const status = err instanceof RepoError ? err.status : 500;
+  const message = err instanceof Error ? err.message : "Unexpected error.";
+  return NextResponse.json({ ok: false, error: message }, { status });
+}
 
 export async function GET() {
   try {
-    const filePath = path.join(process.cwd(), "data", "properties_all_buildings.csv");
-    const csvText = fs.readFileSync(filePath, "utf8");
-    const parsed = papa.parse(csvText, { header: true, skipEmptyLines: true });
-    const rows = (parsed.data as any[]).filter(Boolean);
-
-    // 🔁 normalize: building -> name, units -> total_units
-    const normalized = rows.map(r => ({
-      property_id: r.property_id ?? r.id ?? "",
-      name: r.name ?? r.building ?? "",           // <— UI expects `name`
-      address: r.address ?? "",                   // if you add it later
-      total_units: Number(r.total_units ?? r.units ?? 0),
-      occupied_units: Number(r.occupied_units ?? 0),
-      vacant_units: Number(r.vacant_units ?? 0),
-    }));
-
-    return NextResponse.json(normalized);
-  } catch (err: any) {
+    const data = await propertiesRepo.listProperties();
+    return NextResponse.json({ ok: true, data });
+  } catch (err) {
     console.error("❌ /api/properties failed:", err);
-    return NextResponse.json({ error: "Failed to load properties CSV" }, { status: 500 });
+    return handleError(err);
   }
 }

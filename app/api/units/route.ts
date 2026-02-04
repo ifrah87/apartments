@@ -1,31 +1,20 @@
-import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-import papa from "papaparse";
+import { NextRequest, NextResponse } from "next/server";
+import { RepoError, unitsRepo } from "@/lib/repos";
 
-export async function GET() {
+function handleError(err: unknown) {
+  const status = err instanceof RepoError ? err.status : 500;
+  const message = err instanceof Error ? err.message : "Unexpected error.";
+  return NextResponse.json({ ok: false, error: message }, { status });
+}
+
+export async function GET(req: NextRequest) {
   try {
-    // 1. point to CSV
-    const filePath = path.join(
-      process.cwd(),
-      "data",
-      "units_master_66.csv"
-    );
-
-    // 2. read file
-    const csvText = fs.readFileSync(filePath, "utf8");
-
-    // 3. parse CSV -> objects
-    const parsed = papa.parse(csvText, { header: true });
-    const rows = (parsed.data as any[]).filter(Boolean);
-
-    // 4. return rows as JSON
-    return NextResponse.json(rows);
-  } catch (err: any) {
+    const { searchParams } = new URL(req.url);
+    const propertyId = searchParams.get("propertyId") ?? undefined;
+    const data = await unitsRepo.listUnits({ propertyId });
+    return NextResponse.json({ ok: true, data });
+  } catch (err) {
     console.error("❌ /api/units failed:", err);
-    return NextResponse.json(
-      { error: "Failed to load units CSV" },
-      { status: 500 }
-    );
+    return handleError(err);
   }
 }

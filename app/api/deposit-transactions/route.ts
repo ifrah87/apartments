@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-import papa from "papaparse";
+import { datasetsRepo, RepoError } from "@/lib/repos";
+
+const DATASET_KEY = "deposit_transactions";
+
+function handleError(err: unknown) {
+  const status = err instanceof RepoError ? err.status : 500;
+  const message = err instanceof Error ? err.message : "Unexpected error.";
+  return NextResponse.json({ ok: false, error: message }, { status });
+}
 
 export async function GET() {
   try {
-    const filePath = path.join(process.cwd(), "data", "deposit_transactions.csv");
-    const csvText = fs.readFileSync(filePath, "utf8");
-    const parsed = papa.parse(csvText, { header: true, skipEmptyLines: true });
-    const rows = (parsed.data as any[]).filter(Boolean);
-    return NextResponse.json(rows);
+    const data = await datasetsRepo.getDataset<any[]>(DATASET_KEY, []);
+    return NextResponse.json({ ok: true, data });
   } catch (err) {
     console.error("❌ failed to load deposit transactions", err);
-    return NextResponse.json({ error: "Failed to load deposit transactions" }, { status: 500 });
+    return handleError(err);
   }
 }

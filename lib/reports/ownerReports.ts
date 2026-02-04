@@ -1,4 +1,5 @@
-import { buildApiUrl } from "@/lib/utils/baseUrl";
+import { headers } from "next/headers";
+import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
 type OwnerSummaryRow = {
   property_id: string;
@@ -27,9 +28,12 @@ type MonthEndTaskRow = {
 };
 
 export async function fetchOwnerSummary(month?: string) {
-  const res = await fetch(buildApiUrl("/api/monthly-owner-summary"), { cache: "no-store" });
+  const baseUrl = getRequestBaseUrl(headers());
+  const res = await fetch(`${baseUrl}/api/monthly-owner-summary`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch owner summary");
-  const data: OwnerSummaryRow[] = await res.json();
+  const payload = await res.json();
+  if (payload?.ok === false) throw new Error(payload.error || "Failed to fetch owner summary");
+  const data: OwnerSummaryRow[] = (payload?.ok ? payload.data : payload) as OwnerSummaryRow[];
   const filtered = month ? data.filter((row) => row.month === month) : data;
   return filtered.map((row) => ({
     propertyId: row.property_id,
@@ -43,9 +47,12 @@ export async function fetchOwnerSummary(month?: string) {
 }
 
 export async function fetchKPIDashboard() {
-  const res = await fetch(buildApiUrl("/api/kpi-dashboard"), { cache: "no-store" });
+  const baseUrl = getRequestBaseUrl(headers());
+  const res = await fetch(`${baseUrl}/api/kpi-dashboard`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch KPI dashboard");
-  const data: KPIRecord[] = await res.json();
+  const payload = await res.json();
+  if (payload?.ok === false) throw new Error(payload.error || "Failed to fetch KPI dashboard");
+  const data: KPIRecord[] = (payload?.ok ? payload.data : payload) as KPIRecord[];
   return data.map((row) => ({
     date: row.date,
     occupancyRate: Number(row.occupancy_rate || 0),
@@ -58,9 +65,12 @@ export async function fetchKPIDashboard() {
 }
 
 export async function fetchMonthEndTasks(month?: string) {
-  const res = await fetch(buildApiUrl("/api/month-end-tasks"), { cache: "no-store" });
+  const baseUrl = getRequestBaseUrl(headers());
+  const res = await fetch(`${baseUrl}/api/month-end-tasks`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch month end tasks");
-  const data: MonthEndTaskRow[] = await res.json();
+  const payload = await res.json();
+  if (payload?.ok === false) throw new Error(payload.error || "Failed to fetch month end tasks");
+  const data: MonthEndTaskRow[] = (payload?.ok ? payload.data : payload) as MonthEndTaskRow[];
   const filtered = month ? data.filter((row) => row.month === month) : data;
   return filtered.map((row) => ({
     month: row.month,

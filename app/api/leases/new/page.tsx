@@ -15,7 +15,12 @@ export default function NewLeasePage() {
     Promise.all([
       fetch("/api/tenants").then(r=>r.json()),
       fetch("/api/properties").then(r=>r.json())
-    ]).then(([t,p]) => { setTenants(t); setProperties(p); });
+    ]).then(([t,p]) => {
+      const tenantsData = t?.ok === false ? [] : t?.ok ? t.data : t;
+      const propertiesData = p?.ok === false ? [] : p?.ok ? p.data : p;
+      setTenants(tenantsData || []);
+      setProperties(propertiesData || []);
+    });
   }, []);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -43,11 +48,11 @@ export default function NewLeasePage() {
       <form onSubmit={onSubmit} className="rounded-2xl border bg-white p-4 space-y-3">
         <select name="tenant_id" required className="w-full border rounded p-2">
           <option value="">Select tenant</option>
-          {tenants.map(t => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+          {tenants.map(t => <option key={t.id} value={t.id}>{t.full_name ?? t.name ?? t.id}</option>)}
         </select>
         <select name="property_id" required className="w-full border rounded p-2">
           <option value="">Select property</option>
-          {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {properties.map(p => <option key={p.id} value={p.id}>{p.name ?? p.building ?? p.property_id ?? p.id}</option>)}
         </select>
         <input name="rent_amount" type="number" step="0.01" placeholder="Rent amount" required className="w-full border rounded p-2"/>
         <input name="rent_day" type="number" min={1} max={28} placeholder="Rent day (1–28)" required className="w-full border rounded p-2"/>

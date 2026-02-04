@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
-import papa from "papaparse";
+import { datasetsRepo, RepoError } from "@/lib/repos";
+
+const DATASET_KEY = "maintenance_tickets";
+
+function handleError(err: unknown) {
+  const status = err instanceof RepoError ? err.status : 500;
+  const message = err instanceof Error ? err.message : "Unexpected error.";
+  return NextResponse.json({ ok: false, error: message }, { status });
+}
 
 export async function GET() {
   try {
-    const filePath = path.join(process.cwd(), "data", "maintenance_tickets.csv");
-    const csvText = fs.readFileSync(filePath, "utf8");
-    const parsed = papa.parse(csvText, { header: true, skipEmptyLines: true });
-    const rows = (parsed.data as any[]).filter(Boolean);
-    return NextResponse.json(rows);
+    const data = await datasetsRepo.getDataset<any[]>(DATASET_KEY, []);
+    return NextResponse.json({ ok: true, data });
   } catch (err) {
-    console.error("❌ failed to load maintenance data", err);
-    return NextResponse.json({ error: "Failed to load maintenance data" }, { status: 500 });
+    console.error("❌ failed to load maintenance tickets", err);
+    return handleError(err);
   }
 }

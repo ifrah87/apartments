@@ -1,7 +1,8 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import SectionCard from "@/components/ui/SectionCard";
 import { fetchPropertyOptions } from "@/lib/reports/propertyHelpers";
-import { buildApiUrl } from "@/lib/utils/baseUrl";
+import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
 type SearchParams = {
   property?: string;
@@ -65,9 +66,12 @@ function defaultDates() {
 
 async function fetchTenants(): Promise<Tenant[]> {
   try {
-    const res = await fetch(buildApiUrl("/api/tenants"), { cache: "no-store" });
+    const baseUrl = getRequestBaseUrl(headers());
+    const res = await fetch(`${baseUrl}/api/tenants`, { cache: "no-store" });
     if (!res.ok) return [];
-    return res.json();
+    const payload = await res.json();
+    if (payload?.ok === false) return [];
+    return (payload?.ok ? payload.data : payload) as Tenant[];
   } catch (err) {
     console.error("Failed to load tenants", err);
     return [];
@@ -76,11 +80,14 @@ async function fetchTenants(): Promise<Tenant[]> {
 
 async function fetchStatement(tenantId: string, start: string, end: string): Promise<StatementResponse | null> {
   if (!tenantId) return null;
-  const res = await fetch(buildApiUrl(`/api/tenants/${tenantId}/statement?start=${start}&end=${end}`), {
+  const baseUrl = getRequestBaseUrl(headers());
+  const res = await fetch(`${baseUrl}/api/tenants/${tenantId}/statement?start=${start}&end=${end}`, {
     cache: "no-store",
   });
   if (!res.ok) return null;
-  return res.json();
+  const payload = await res.json();
+  if (payload?.ok === false) return null;
+  return (payload?.ok ? payload.data : payload) as StatementResponse;
 }
 
 export const runtime = "nodejs";

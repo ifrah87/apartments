@@ -1,4 +1,5 @@
-import { buildApiUrl } from "@/lib/utils/baseUrl";
+import { headers } from "next/headers";
+import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
 export type RentSummary = {
   rentCollectedMTD: number;
@@ -9,13 +10,16 @@ export type RentSummary = {
 };
 
 export async function calculateRentSummary(): Promise<RentSummary> {
+  const baseUrl = getRequestBaseUrl(headers());
   const [tenantsRes, paymentsRes] = await Promise.all([
-    fetch(buildApiUrl("/api/tenants"), { cache: "no-store" }),
-    fetch(buildApiUrl("/api/payments"), { cache: "no-store" }),
+    fetch(`${baseUrl}/api/tenants`, { cache: "no-store" }),
+    fetch(`${baseUrl}/api/payments`, { cache: "no-store" }),
   ]);
 
-  const tenants = await tenantsRes.json();
-  const payments = await paymentsRes.json();
+  const tenantsPayload = await tenantsRes.json();
+  const paymentsPayload = await paymentsRes.json();
+  const tenants = tenantsPayload?.ok === false ? [] : (tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload);
+  const payments = paymentsPayload?.ok === false ? [] : (paymentsPayload?.ok ? paymentsPayload.data : paymentsPayload);
 
   const referenceDate = deriveReferenceDate(payments);
   const thisMonth = referenceDate.getMonth();

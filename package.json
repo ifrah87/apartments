@@ -10,7 +10,9 @@
     "test": "tsx tests/tenantStatement.test.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "tsx scripts/seed.ts",
+    "db:reset": "psql $DATABASE_URL -f scripts/reset-db.sql",
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
     "@swc/helpers": "^0.5.17",

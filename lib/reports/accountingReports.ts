@@ -1,4 +1,5 @@
-import { buildApiUrl } from "@/lib/utils/baseUrl";
+import { headers } from "next/headers";
+import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { ACCOUNTING_CHART, findAccount, type AccountCategory } from "@/lib/reports/accountingChart";
 
 export type JournalEntryRow = {
@@ -73,9 +74,12 @@ export type GeneralLedgerRow = {
 };
 
 async function fetchJournalEntries(): Promise<JournalEntryRow[]> {
-  const res = await fetch(buildApiUrl("/api/journal-entries"), { cache: "no-store" });
+  const baseUrl = getRequestBaseUrl(headers());
+  const res = await fetch(`${baseUrl}/api/journal-entries`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to load journal entries");
-  return res.json();
+  const payload = await res.json();
+  if (payload?.ok === false) throw new Error(payload.error || "Failed to load journal entries");
+  return (payload?.ok ? payload.data : payload) as JournalEntryRow[];
 }
 
 function toNumber(value: string | number | undefined | null) {
