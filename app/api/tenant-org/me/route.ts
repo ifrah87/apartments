@@ -10,7 +10,7 @@ import {
 export const runtime = "nodejs";
 
 export async function GET() {
-  const orgId = getTenantOrgSessionId();
+  const orgId = await getTenantOrgSessionId();
   if (!orgId) {
     return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
   }

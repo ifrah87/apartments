@@ -1,7 +1,10 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { CHART_OF_ACCOUNTS, suggestAccountForTransaction } from "@/lib/reports/chartOfAccounts";
+import { fetchSettings } from "@/lib/settings/client";
+import { DEFAULT_EXPENSE_CATEGORIES } from "@/lib/settings/defaults";
+import type { ExpenseCategoriesSettings, ExpenseCategory } from "@/lib/settings/types";
 
 type Row = {
   id: string;
@@ -34,13 +37,27 @@ export default function TransactionCategoryTable({
 }) {
   const [categoryMap, setCategoryMap] = useState<CategoryMap>(initialCategories || {});
   const [saving, setSaving] = useState<Record<string, "idle" | "saving" | "error">>({});
+  const [expenseAccounts, setExpenseAccounts] = useState<ExpenseCategory[]>(
+    DEFAULT_EXPENSE_CATEGORIES.categories,
+  );
   const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    fetchSettings<ExpenseCategoriesSettings>("expense-categories", DEFAULT_EXPENSE_CATEGORIES).then((data) =>
+      setExpenseAccounts(data.categories || DEFAULT_EXPENSE_CATEGORIES.categories),
+    );
+  }, []);
 
   const accountGroups = useMemo(() => {
     const income = CHART_OF_ACCOUNTS.filter((acc) => acc.type === "income");
-    const expense = CHART_OF_ACCOUNTS.filter((acc) => acc.type === "expense");
+    const expense = expenseAccounts
+      .filter((acc) => acc.active !== false)
+      .map((acc) => ({
+        id: acc.code?.trim() || acc.id,
+        name: acc.name,
+      }));
     return { income, expense };
-  }, []);
+  }, [expenseAccounts]);
 
   function handleCategoryChange(id: string, accountId: string) {
     setCategoryMap((prev) => ({ ...prev, [id]: accountId }));
@@ -65,7 +82,15 @@ export default function TransactionCategoryTable({
   }
 
   function getSelectedAccountId(row: Row) {
-    return categoryMap[row.id] || suggestAccountForTransaction(row).id;
+    const stored = categoryMap[row.id];
+    if (stored) return stored;
+    const suggested = suggestAccountForTransaction(row).id;
+    const allOptions = new Set([
+      ...accountGroups.income.map((account) => account.id),
+      ...accountGroups.expense.map((account) => account.id),
+    ]);
+    if (allOptions.has(suggested)) return suggested;
+    return accountGroups.expense[0]?.id || accountGroups.income[0]?.id || suggested;
   }
 
   return (

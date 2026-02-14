@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { listManualPayments, type ManualPayment } from "@/lib/reports/manualPayments";
 import { createStatement, normalizeId, type ChargeEntry, type PaymentEntry, type StatementRow, type TenantRecord } from "@/lib/reports/tenantStatement";
@@ -75,7 +74,7 @@ function toNumber(value: unknown, fallback = 0) {
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {

@@ -11,6 +11,8 @@ type ServiceRecord = {
   rate: number;
   accent?: "cyan" | "blue" | "emerald" | "violet" | "teal" | "amber";
   icon?: "water" | "electricity" | "money" | "security" | "generic";
+  style?: unknown;
+  meta?: unknown;
 };
 
 const DEFAULT_SERVICES: ServiceRecord[] = [
@@ -24,17 +26,17 @@ const DEFAULT_SERVICES: ServiceRecord[] = [
     accent: "blue",
     icon: "electricity",
   },
-  { id: "waste", name: "Waste Management", type: "flat", unit: "Month", rate: 7, accent: "amber", icon: "money" },
+  { id: "waste", name: "Waste Management", type: "flat", unit: "Month", rate: 7, accent: "teal", icon: "money" },
   {
     id: "cleaning",
     name: "Elevators + Cleaning",
     type: "flat",
     unit: "Month",
     rate: 13,
-    accent: "amber",
+    accent: "teal",
     icon: "money",
   },
-  { id: "security", name: "Security", type: "flat", unit: "Month", rate: 5, accent: "amber", icon: "money" },
+  { id: "security", name: "Security", type: "flat", unit: "Month", rate: 5, accent: "teal", icon: "money" },
 ];
 
 function handleError(err: unknown) {
@@ -49,6 +51,33 @@ function toNumber(value: unknown) {
   return Number.isFinite(num) ? num : 0;
 }
 
+function parseOptionalJson(value: unknown, field: string, serviceId: string) {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch (err) {
+    console.warn(`⚠️ invalid JSON in ${field} for service ${serviceId}`, err);
+    return value;
+  }
+}
+
+function normalizeServicePayload(payload: Partial<ServiceRecord>) {
+  const idHint = payload.id ?? payload.name ?? "unknown";
+  const next = { ...payload };
+  if ("style" in next) {
+    next.style = parseOptionalJson(next.style, "style", String(idHint));
+  }
+  if ("meta" in next) {
+    next.meta = parseOptionalJson(next.meta, "meta", String(idHint));
+  }
+  return next;
+}
+
+function normalizeServiceList(value: unknown): ServiceRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as ServiceRecord[];
+}
+
 export async function GET() {
   try {
     const data = await datasetsRepo.getDataset<ServiceRecord[]>(DATASET_KEY, DEFAULT_SERVICES);
@@ -61,7 +90,11 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = (await req.json()) as Partial<ServiceRecord>;
+    const rawPayload = await req.json();
+    if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
+      return NextResponse.json({ ok: false, error: "Invalid service payload." }, { status: 400 });
+    }
+    const payload = normalizeServicePayload(rawPayload as Partial<ServiceRecord>);
     if (!payload.name) {
       return NextResponse.json({ ok: false, error: "Service name is required." }, { status: 400 });
     }
@@ -72,13 +105,15 @@ export async function POST(req: NextRequest) {
       type: payload.type === "flat" ? "flat" : "metered",
       unit: payload.unit || "Unit",
       rate: toNumber(payload.rate),
-      accent: payload.accent ?? (payload.type === "flat" ? "amber" : "cyan"),
+      accent: payload.accent ?? (payload.type === "flat" ? "teal" : "cyan"),
       icon: payload.icon ?? (payload.type === "flat" ? "money" : "generic"),
+      style: payload.style,
+      meta: payload.meta,
     };
 
     const updated = await datasetsRepo.updateDataset<ServiceRecord[]>(
       DATASET_KEY,
-      (current) => [...current, entry],
+      (current) => [...normalizeServiceList(current), entry],
       DEFAULT_SERVICES,
     );
 
@@ -91,7 +126,11 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const payload = (await req.json()) as Partial<ServiceRecord>;
+    const rawPayload = await req.json();
+    if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
+      return NextResponse.json({ ok: false, error: "Invalid service payload." }, { status: 400 });
+    }
+    const payload = normalizeServicePayload(rawPayload as Partial<ServiceRecord>);
     if (!payload.id) {
       return NextResponse.json({ ok: false, error: "Service id is required." }, { status: 400 });
     }
@@ -99,8 +138,9 @@ export async function PUT(req: NextRequest) {
     const updated = await datasetsRepo.updateDataset<ServiceRecord[]>(
       DATASET_KEY,
       (current) => {
+        const safeCurrent = normalizeServiceList(current);
         let found = false;
-        const next = current.map((item) => {
+        const next = safeCurrent.map((item) => {
           if (item.id !== payload.id) return item;
           found = true;
           return {
@@ -109,8 +149,10 @@ export async function PUT(req: NextRequest) {
             type: payload.type === "flat" ? "flat" : payload.type === "metered" ? "metered" : item.type,
             unit: payload.unit ?? item.unit,
             rate: payload.rate !== undefined ? toNumber(payload.rate) : item.rate,
-            accent: payload.accent ?? (payload.type === "flat" ? "amber" : payload.type === "metered" ? "cyan" : item.accent),
+            accent: payload.accent ?? (payload.type === "flat" ? "teal" : payload.type === "metered" ? "cyan" : item.accent),
             icon: payload.icon ?? (payload.type === "flat" ? "money" : item.icon),
+            style: payload.style ?? item.style,
+            meta: payload.meta ?? item.meta,
           } satisfies ServiceRecord;
         });
         if (!found) throw new Error("Service not found.");
@@ -135,7 +177,7 @@ export async function DELETE(req: NextRequest) {
 
     const updated = await datasetsRepo.updateDataset<ServiceRecord[]>(
       DATASET_KEY,
-      (current) => current.filter((item) => item.id !== payload.id),
+      (current) => normalizeServiceList(current).filter((item) => item.id !== payload.id),
       DEFAULT_SERVICES,
     );
 

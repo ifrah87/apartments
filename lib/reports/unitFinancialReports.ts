@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { listManualPayments } from "@/lib/reports/manualPayments";
 import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
@@ -63,7 +62,7 @@ export type UnitFinancialReportResult = {
 };
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to fetch ${path}`);
@@ -121,7 +120,7 @@ export async function buildUnitFinancialReport(
   properties: PropertyInfo[],
 ): Promise<UnitFinancialReportResult> {
   const [units, tenants, rawPayments, expenses] = await Promise.all([
-    fetchJson<UnitInventory[]>("/api/unit-inventory"),
+    fetchJson<UnitInventory[]>("/api/unit-inventory").catch(() => [] as UnitInventory[]),
     fetchJson<TenantRecord[]>("/api/tenants"),
     fetchJson<RawPayment[]>("/api/payments"),
     fetchJson<RawExpense[]>("/api/unit-expenses").catch(() => [] as RawExpense[]),

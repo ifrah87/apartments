@@ -1,6 +1,5 @@
 import Link from "next/link";
 import SectionCard from "@/components/ui/SectionCard";
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { fetchPropertyOptions } from "@/lib/reports/propertyHelpers";
 import ReportControlsBar from "@/components/reports/ReportControlsBar";
@@ -48,13 +47,14 @@ type SearchParams = {
   property?: string;
 };
 
-export default async function UpcomingPaymentsPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function UpcomingPaymentsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const today = new Date();
   const defaultStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
   const defaultEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
-  const start = searchParams.from || searchParams.start || defaultStart;
-  const end = searchParams.to || searchParams.end || defaultEnd;
-  const propertyId = searchParams.propertyId || searchParams.property || "all";
+  const start = sp.from || sp.start || defaultStart;
+  const end = sp.to || sp.end || defaultEnd;
+  const propertyId = sp.propertyId || sp.property || "all";
   const [tenants, payments, properties] = await Promise.all([
     fetchJson<TenantRecord[]>("/api/tenants"),
     fetchJson<PaymentRecord[]>("/api/payments"),
@@ -157,7 +157,7 @@ function SummaryCard({ label, value, emphasize }: { label: string; value: string
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {

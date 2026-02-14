@@ -49,28 +49,28 @@ export default async function DashboardPage() {
       label: "Rent collected (MTD)",
       value: formatCurrency(rent.rentCollectedMTD),
       subtitle: "Monthly rental income",
-      accent: "green" as const,
+      accent: "cyan" as const,
       href: ledgerLink,
     },
     {
       label: "Upcoming payments",
       value: formatCurrency(rent.upcomingTotal),
       subtitle: `${rent.upcomingPayments} due in 7d`,
-      accent: "orange" as const,
+      accent: "cyan" as const,
       href: ledgerLink,
     },
     {
       label: "Overdue rent",
       value: formatCurrency(rent.overdueTotal),
       subtitle: `${rent.overdueTenants} tenants overdue`,
-      accent: "red" as const,
+      accent: "cyan" as const,
       href: ledgerLink,
     },
     {
       label: "Occupancy rate",
       value: `${occupancy.occupancyRate}%`,
       subtitle: `${occupancy.occupiedUnits}/${occupancy.totalUnits} occupied`,
-      accent: "purple" as const,
+      accent: "cyan" as const,
       href: "/reports/occupancy",
     },
     {
@@ -90,7 +90,7 @@ export default async function DashboardPage() {
         actions={
           <Link
             href="/reports"
-            className="rounded-full border border-white/10 bg-surface/60 px-4 py-2 text-xs font-semibold uppercase tracking-widest text-slate-200 hover:border-white/20"
+            className="rounded-full border border-accent/30 bg-panel/60 px-4 py-2 text-xs font-semibold uppercase tracking-widest text-accent hover:border-accent/50"
           >
             View reports
           </Link>
@@ -118,7 +118,7 @@ export default async function DashboardPage() {
             <h2 className="text-sm font-semibold text-slate-100">Recent activity</h2>
             <p className="text-xs text-slate-400">Latest ledger entries across all properties.</p>
           </div>
-          <Link href={ledgerLink} className="text-xs font-semibold text-cyan-300 hover:text-cyan-200">
+          <Link href={ledgerLink} className="text-xs font-semibold text-accent hover:text-accent/80">
             Open ledger
           </Link>
         </div>

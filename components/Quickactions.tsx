@@ -4,7 +4,6 @@ import Link from "next/link";
 export default function QuickActions() {
   const items = [
     { label: "New Tenant", href: "/tenants/new" },
-    { label: "Add Payment", href: "/payments/new" },
     { label: "Upload Statement", href: "/uploads/bank" },
     { label: "New Property", href: "/properties/new" },
   ];

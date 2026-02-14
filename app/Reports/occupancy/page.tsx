@@ -13,13 +13,14 @@ type SearchParams = {
 
 export const runtime = "nodejs";
 
-export default async function OccupancyReportPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function OccupancyReportPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
   const report = await buildOccupancyReport(
     {
-      propertyId: searchParams.property,
-      status: searchParams.status,
-      beds: searchParams.beds,
+      propertyId: sp.property,
+      status: sp.status,
+      beds: sp.beds,
     },
     properties,
   );
@@ -43,7 +44,7 @@ export default async function OccupancyReportPage({ searchParams }: { searchPara
             Property
             <select
               name="property"
-              defaultValue={searchParams.property || ""}
+              defaultValue={sp.property || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All properties</option>
@@ -59,7 +60,7 @@ export default async function OccupancyReportPage({ searchParams }: { searchPara
             Status
             <select
               name="status"
-              defaultValue={searchParams.status || "all"}
+              defaultValue={sp.status || "all"}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="all">All</option>
@@ -72,7 +73,7 @@ export default async function OccupancyReportPage({ searchParams }: { searchPara
             Beds
             <select
               name="beds"
-              defaultValue={searchParams.beds || ""}
+              defaultValue={sp.beds || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All</option>

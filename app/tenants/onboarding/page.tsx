@@ -15,6 +15,7 @@ type OnboardingRow = {
 export default function TenantsOnboardingListPage() {
   const [rows, setRows] = useState<OnboardingRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/tenant-orgs/onboarding", { cache: "no-store" })
@@ -23,6 +24,21 @@ export default function TenantsOnboardingListPage() {
       .catch(() => setRows([]))
       .finally(() => setLoading(false));
   }, []);
+
+  const deleteOnboarding = async (orgId: string) => {
+    if (deletingId) return;
+    if (!window.confirm("Delete this onboarding record? This cannot be undone.")) return;
+    setDeletingId(orgId);
+    const res = await fetch(`/api/admin/tenant-orgs/${orgId}/onboarding`, { method: "DELETE" });
+    const response = await res.json().catch(() => ({}));
+    if (!res.ok || !response?.ok) {
+      alert(response?.error || "Delete failed.");
+      setDeletingId(null);
+      return;
+    }
+    setRows((prev) => prev.filter((row) => row.org.id !== orgId));
+    setDeletingId(null);
+  };
 
   const onboardingRows = rows.filter((row) => row.org?.status !== "active");
   const archivedRows = rows.filter((row) => row.org?.status === "active");
@@ -101,12 +117,22 @@ export default function TenantsOnboardingListPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Link
-                      href={`/tenants/onboarding/${row.org.id}`}
-                      className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700"
-                    >
-                      Continue
-                    </Link>
+                    <div className="flex items-center justify-end gap-2">
+                      <Link
+                        href={`/tenants/onboarding/${row.org.id}`}
+                        className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700"
+                      >
+                        Continue
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => deleteOnboarding(row.org.id)}
+                        disabled={deletingId === row.org.id}
+                        className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 disabled:opacity-60"
+                      >
+                        {deletingId === row.org.id ? "Deleting..." : "Delete"}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

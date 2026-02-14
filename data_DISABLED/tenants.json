@@ -1,0 +1,15 @@
+[
+  {
+    "id": "4dfaedd1-2b37-45a1-89fa-d804283107ca",
+    "fullName": "Ifrah",
+    "email": "",
+    "phone": "0613533329",
+    "unitId": "101",
+    "propertyId": "101",
+    "leaseId": "91542693-e381-4fc7-a927-8af5a515da3d",
+    "role": "tenant",
+    "onboardingStatus": "pending_payment",
+    "createdAt": "2026-01-26T09:28:29.749Z",
+    "updatedAt": "2026-01-26T10:00:24.868Z"
+  }
+]

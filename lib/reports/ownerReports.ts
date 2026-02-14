@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
 type OwnerSummaryRow = {
@@ -28,7 +27,7 @@ type MonthEndTaskRow = {
 };
 
 export async function fetchOwnerSummary(month?: string) {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const res = await fetch(`${baseUrl}/api/monthly-owner-summary`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch owner summary");
   const payload = await res.json();
@@ -47,7 +46,7 @@ export async function fetchOwnerSummary(month?: string) {
 }
 
 export async function fetchKPIDashboard() {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const res = await fetch(`${baseUrl}/api/kpi-dashboard`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch KPI dashboard");
   const payload = await res.json();
@@ -65,7 +64,7 @@ export async function fetchKPIDashboard() {
 }
 
 export async function fetchMonthEndTasks(month?: string) {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const res = await fetch(`${baseUrl}/api/month-end-tasks`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch month end tasks");
   const payload = await res.json();

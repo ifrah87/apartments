@@ -15,9 +15,10 @@ type SearchParams = {
 
 export const runtime = "nodejs";
 
-export default async function DepositsReportPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function DepositsReportPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
-  const report = await buildDepositReport({ propertyId: searchParams.property }, properties);
+  const report = await buildDepositReport({ propertyId: sp.property }, properties);
 
   return (
     <div className="space-y-6 p-6">
@@ -40,7 +41,7 @@ export default async function DepositsReportPage({ searchParams }: { searchParam
             Property
             <select
               name="property"
-              defaultValue={searchParams.property || ""}
+              defaultValue={sp.property || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All properties</option>

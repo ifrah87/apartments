@@ -23,14 +23,15 @@ function formatDate(value?: string) {
 
 export const runtime = "nodejs";
 
-export default async function OverdueRentPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function OverdueRentPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
-  const days = Number(searchParams.days || 30);
+  const days = Number(sp.days || 30);
   const report = await buildOverdueRentReport(
     {
-      propertyId: searchParams.property,
+      propertyId: sp.property,
       days,
-      tenantStatus: searchParams.status,
+      tenantStatus: sp.status,
     },
     properties,
   );
@@ -54,7 +55,7 @@ export default async function OverdueRentPage({ searchParams }: { searchParams: 
             Property
             <select
               name="property"
-              defaultValue={searchParams.property || ""}
+              defaultValue={sp.property || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All properties</option>
@@ -85,7 +86,7 @@ export default async function OverdueRentPage({ searchParams }: { searchParams: 
             Tenant status
             <select
               name="status"
-              defaultValue={searchParams.status || "all"}
+              defaultValue={sp.status || "all"}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="all">All</option>

@@ -8,12 +8,13 @@ type SearchParams = { start?: string; end?: string };
 
 export const runtime = "nodejs";
 
-export default async function BankSummaryPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function BankSummaryPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const today = new Date();
   const defaultStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
   const defaultEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
-  const start = searchParams.start || defaultStart;
-  const end = searchParams.end || defaultEnd;
+  const start = sp.start || defaultStart;
+  const end = sp.end || defaultEnd;
 
   const [ledger, categories] = await Promise.all([fetchLedger(), getTransactionCategories()]);
   const augmented = ledger
@@ -35,7 +36,7 @@ export default async function BankSummaryPage({ searchParams }: { searchParams: 
   const unreconciledRows = statementLines
     .filter(isUnreconciled)
     .filter((line) => !usedCategoryIds.has(String(line.id ?? `${line.date}-${line.description}`)));
-  const showUnreconciledOnly = searchParams.view === "unreconciled";
+  const showUnreconciledOnly = sp.view === "unreconciled";
   const visibleLines = showUnreconciledOnly ? unreconciledRows : statementLines;
 
   const cashIn = statementLines.filter((l) => l.amount >= 0).reduce((sum, l) => sum + l.amount, 0);

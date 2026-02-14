@@ -1,0 +1,24 @@
+[
+  {
+    "id": "180de8d3-d908-4352-a38e-d23187661a9d",
+    "tenantOrgId": "1025f784-8198-49dc-9137-4b135535164c",
+    "startDate": "2026-01-26",
+    "endDate": "2026-01-26",
+    "rentAmount": 500,
+    "serviceChargeAmount": 50,
+    "dueDay": 1,
+    "graceDays": 5,
+    "currency": "USD"
+  },
+  {
+    "id": "f7a67263-ff59-47c8-9542-e06302b71dd6",
+    "tenantOrgId": "629bf7a8-b2c4-47a9-bdda-a0508958985e",
+    "startDate": "2026-01-28",
+    "endDate": "2026-01-28",
+    "rentAmount": 600,
+    "serviceChargeAmount": 15,
+    "dueDay": 1,
+    "graceDays": 3,
+    "currency": "USD"
+  }
+]

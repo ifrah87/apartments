@@ -1,4 +1,3 @@
-import { headers } from "next/headers";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { fetchPropertyOptions } from "@/lib/reports/propertyHelpers";
 import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
@@ -61,10 +60,18 @@ export type OccupancySummary = {
 };
 
 async function fetchJson<T>(path: string): Promise<T> {
-  const baseUrl = getRequestBaseUrl(headers());
+  const baseUrl = await getRequestBaseUrl();
   const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Failed to fetch ${path}`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Failed to fetch ${path} (${res.status} ${res.statusText}) → ${body.slice(0, 300)}`);
+  }
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Expected JSON from ${path}, got ${contentType} → ${body.slice(0, 300)}`);
+  }
   const payload = await res.json();
   if (payload?.ok === false) throw new Error(payload.error || `Failed to fetch ${path}`);
   return (payload?.ok ? payload.data : payload) as T;
@@ -106,9 +113,9 @@ function getPropertyName(id: string | undefined, properties: PropertyInfo[]) {
 
 export async function buildOccupancyReport(filters: OccupancyFilters, properties: PropertyInfo[]): Promise<OccupancyReportResult> {
   const [units, turnover, tenants] = await Promise.all([
-    fetchJson<UnitInventory[]>("/api/unit-inventory"),
+    fetchJson<UnitInventory[]>("/api/unit-inventory").catch(() => [] as UnitInventory[]),
     fetchJson<UnitTurnover[]>("/api/unit-turnover").catch(() => [] as UnitTurnover[]),
-    fetchJson<TenantRecord[]>("/api/tenants"),
+    fetchJson<TenantRecord[]>("/api/dashboard/occupancy"),
   ]);
   const propertyFilter = (filters.propertyId || "").toLowerCase();
   const statusFilter = filters.status || "all";

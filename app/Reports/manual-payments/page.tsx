@@ -1,12 +1,9 @@
 import Link from "next/link";
-import ManualPaymentsManager from "@/components/ManualPaymentsManager";
-import { listManualPayments } from "@/lib/reports/manualPayments";
+import SectionCard from "@/components/ui/SectionCard";
 
 export const runtime = "nodejs";
 
 export default async function ManualPaymentsPage() {
-  const payments = listManualPayments();
-
   return (
     <div className="space-y-6 p-6">
       <header className="space-y-1">
@@ -17,12 +14,12 @@ export default async function ManualPaymentsPage() {
           / Manual Payments
         </p>
         <h1 className="text-3xl font-semibold text-slate-900">Manual Payments</h1>
-        <p className="text-sm text-slate-500">
-          Record tenant receipts that do not appear in the bank CSV so tenant ledgers stay accurate.
-        </p>
+        <p className="text-sm text-slate-500">Manual payment entry is disabled.</p>
       </header>
 
-      <ManualPaymentsManager initialPayments={payments} />
+      <SectionCard className="p-6 text-sm text-slate-600">
+        Payments are reconciled via bank sync; manual payments are disabled
+      </SectionCard>
     </div>
   );
 }

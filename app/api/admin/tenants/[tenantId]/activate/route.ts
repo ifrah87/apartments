@@ -4,8 +4,8 @@ import { getCheckpoints, getTenants, updateTenants } from "@/lib/onboardingStore
 
 export const runtime = "nodejs";
 
-export async function PATCH(_: Request, { params }: { params: { tenantId: string } }) {
-  const { tenantId } = await Promise.resolve(params);
+export async function PATCH(_: Request, { params }: { params: Promise<{ tenantId: string }> }) {
+  const { tenantId } = await params;
   const [tenants, checkpoints] = await Promise.all([getTenants(), getCheckpoints()]);
   const tenant = tenants.find((item) => item.id === tenantId);
   const checkpoint = checkpoints.find((item) => item.tenantId === tenantId);

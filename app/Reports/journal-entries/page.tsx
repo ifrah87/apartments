@@ -17,12 +17,13 @@ function defaultRange() {
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
 }
 
-export default async function JournalEntriesPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function JournalEntriesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
   const defaults = defaultRange();
-  const start = searchParams.start || defaults.start;
-  const end = searchParams.end || defaults.end;
-  const entries = await listJournalEntries({ propertyId: searchParams.property, start, end });
+  const start = sp.start || defaults.start;
+  const end = sp.end || defaults.end;
+  const entries = await listJournalEntries({ propertyId: sp.property, start, end });
 
   return (
     <div className="space-y-6 p-6">
@@ -40,7 +41,7 @@ export default async function JournalEntriesPage({ searchParams }: { searchParam
         <form className="grid gap-4 md:grid-cols-4">
           <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Property
-            <select name="property" defaultValue={searchParams.property || ""} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+            <select name="property" defaultValue={sp.property || ""} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
               <option value="">All properties</option>
               {properties.map((property) => (
                 <option key={property.property_id} value={property.property_id}>

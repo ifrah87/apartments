@@ -1,10 +1,15 @@
 import { randomUUID } from "crypto";
 import { query } from "@/lib/db/client";
+import { DEFAULT_INITIAL_READINGS } from "@/lib/settings/defaults";
+import { normalizeSettings } from "@/lib/settings/server";
+import type { InitialReadingsSettings } from "@/lib/settings/types";
+import { datasetsRepo } from "./datasetsRepo";
 import { badRequest } from "./errors";
 
 export type MeterReading = {
   id: string;
   unit: string;
+  tenant_id?: string | null;
   meter_type: "water" | "electricity" | string;
   reading_date: string;
   reading_value: number;
@@ -22,6 +27,7 @@ export type MeterReadingFilters = {
 
 export type MeterReadingInput = {
   unit?: string;
+  tenant_id?: string | null;
   meter_type?: string;
   reading_date?: string;
   reading_value?: number | string;
@@ -38,10 +44,17 @@ function descriptionForType(meterType: string) {
   return meterType === "water" ? "Water Billing" : "Electricity Billing";
 }
 
+async function getInitialReadingsSettings(): Promise<InitialReadingsSettings> {
+  const raw = await datasetsRepo.getDataset("settings.initialReadings", DEFAULT_INITIAL_READINGS);
+  const normalized = normalizeSettings("initial-readings", raw, false);
+  return normalized.value as InitialReadingsSettings;
+}
+
 function normalizeReadingRow(row: any): MeterReading {
   return {
     id: String(row.id),
     unit: row.unit,
+    tenant_id: row.tenant_id ?? null,
     meter_type: row.meter_type,
     reading_date: row.reading_date,
     reading_value: row.reading_value !== null && row.reading_value !== undefined ? Number(row.reading_value) : 0,
@@ -68,7 +81,7 @@ export async function listReadings(filters: MeterReadingFilters = {}): Promise<M
 
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const { rows } = await query(
-    `SELECT id, unit, meter_type, reading_date, reading_value, prev_value, usage, amount, proof_url
+    `SELECT id, unit, tenant_id, meter_type, reading_date, reading_value, prev_value, usage, amount, proof_url
      FROM meter_readings
      ${where}
      ORDER BY reading_date DESC, created_at DESC`,
@@ -79,6 +92,7 @@ export async function listReadings(filters: MeterReadingFilters = {}): Promise<M
 
 export async function createReading(payload: MeterReadingInput): Promise<MeterReading> {
   const unit = payload.unit?.trim();
+  const tenantId = payload.tenant_id?.trim() || null;
   const meterType = payload.meter_type?.trim();
   const readingDate = payload.reading_date?.trim();
   const readingValue = toNumber(payload.reading_value);
@@ -96,16 +110,23 @@ export async function createReading(payload: MeterReadingInput): Promise<MeterRe
      LIMIT 1`,
     [unit, meterType],
   );
-  const prevValue = prevRows[0]?.reading_value ? Number(prevRows[0].reading_value) : 0;
+  let prevValue = prevRows[0]?.reading_value !== undefined ? Number(prevRows[0].reading_value) : undefined;
+  if (prevValue === undefined) {
+    const settings = await getInitialReadingsSettings();
+    if (meterType === "water") prevValue = settings.initialReadings.water ?? 0;
+    else if (meterType === "electricity") prevValue = settings.initialReadings.electricity ?? 0;
+    else prevValue = 0;
+  }
   const usage = Number((readingValue - prevValue).toFixed(2));
 
   const { rows } = await query(
-    `INSERT INTO meter_readings (id, unit, meter_type, reading_date, reading_value, prev_value, usage, amount, proof_url)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-     RETURNING id, unit, meter_type, reading_date, reading_value, prev_value, usage, amount, proof_url`,
+    `INSERT INTO meter_readings (id, unit, tenant_id, meter_type, reading_date, reading_value, prev_value, usage, amount, proof_url)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     RETURNING id, unit, tenant_id, meter_type, reading_date, reading_value, prev_value, usage, amount, proof_url`,
     [
       randomUUID(),
       unit,
+      tenantId,
       meterType,
       readingDate,
       readingValue,

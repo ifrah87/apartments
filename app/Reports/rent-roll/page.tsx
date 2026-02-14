@@ -31,15 +31,16 @@ type SearchParams = {
 
 export const runtime = "nodejs";
 
-export default async function RentRollPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function RentRollPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
-  const monthParam = searchParams.month || defaultMonth();
+  const monthParam = sp.month || defaultMonth();
   const report = await buildRentRollReport(
     {
-      propertyId: searchParams.property,
+      propertyId: sp.property,
       month: monthParam,
-      unitType: searchParams.unitType,
-      occupancy: searchParams.occupancy,
+      unitType: sp.unitType,
+      occupancy: sp.occupancy,
     },
     properties,
   );
@@ -76,7 +77,7 @@ export default async function RentRollPage({ searchParams }: { searchParams: Sea
             Property
             <select
               name="property"
-              defaultValue={searchParams.property || ""}
+              defaultValue={sp.property || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All properties</option>
@@ -102,7 +103,7 @@ export default async function RentRollPage({ searchParams }: { searchParams: Sea
             Unit type
             <select
               name="unitType"
-              defaultValue={searchParams.unitType || ""}
+              defaultValue={sp.unitType || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All types</option>
@@ -118,7 +119,7 @@ export default async function RentRollPage({ searchParams }: { searchParams: Sea
             Occupancy
             <select
               name="occupancy"
-              defaultValue={searchParams.occupancy || "all"}
+              defaultValue={sp.occupancy || "all"}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="all">All units</option>

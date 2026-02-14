@@ -15,8 +15,9 @@ function defaultMonth() {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 }
 
-export default async function OwnerSummaryPage({ searchParams }: { searchParams: SearchParams }) {
-  const month = searchParams.month || defaultMonth();
+export default async function OwnerSummaryPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
+  const month = sp.month || defaultMonth();
   const rows = await fetchOwnerSummary(month);
 
   const totals = rows.reduce(

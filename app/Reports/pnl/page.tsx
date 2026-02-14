@@ -31,12 +31,13 @@ function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
 }
 
-export default async function ProfitAndLossPage({ searchParams }: { searchParams: SearchParams }) {
-  const period = searchParams.period || "month";
+export default async function ProfitAndLossPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
+  const period = sp.period || "month";
   const defaults = defaultRange(period);
-  const start = searchParams.start || defaults.start;
-  const end = searchParams.end || defaults.end;
-  const propertyFilter = searchParams.property || "all";
+  const start = sp.start || defaults.start;
+  const end = sp.end || defaults.end;
+  const propertyFilter = sp.property || "all";
 
   const pnl = await calculateProfitAndLoss({ start, end });
   const propertyOptions = pnl.properties.map((property) => ({

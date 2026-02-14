@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import ChecklistItem from "@/components/ui/ChecklistItem";
 import ProgressBar from "@/components/ui/ProgressBar";
 import StatusChip from "@/components/ui/StatusChip";
@@ -22,11 +22,13 @@ type OnboardingResponse = {
 
 export default function OnboardingWizardPage() {
   const params = useParams();
+  const router = useRouter();
   const orgId = params?.tenantId as string;
   const [data, setData] = useState<OnboardingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [leaseDoc, setLeaseDoc] = useState({ name: "Lease", url: "" });
+  const [deleting, setDeleting] = useState(false);
 
   const refresh = () => {
     setLoading(true);
@@ -122,6 +124,21 @@ export default function OnboardingWizardPage() {
     refresh();
   };
 
+  const deleteOnboarding = async () => {
+    if (!orgId || deleting) return;
+    if (!window.confirm("Delete this onboarding record? This cannot be undone.")) return;
+    setDeleting(true);
+    setMessage(null);
+    const res = await fetch(`/api/admin/tenant-orgs/${orgId}/onboarding`, { method: "DELETE" });
+    const response = await res.json().catch(() => ({}));
+    if (!res.ok || !response?.ok) {
+      setMessage(response?.error || "Delete failed.");
+      setDeleting(false);
+      return;
+    }
+    router.push("/tenants/onboarding");
+  };
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-4">
@@ -131,7 +148,19 @@ export default function OnboardingWizardPage() {
           </p>
           <h1 className="text-2xl font-semibold text-slate-900">{data.org.name}</h1>
         </div>
-        <StatusChip status={data.org.status} />
+        <div className="flex items-center gap-3">
+          <StatusChip status={data.org.status} />
+          {data.org.status !== "active" && (
+            <button
+              type="button"
+              onClick={deleteOnboarding}
+              disabled={deleting}
+              className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 disabled:opacity-60"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4">

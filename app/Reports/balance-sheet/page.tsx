@@ -17,10 +17,11 @@ function defaultDate() {
   return today.toISOString().slice(0, 10);
 }
 
-export default async function BalanceSheetPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function BalanceSheetPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
-  const end = searchParams.end || defaultDate();
-  const report = await buildBalanceSheet({ propertyId: searchParams.property, end });
+  const end = sp.end || defaultDate();
+  const report = await buildBalanceSheet({ propertyId: sp.property, end });
 
   return (
     <div className="space-y-6 p-6">
@@ -41,7 +42,7 @@ export default async function BalanceSheetPage({ searchParams }: { searchParams:
             Property
             <select
               name="property"
-              defaultValue={searchParams.property || ""}
+              defaultValue={sp.property || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All properties</option>

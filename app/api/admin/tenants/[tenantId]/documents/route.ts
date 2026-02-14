@@ -12,9 +12,9 @@ type Payload = {
   markLeaseUploaded?: boolean;
 };
 
-export async function POST(req: Request, { params }: { params: { tenantId: string } }) {
+export async function POST(req: Request, { params }: { params: Promise<{ tenantId: string }> }) {
   try {
-    const { tenantId } = await Promise.resolve(params);
+    const { tenantId } = await params;
     const payload = (await req.json()) as Payload;
     const tenants = await getTenants();
     const tenant = tenants.find((item) => item.id === tenantId);

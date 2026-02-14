@@ -4,13 +4,15 @@ type SearchParams = {
   tab?: string;
 };
 
-export default function TenantRedirectPage({
+export default async function TenantRedirectPage({
   params,
   searchParams,
 }: {
-  params: { tenantId: string };
-  searchParams: SearchParams;
+  params: Promise<{ tenantId: string }>;
+  searchParams: Promise<SearchParams>;
 }) {
-  const tab = searchParams.tab || "statement";
-  redirect(`/tenants?tenantId=${params.tenantId}&tab=${tab}`);
+  const { tenantId } = await params;
+  const sp = await searchParams;
+  const tab = sp.tab || "statement";
+  redirect(`/tenants?tenantId=${tenantId}&tab=${tab}`);
 }
