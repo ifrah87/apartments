@@ -11,9 +11,10 @@ type SearchParams = {
 
 export const runtime = "nodejs";
 
-export default async function BankReconciliationPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function BankReconciliationPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
-  const report = await buildReconciliationReport({ propertyId: searchParams.property });
+  const report = await buildReconciliationReport({ propertyId: sp.property });
 
   return (
     <div className="space-y-6 p-6">
@@ -32,7 +33,7 @@ export default async function BankReconciliationPage({ searchParams }: { searchP
         <form className="flex flex-wrap gap-4">
           <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Property
-            <select name="property" defaultValue={searchParams.property || ""} className="mt-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+            <select name="property" defaultValue={sp.property || ""} className="mt-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
               <option value="">All properties</option>
               {properties.map((property) => (
                 <option key={property.property_id} value={property.property_id}>

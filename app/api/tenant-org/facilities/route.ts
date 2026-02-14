@@ -14,7 +14,7 @@ type Payload = {
 };
 
 export async function GET() {
-  const orgId = getTenantOrgSessionId();
+  const orgId = await getTenantOrgSessionId();
   if (!orgId) {
     return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
   }
@@ -25,7 +25,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const orgId = getTenantOrgSessionId();
+  const orgId = await getTenantOrgSessionId();
   if (!orgId) {
     return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
   }

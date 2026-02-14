@@ -110,7 +110,7 @@ export default function CashflowWidget({ points, link }: Props) {
           >
             <div className="flex h-44 w-full items-end gap-3">
               <div
-                className="w-5 rounded-sm bg-cyan-400 shadow-[0_2px_6px_rgba(34,211,238,0.35)]"
+                className="w-5 rounded-sm bg-accent shadow-[0_2px_6px_rgba(56,189,248,0.35)]"
                 style={{ height: `${Math.max((point.inflow / maxValue) * 100, 4)}%` }}
               />
               <div
@@ -142,7 +142,7 @@ export default function CashflowWidget({ points, link }: Props) {
 
       <div className="mt-3 flex gap-4 text-xs text-slate-400">
         <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-cyan-400" />
+          <span className="h-2 w-2 rounded-full bg-accent" />
           Cash in
         </span>
         <span className="flex items-center gap-1">
@@ -153,7 +153,7 @@ export default function CashflowWidget({ points, link }: Props) {
       <div className="mt-4 flex justify-end">
         <Link
           href={link}
-          className="rounded-full border border-cyan-400/30 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:border-cyan-300/60"
+          className="rounded-full border border-accent/30 px-3 py-1.5 text-xs font-semibold text-accent hover:border-accent/60"
         >
           View detailed cashflow →
         </Link>

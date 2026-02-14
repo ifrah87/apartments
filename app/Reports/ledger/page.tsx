@@ -4,11 +4,7 @@ import SectionCard from "@/components/ui/SectionCard";
 import { fetchLedger } from "@/lib/reports/ledger";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
-type SearchParams = {
-  start?: string;
-  end?: string;
-  property?: string;
-};
+type SearchParams = Record<string, string | string[] | undefined>;
 
 type PropertyOption = { property_id: string; name?: string };
 
@@ -44,9 +40,9 @@ export default async function LedgerPage({
   const defaultStart = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
   const defaultEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
 
-  const start = sp.start || defaultStart;
-  const end = sp.end || defaultEnd;
-  const property = sp.property || "";
+  const start = (typeof sp.start === "string" ? sp.start : "") || defaultStart;
+  const end = (typeof sp.end === "string" ? sp.end : "") || defaultEnd;
+  const property = (typeof sp.property === "string" ? sp.property : "") || "";
 
   const [entries, properties] = await Promise.all([
     fetchLedger({ start, end, propertyId: property || undefined }),

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { datasetsRepo, tenantsRepo } from "@/lib/repos";
 import {
   ChargeEntry,
@@ -138,15 +138,25 @@ function buildInvoiceSection(
   `;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const reference = new Date();
     const { start, end } = monthRange(reference);
     const tenants = await tenantsRepo.listTenants();
+    const { searchParams } = new URL(req.url);
+    const requestedTenantId = searchParams.get("tenantId") || searchParams.get("tenant") || "";
+    const mode = searchParams.get("mode") || "download";
+    const normalizedTenantId = normalizeId(requestedTenantId);
+    const scopedTenants = normalizedTenantId
+      ? tenants.filter((tenant) => {
+          const candidates = [tenant.id, tenant.reference, tenant.unit].filter(Boolean).map(String);
+          return candidates.some((candidate) => normalizeId(candidate) === normalizedTenantId);
+        })
+      : tenants;
     const charges = await datasetsRepo.getDataset<ChargeRow[]>("tenant_charges", []);
     const chargeIndex = buildChargeIndex(charges);
 
-    const sections = tenants
+    const sections = scopedTenants
       .map((tenant) => {
         const tenantId = normalizeId(tenant.id);
         const additionalCharges = chargeIndex.get(tenantId) || [];
@@ -163,7 +173,9 @@ export async function GET() {
       .filter(Boolean)
       .join("");
 
-    const body = sections || `<section class="empty">No charges found for ${monthLabel(reference)}.</section>`;
+    const body =
+      sections ||
+      `<section class="empty">No charges found for ${monthLabel(reference)}${normalizedTenantId ? " for this tenant" : ""}.</section>`;
     const html = `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -204,10 +216,14 @@ export async function GET() {
   </body>
 </html>`;
 
+    const filename = normalizedTenantId
+      ? `tenant-invoice-${normalizedTenantId}-${toISO(reference).slice(0, 7)}.html`
+      : `tenant-invoices-${toISO(reference).slice(0, 7)}.html`;
+    const disposition = mode === "view" ? "inline" : "attachment";
     return new NextResponse(html, {
       headers: {
         "Content-Type": "text/html",
-        "Content-Disposition": `attachment; filename="tenant-invoices-${toISO(reference).slice(0, 7)}.html"`,
+        "Content-Disposition": `${disposition}; filename="${filename}"`,
       },
     });
   } catch (err) {

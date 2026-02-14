@@ -42,7 +42,18 @@ export async function getDataset<T>(key: DatasetKey, fallback: T): Promise<T> {
 
 export async function setDataset<T>(key: DatasetKey, data: T): Promise<T> {
   const normalized = normalizeKey(key);
-  const json = JSON.stringify(data);
+  let json: string;
+  try {
+    json = JSON.stringify(data);
+  } catch (err) {
+    console.error("❌ failed to serialize dataset", { key: normalized, error: err });
+    throw err;
+  }
+  if (json === undefined) {
+    const err = new Error(`Failed to serialize dataset "${normalized}". JSON.stringify returned undefined.`);
+    console.error("❌ failed to serialize dataset", { key: normalized, error: err });
+    throw err;
+  }
   try {
     await query(
       `INSERT INTO app_datasets (key, data)

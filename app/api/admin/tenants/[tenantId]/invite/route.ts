@@ -4,8 +4,8 @@ import { getCheckpoints, getTenants, updateCheckpoints, updateTenants } from "@/
 
 export const runtime = "nodejs";
 
-export async function POST(_: Request, { params }: { params: { tenantId: string } }) {
-  const { tenantId } = await Promise.resolve(params);
+export async function POST(_: Request, { params }: { params: Promise<{ tenantId: string }> }) {
+  const { tenantId } = await params;
   const [tenants, checkpoints] = await Promise.all([getTenants(), getCheckpoints()]);
   const tenant = tenants.find((item) => item.id === tenantId);
   if (!tenant) {

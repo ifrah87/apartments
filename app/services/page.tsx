@@ -48,17 +48,17 @@ const DEFAULT_SERVICES: Service[] = [
     accent: "blue",
     icon: "electricity",
   },
-  { id: "waste", name: "Waste Management", type: "flat", unit: "Month", rate: 7, accent: "amber", icon: "money" },
+  { id: "waste", name: "Waste Management", type: "flat", unit: "Month", rate: 7, accent: "teal", icon: "money" },
   {
     id: "cleaning",
     name: "Elevators + Cleaning",
     type: "flat",
     unit: "Month",
     rate: 13,
-    accent: "amber",
+    accent: "teal",
     icon: "money",
   },
-  { id: "security", name: "Security", type: "flat", unit: "Month", rate: 5, accent: "amber", icon: "money" },
+  { id: "security", name: "Security", type: "flat", unit: "Month", rate: 5, accent: "teal", icon: "money" },
 ];
 
 const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
@@ -70,12 +70,12 @@ const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
 };
 
 const ACCENT_STYLES: Record<string, { border: string; icon: string }> = {
-  cyan: { border: "border-cyan-400/70", icon: "text-cyan-200" },
+  cyan: { border: "border-accent/70", icon: "text-accent" },
   blue: { border: "border-sky-400/70", icon: "text-sky-200" },
   emerald: { border: "border-emerald-400/70", icon: "text-emerald-200" },
   violet: { border: "border-violet-400/70", icon: "text-violet-200" },
   teal: { border: "border-teal-400/70", icon: "text-teal-200" },
-  amber: { border: "border-amber-400/70", icon: "text-amber-200" },
+  amber: { border: "border-teal-400/70", icon: "text-teal-200" },
 };
 
 function formatRate(rate: number) {
@@ -100,7 +100,7 @@ function inferIcon(name: string, type: Service["type"]): ServiceFormState["icon"
 }
 
 function inferAccent(type: Service["type"]): ServiceFormState["accent"] {
-  return type === "flat" ? "amber" : "cyan";
+  return type === "flat" ? "teal" : "cyan";
 }
 
 export default function ServicesPage() {
@@ -247,7 +247,7 @@ export default function ServicesPage() {
         actions={
           <button
             onClick={startCreate}
-            className="inline-flex items-center gap-2 rounded-full bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow-[0_10px_20px_rgba(34,211,238,0.25)] hover:bg-cyan-300"
+            className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-slate-900 shadow-[0_10px_20px_rgba(56,189,248,0.25)] hover:bg-accent-strong"
           >
             <Plus className="h-4 w-4" />
             Add New Service
@@ -259,7 +259,7 @@ export default function ServicesPage() {
         <SectionCard className="p-6">
           <div className="space-y-4">
             {services.map((service) => {
-              const accent = ACCENT_STYLES[service.accent || (service.type === "flat" ? "amber" : "cyan")] ?? ACCENT_STYLES.cyan;
+              const accent = ACCENT_STYLES[service.accent || (service.type === "flat" ? "teal" : "cyan")] ?? ACCENT_STYLES.cyan;
               const badgeVariant = service.type === "metered" ? "info" : "warning";
               const Icon = ICON_MAP[service.icon || "generic"] ?? Sparkles;
               return (
@@ -284,7 +284,7 @@ export default function ServicesPage() {
                       <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
                         {rateLabel(service)}
                       </p>
-                      <p className="text-sm font-semibold text-cyan-200">{formatRate(service.rate)}</p>
+                      <p className="text-sm font-semibold text-accent">{formatRate(service.rate)}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -385,7 +385,7 @@ export default function ServicesPage() {
               type="button"
               onClick={saveService}
               disabled={saving}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-900 shadow-[0_10px_20px_rgba(34,211,238,0.25)] hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-slate-900 shadow-[0_10px_20px_rgba(56,189,248,0.25)] hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-70"
             >
               {saving ? "Saving..." : mode === "edit" ? "Update Service" : "Create Service"}
             </button>

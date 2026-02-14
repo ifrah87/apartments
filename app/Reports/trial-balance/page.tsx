@@ -19,12 +19,13 @@ function defaultRange() {
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
 }
 
-export default async function TrialBalancePage({ searchParams }: { searchParams: SearchParams }) {
+export default async function TrialBalancePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
   const defaults = defaultRange();
-  const start = searchParams.start || defaults.start;
-  const end = searchParams.end || defaults.end;
-  const rows = await buildTrialBalance({ propertyId: searchParams.property, start, end });
+  const start = sp.start || defaults.start;
+  const end = sp.end || defaults.end;
+  const rows = await buildTrialBalance({ propertyId: sp.property, start, end });
 
   const debitTotal = rows.reduce((sum, row) => sum + row.debit, 0);
   const creditTotal = rows.reduce((sum, row) => sum + row.credit, 0);
@@ -50,7 +51,7 @@ export default async function TrialBalancePage({ searchParams }: { searchParams:
             Property
             <select
               name="property"
-              defaultValue={searchParams.property || ""}
+              defaultValue={sp.property || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All properties</option>

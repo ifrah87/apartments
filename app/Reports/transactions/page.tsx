@@ -13,6 +13,7 @@ function buildQuery(searchParams: SearchParams) {
   return qs ? `?${qs}` : "";
 }
 
-export default function ReportsTransactionsRedirect({ searchParams }: { searchParams: SearchParams }) {
-  redirect(`/reports/account-transactions${buildQuery(searchParams)}`);
+export default async function ReportsTransactionsRedirect({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
+  redirect(`/reports/account-transactions${buildQuery(sp)}`);
 }

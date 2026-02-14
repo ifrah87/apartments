@@ -28,14 +28,15 @@ function formatDate(value: string) {
 
 export const runtime = "nodejs";
 
-export default async function RentChangesPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function RentChangesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
-  const effective = searchParams.effective || defaultEffectiveDate();
+  const effective = sp.effective || defaultEffectiveDate();
   const report = await buildRentChargeReport(
     {
-      propertyId: searchParams.property,
+      propertyId: sp.property,
       effectiveDate: effective,
-      query: searchParams.query,
+      query: sp.query,
     },
     properties,
   );
@@ -61,7 +62,7 @@ export default async function RentChangesPage({ searchParams }: { searchParams: 
             Property
             <select
               name="property"
-              defaultValue={searchParams.property || ""}
+              defaultValue={sp.property || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All properties</option>
@@ -88,7 +89,7 @@ export default async function RentChangesPage({ searchParams }: { searchParams: 
             <input
               type="text"
               name="query"
-              defaultValue={searchParams.query || ""}
+              defaultValue={sp.query || ""}
               placeholder="Search by name or unit"
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             />

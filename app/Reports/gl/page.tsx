@@ -13,6 +13,7 @@ function buildQuery(searchParams: SearchParams) {
   return qs ? `?${qs}` : "";
 }
 
-export default function ReportsGlRedirect({ searchParams }: { searchParams: SearchParams }) {
-  redirect(`/reports/general-ledger${buildQuery(searchParams)}`);
+export default async function ReportsGlRedirect({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
+  redirect(`/reports/general-ledger${buildQuery(sp)}`);
 }

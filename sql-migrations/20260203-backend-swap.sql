@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS bank_transactions (
 CREATE TABLE IF NOT EXISTS meter_readings (
   id TEXT PRIMARY KEY,
   unit TEXT NOT NULL,
+  tenant_id TEXT,
   meter_type TEXT NOT NULL,
   reading_date DATE NOT NULL,
   reading_value NUMERIC NOT NULL,

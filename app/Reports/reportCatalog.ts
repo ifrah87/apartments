@@ -22,7 +22,6 @@ export const REPORT_ROUTES = {
   pnl: "/reports/pnl",
   bankImports: "/reports/bank-imports",
   bankReconciliation: "/reports/bank-reconciliation",
-  manualPayments: "/reports/manual-payments",
   balanceSheet: "/reports/balance-sheet",
   cashflow: "/reports/cashflow",
   trialBalance: "/reports/trial-balance",
@@ -55,7 +54,6 @@ export const REPORT_GROUPS = [
       { key: "pnl", href: REPORT_ROUTES.pnl, Icon: CircleDollarSign },
       { key: "bankImports", href: REPORT_ROUTES.bankImports, Icon: LineChart },
       { key: "bankReconciliation", href: REPORT_ROUTES.bankReconciliation, Icon: Wallet },
-      { key: "manualPayments", href: REPORT_ROUTES.manualPayments, Icon: CircleDollarSign },
     ],
   },
   {

@@ -24,8 +24,9 @@ function buildCsv(rows: Record<string, unknown>[]) {
   return lines.join("\n");
 }
 
-export async function GET(_req: NextRequest, { params }: { params: { filename: string } }) {
-  const rawName = params.filename || "";
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ filename: string }> }) {
+  const { filename } = await params;
+  const rawName = filename || "";
   const decoded = decodeURIComponent(rawName);
   if (
     !decoded ||

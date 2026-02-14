@@ -1,25 +1,39 @@
 import { Pool, type QueryResult } from "pg";
 
-const globalForPg = globalThis as unknown as { __PG_POOL__?: Pool };
+declare global {
+  // eslint-disable-next-line no-var
+  var __orfane_pgPool: Pool | undefined;
+}
 
-const connectionString = process.env.DATABASE_URL;
+function getSslConfig() {
+  const caRaw = process.env.DATABASE_SSL_CA;
+  if (!caRaw) return undefined;
 
-export const pool: Pool =
-  globalForPg.__PG_POOL__ ??
-  new Pool(
-    connectionString
-      ? { connectionString }
-      : {
-          host: "127.0.0.1",
-          port: 5432,
-          database: "apartments",
-          user: "postgres",
-        },
-  );
+  const ca = caRaw.replace(/\\n/g, "\n");
 
-if (!globalForPg.__PG_POOL__) globalForPg.__PG_POOL__ = pool;
+  return {
+    ca,
+    rejectUnauthorized: true,
+  } as const;
+}
 
-export async function query<T = any>(text: string, params: any[] = []): Promise<QueryResult<T>> {
+export function getPool() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is missing");
+  }
+
+  if (!globalThis.__orfane_pgPool) {
+    globalThis.__orfane_pgPool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: getSslConfig(),
+    });
+  }
+
+  return globalThis.__orfane_pgPool;
+}
+
+export async function query<T = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
+  const pool = getPool();
   return pool.query<T>(text, params);
 }
 

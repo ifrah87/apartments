@@ -13,7 +13,7 @@ type Payload = {
 };
 
 export async function PATCH(req: Request) {
-  const orgId = getTenantOrgSessionId();
+  const orgId = await getTenantOrgSessionId();
   if (!orgId) {
     return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
   }

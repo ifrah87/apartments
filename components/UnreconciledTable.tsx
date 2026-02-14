@@ -1,7 +1,10 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { CHART_OF_ACCOUNTS, suggestAccountForTransaction } from "@/lib/reports/chartOfAccounts";
+import { fetchSettings } from "@/lib/settings/client";
+import { DEFAULT_EXPENSE_CATEGORIES } from "@/lib/settings/defaults";
+import type { ExpenseCategoriesSettings, ExpenseCategory } from "@/lib/settings/types";
 
 type Row = {
   id: string;
@@ -30,8 +33,24 @@ export default function UnreconciledTable({ rows, initialCategories }: { rows: R
   const [categoryMap, setCategoryMap] = useState(initialCategories || {});
   const [saving, setSaving] = useState<Record<string, "idle" | "saving" | "error">>({});
   const [, startTransition] = useTransition();
+  const [expenseAccounts, setExpenseAccounts] = useState<ExpenseCategory[]>(
+    DEFAULT_EXPENSE_CATEGORIES.categories,
+  );
   const incomeAccounts = useMemo(() => CHART_OF_ACCOUNTS.filter((acc) => acc.type === "income"), []);
-  const expenseAccounts = useMemo(() => CHART_OF_ACCOUNTS.filter((acc) => acc.type === "expense"), []);
+
+  useEffect(() => {
+    fetchSettings<ExpenseCategoriesSettings>("expense-categories", DEFAULT_EXPENSE_CATEGORIES).then((data) =>
+      setExpenseAccounts(data.categories || DEFAULT_EXPENSE_CATEGORIES.categories),
+    );
+  }, []);
+
+  const expenseOptions = useMemo(
+    () =>
+      expenseAccounts
+        .filter((acc) => acc.active !== false)
+        .map((acc) => ({ id: acc.code?.trim() || acc.id, name: acc.name })),
+    [expenseAccounts],
+  );
 
   const activeRows = queue.filter((row) => !categoryMap[row.id]);
 
@@ -86,9 +105,13 @@ export default function UnreconciledTable({ rows, initialCategories }: { rows: R
           </thead>
           <tbody>
             {activeRows.map((row) => {
-              const suggestions = row.amount >= 0 ? incomeAccounts : expenseAccounts;
+              const suggestions = row.amount >= 0 ? incomeAccounts : expenseOptions;
               const defaultAccount = suggestAccountForTransaction(row);
-              const currentValue = categoryMap[row.id] || defaultAccount.id;
+              const availableIds = new Set(suggestions.map((account) => account.id));
+              const preferred = categoryMap[row.id] || defaultAccount.id;
+              const currentValue = availableIds.has(preferred)
+                ? preferred
+                : suggestions[0]?.id || defaultAccount.id;
               return (
                 <tr key={row.id} className="border-t border-rose-50">
                   <td className="px-4 py-2 text-slate-600">{formatDate(row.date)}</td>

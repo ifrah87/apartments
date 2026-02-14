@@ -19,12 +19,13 @@ function defaultRange() {
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
 }
 
-export default async function CashflowPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function CashflowPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
   const defaults = defaultRange();
-  const start = searchParams.start || defaults.start;
-  const end = searchParams.end || defaults.end;
-  const report = await buildCashflowStatement({ propertyId: searchParams.property, start, end });
+  const start = sp.start || defaults.start;
+  const end = sp.end || defaults.end;
+  const report = await buildCashflowStatement({ propertyId: sp.property, start, end });
 
   return (
     <div className="space-y-6 p-6">
@@ -47,7 +48,7 @@ export default async function CashflowPage({ searchParams }: { searchParams: Sea
             Property
             <select
               name="property"
-              defaultValue={searchParams.property || ""}
+              defaultValue={sp.property || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All properties</option>

@@ -61,12 +61,12 @@ export default function PropertiesPage() {
         </p>
       </header>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-panel/70 px-4 py-3 shadow-card-soft">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search building, unit, or tenant"
-          className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-200 sm:w-72"
+          className="w-full rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-accent/30 sm:w-72"
         />
         <span className="text-xs text-slate-400">{tenants.length} tenants loaded</span>
       </div>
@@ -105,8 +105,8 @@ function PropertyPanel({
   const rent = tenants.reduce((sum, tenant) => sum + Number(tenant.monthly_rent || 0), 0);
 
   return (
-    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
+    <div className="overflow-hidden rounded-3xl border border-white/10 bg-panel/80 bg-gradient-to-br from-white/5 to-transparent shadow-card-soft">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 px-5 py-4">
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">
             {property.name || `Building ${property.property_id}`}
@@ -122,8 +122,8 @@ function PropertyPanel({
               onClick={() => setTab(key)}
               className={`rounded-full border px-3 py-1 font-medium transition ${
                 tab === key
-                  ? "border-indigo-500 bg-indigo-50 text-indigo-600"
-                  : "border-slate-200 text-slate-500"
+                  ? "border-accent/50 bg-accent/15 text-accent"
+                  : "border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200"
               }`}
             >
               {key.charAt(0).toUpperCase() + key.slice(1)}
@@ -138,7 +138,7 @@ function PropertyPanel({
             <span className="text-xs text-slate-500">From properties CSV</span>
           </SummaryCard>
           <SummaryCard label="Occupied" value={occupied}>
-            <span className="text-xs text-green-600">{vacant} vacant</span>
+            <span className="text-xs text-emerald-200">{vacant} vacant</span>
           </SummaryCard>
           <SummaryCard label="Vacant" value={vacant || "0"}>
             <span className="text-xs text-slate-500">Auto-calculated</span>
@@ -150,10 +150,10 @@ function PropertyPanel({
       )}
 
       {tab === "units" && (
-        <div className="px-5 py-6 space-y-3">
+        <div className="space-y-3 px-5 py-6">
           <button
             onClick={() => setUnitsOpen((prev) => !prev)}
-            className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700"
+            className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-panel-2/60 px-4 py-2 text-sm font-semibold text-slate-200"
           >
             <span>Units list</span>
             <span>{unitsOpen ? "–" : "+"}</span>
@@ -161,7 +161,7 @@ function PropertyPanel({
           {unitsOpen && (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="text-xs uppercase tracking-wide text-slate-500">
+                <thead className="text-xs uppercase tracking-wide text-slate-400">
                   <tr>
                     <th className="py-2">Unit</th>
                     <th className="py-2">Tenant</th>
@@ -174,7 +174,7 @@ function PropertyPanel({
                   {tenants.map((tenant) => (
                     <tr
                       key={`${tenant.property_id}-${tenant.unit}`}
-                      className="border-t border-slate-100"
+                      className="border-t border-white/10"
                     >
                       <td className="py-2 font-medium text-slate-900">{tenant.unit}</td>
                       <td className="py-2 text-slate-700">{tenant.name}</td>
@@ -183,20 +183,20 @@ function PropertyPanel({
                       </td>
                       <td className="py-2 text-slate-500">{tenant.due_day || "—"}</td>
                       <td className="py-2">
-                        <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+                        <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-200">
                           Occupied
                         </span>
                       </td>
                     </tr>
                   ))}
                   {vacant > 0 && (
-                    <tr className="border-t border-slate-100">
+                    <tr className="border-t border-white/10">
                       <td className="py-2 font-medium text-slate-900">—</td>
                       <td className="py-2 text-slate-500">Vacant units</td>
                       <td className="py-2 text-slate-500">—</td>
                       <td className="py-2 text-slate-500">—</td>
                       <td className="py-2">
-                        <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200">
                           {vacant} Vacant
                         </span>
                       </td>
@@ -210,10 +210,10 @@ function PropertyPanel({
       )}
 
       {tab === "tenants" && (
-        <div className="px-5 py-6 space-y-3">
+        <div className="space-y-3 px-5 py-6">
           <button
             onClick={() => setTenantsOpen((prev) => !prev)}
-            className="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700"
+            className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-panel-2/60 px-4 py-2 text-sm font-semibold text-slate-200"
           >
             <span>Tenant list</span>
             <span>{tenantsOpen ? "–" : "+"}</span>
@@ -223,7 +223,7 @@ function PropertyPanel({
               {tenants.map((tenant) => (
                 <div
                   key={tenant.id}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                  className="rounded-2xl border border-white/10 bg-panel-2/60 px-4 py-3"
                 >
                   <p className="text-sm font-semibold text-slate-900">{tenant.name}</p>
                   <p className="text-xs text-slate-500">
@@ -254,7 +254,7 @@ function SummaryCard({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+    <div className="rounded-2xl border border-white/10 bg-panel/70 p-4">
       <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-2 text-2xl font-semibold text-slate-900">{value}</p>
       {children && <div className="mt-1">{children}</div>}

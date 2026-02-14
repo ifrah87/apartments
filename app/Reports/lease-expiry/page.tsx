@@ -17,14 +17,15 @@ function formatDate(value?: string) {
 
 export const runtime = "nodejs";
 
-export default async function LeaseExpiryPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function LeaseExpiryPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
-  const range = Number(searchParams.range || 60);
+  const range = Number(sp.range || 60);
   const report = await buildLeaseExpiryReport(
     {
-      propertyId: searchParams.property,
+      propertyId: sp.property,
       range,
-      unitType: searchParams.unitType,
+      unitType: sp.unitType,
     },
     properties,
   );
@@ -48,7 +49,7 @@ export default async function LeaseExpiryPage({ searchParams }: { searchParams: 
             Property
             <select
               name="property"
-              defaultValue={searchParams.property || ""}
+              defaultValue={sp.property || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All properties</option>
@@ -79,7 +80,7 @@ export default async function LeaseExpiryPage({ searchParams }: { searchParams: 
             Unit size
             <select
               name="unitType"
-              defaultValue={searchParams.unitType || ""}
+              defaultValue={sp.unitType || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All sizes</option>

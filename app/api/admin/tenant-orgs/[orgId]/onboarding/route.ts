@@ -11,6 +11,8 @@ import {
   getCommercialLeases,
   getTenantOrgs,
   updateCommercialCheckpoints,
+  updateCommercialDocuments,
+  updateCommercialLeases,
   updateTenantOrgs,
 } from "@/lib/commercialStore";
 
@@ -28,8 +30,8 @@ type PatchPayload = Partial<Pick<
   | "accessCardsIssued"
 >>;
 
-export async function GET(_: Request, { params }: { params: { orgId: string } }) {
-  const { orgId } = await Promise.resolve(params);
+export async function GET(_: Request, { params }: { params: Promise<{ orgId: string }> }) {
+  const { orgId } = await params;
   const [orgs, leases, checkpoints, documents] = await Promise.all([
     getTenantOrgs(),
     getCommercialLeases(),
@@ -48,8 +50,8 @@ export async function GET(_: Request, { params }: { params: { orgId: string } })
   return NextResponse.json({ org, lease, checkpoints: checkpoint, documents: docs });
 }
 
-export async function PATCH(req: Request, { params }: { params: { orgId: string } }) {
-  const { orgId } = await Promise.resolve(params);
+export async function PATCH(req: Request, { params }: { params: Promise<{ orgId: string }> }) {
+  const { orgId } = await params;
   try {
     const payload = (await req.json()) as PatchPayload;
     const updates: Partial<OnboardingCheckpointsCommercial> = {
@@ -88,6 +90,32 @@ export async function PATCH(req: Request, { params }: { params: { orgId: string 
     return NextResponse.json({ ok: true, checkpoints: updatedCheckpoint });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err?.message || "Failed to update onboarding." }, { status: 500 });
+  }
+}
+
+export async function DELETE(_: Request, { params }: { params: Promise<{ orgId: string }> }) {
+  const { orgId } = await params;
+  try {
+    const orgs = await getTenantOrgs();
+    const org = orgs.find((item) => item.id === orgId);
+    if (!org) {
+      return NextResponse.json({ ok: false, error: "Tenant org not found." }, { status: 404 });
+    }
+    if (org.status === "active") {
+      return NextResponse.json(
+        { ok: false, error: "Active tenants cannot be deleted from onboarding." },
+        { status: 400 },
+      );
+    }
+
+    await updateTenantOrgs((items) => items.filter((item) => item.id !== orgId));
+    await updateCommercialLeases((items) => items.filter((item) => item.tenantOrgId !== orgId));
+    await updateCommercialCheckpoints((items) => items.filter((item) => item.tenantOrgId !== orgId));
+    await updateCommercialDocuments((items) => items.filter((item) => item.tenantOrgId !== orgId));
+
+    return NextResponse.json({ ok: true });
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: err?.message || "Failed to delete onboarding." }, { status: 500 });
   }
 }
 

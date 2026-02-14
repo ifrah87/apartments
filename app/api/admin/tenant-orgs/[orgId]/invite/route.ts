@@ -14,8 +14,8 @@ import {
 
 export const runtime = "nodejs";
 
-export async function POST(_: Request, { params }: { params: { orgId: string } }) {
-  const { orgId } = await Promise.resolve(params);
+export async function POST(_: Request, { params }: { params: Promise<{ orgId: string }> }) {
+  const { orgId } = await params;
   const [orgs, checkpoints] = await Promise.all([getTenantOrgs(), getCommercialCheckpoints()]);
   const org = orgs.find((item) => item.id === orgId);
   if (!org) {

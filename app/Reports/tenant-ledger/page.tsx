@@ -91,20 +91,21 @@ async function fetchStatement(tenantId: string, start: string, end: string): Pro
 
 export const runtime = "nodejs";
 
-export default async function TenantLedgerPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function TenantLedgerPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const tenants = await fetchTenants();
   const properties = await fetchPropertyOptions();
   const defaults = defaultDates();
-  const propertyFilter = searchParams.property || "";
-  const unitFilter = searchParams.unit || "";
+  const propertyFilter = sp.property || "";
+  const unitFilter = sp.unit || "";
   const filteredTenants = tenants.filter((tenant) => {
     if (propertyFilter && tenant.property_id !== propertyFilter && tenant.building !== propertyFilter) return false;
     if (unitFilter && (tenant.unit || "").toLowerCase() !== unitFilter.toLowerCase()) return false;
     return true;
   });
-  const tenantId = searchParams.tenant || filteredTenants[0]?.id || "";
-  const start = searchParams.start || defaults.start;
-  const end = searchParams.end || defaults.end;
+  const tenantId = sp.tenant || filteredTenants[0]?.id || "";
+  const start = sp.start || defaults.start;
+  const end = sp.end || defaults.end;
   const statement = tenantId ? await fetchStatement(tenantId, start, end) : null;
   const exportParams = new URLSearchParams({ start, end, format: "csv" });
   const exportHref = tenantId ? `/api/tenants/${tenantId}/statement?${exportParams.toString()}` : null;
@@ -128,7 +129,7 @@ export default async function TenantLedgerPage({ searchParams }: { searchParams:
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Property</span>
             <select
               name="property"
-              defaultValue={searchParams.property || ""}
+              defaultValue={sp.property || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All properties</option>

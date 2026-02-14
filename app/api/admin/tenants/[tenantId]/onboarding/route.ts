@@ -14,8 +14,8 @@ type PatchPayload = Partial<Pick<
   "leaseUploaded" | "depositExpected" | "depositReceived" | "firstRentReceived" | "portalInviteSent"
 >>;
 
-export async function GET(_: Request, { params }: { params: { tenantId: string } }) {
-  const { tenantId } = await Promise.resolve(params);
+export async function GET(_: Request, { params }: { params: Promise<{ tenantId: string }> }) {
+  const { tenantId } = await params;
   const [tenants, leases, checkpoints, documents] = await Promise.all([
     getTenants(),
     getLeases(),
@@ -34,8 +34,8 @@ export async function GET(_: Request, { params }: { params: { tenantId: string }
   return NextResponse.json({ tenant, lease, checkpoints: checkpoint, documents: docs });
 }
 
-export async function PATCH(req: Request, { params }: { params: { tenantId: string } }) {
-  const { tenantId } = await Promise.resolve(params);
+export async function PATCH(req: Request, { params }: { params: Promise<{ tenantId: string }> }) {
+  const { tenantId } = await params;
   try {
     const payload = (await req.json()) as PatchPayload;
     const updates: Partial<OnboardingCheckpoints> = {

@@ -13,8 +13,9 @@ function defaultMonth() {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 }
 
-export default async function MonthEndPage({ searchParams }: { searchParams: SearchParams }) {
-  const month = searchParams.month || defaultMonth();
+export default async function MonthEndPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
+  const month = sp.month || defaultMonth();
   const tasks = await fetchMonthEndTasks(month);
   const completed = tasks.filter((task) => task.completed).length;
 

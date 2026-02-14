@@ -12,9 +12,10 @@ type SearchParams = {
 
 export const runtime = "nodejs";
 
-export default async function MaintenanceReportPage({ searchParams }: { searchParams: SearchParams }) {
+export default async function MaintenanceReportPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const properties = await fetchPropertyOptions();
-  const report = await buildMaintenanceReport({ propertyId: searchParams.property, status: searchParams.status }, properties);
+  const report = await buildMaintenanceReport({ propertyId: sp.property, status: sp.status }, properties);
 
   return (
     <div className="space-y-6 p-6">
@@ -35,7 +36,7 @@ export default async function MaintenanceReportPage({ searchParams }: { searchPa
             Property
             <select
               name="property"
-              defaultValue={searchParams.property || ""}
+              defaultValue={sp.property || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All properties</option>
@@ -50,7 +51,7 @@ export default async function MaintenanceReportPage({ searchParams }: { searchPa
             Status
             <select
               name="status"
-              defaultValue={searchParams.status || ""}
+              defaultValue={sp.status || ""}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
               <option value="">All</option>

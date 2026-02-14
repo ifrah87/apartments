@@ -120,7 +120,7 @@ export async function buildUnitFinancialReport(
   properties: PropertyInfo[],
 ): Promise<UnitFinancialReportResult> {
   const [units, tenants, rawPayments, expenses] = await Promise.all([
-    fetchJson<UnitInventory[]>("/api/unit-inventory"),
+    fetchJson<UnitInventory[]>("/api/unit-inventory").catch(() => [] as UnitInventory[]),
     fetchJson<TenantRecord[]>("/api/tenants"),
     fetchJson<RawPayment[]>("/api/payments"),
     fetchJson<RawExpense[]>("/api/unit-expenses").catch(() => [] as RawExpense[]),
