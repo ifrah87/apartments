@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "@/components/LanguageProvider";
-import { REPORT_GROUPS } from "@/app/Reports/reportCatalog";
+import { REPORT_GROUPS } from "@/app/reports/reportCatalog";
 import ReportList from "@/components/reports/ReportList";
 
 export default function ReportsAllPage() {

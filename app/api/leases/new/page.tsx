@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Opt = { id:number; name?:string; full_name?:string };
+type Opt = { id: number; name?: string; full_name?: string; building?: string; property_id?: string };
 
 export default function NewLeasePage() {
   const [tenants, setTenants] = useState<Opt[]>([]);

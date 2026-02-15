@@ -159,16 +159,26 @@ export async function GET(req: NextRequest) {
     const sections = scopedTenants
       .map((tenant) => {
         const tenantId = normalizeId(tenant.id);
+        const statementTenant = {
+          id: tenant.id,
+          name: tenant.name,
+          property_id: tenant.property_id ?? undefined,
+          building: tenant.building ?? undefined,
+          unit: tenant.unit ?? undefined,
+          reference: tenant.reference ?? undefined,
+          monthly_rent: tenant.monthly_rent ?? undefined,
+          due_day: tenant.due_day ?? undefined,
+        };
         const additionalCharges = chargeIndex.get(tenantId) || [];
         const { rows, totals } = createStatement({
-          tenant,
+          tenant: statementTenant,
           start,
           end,
           payments: [],
           additionalCharges,
         });
         if (!totals.charges) return "";
-        return buildInvoiceSection(tenant, rows, totals.charges, reference);
+        return buildInvoiceSection(statementTenant, rows, totals.charges, reference);
       })
       .filter(Boolean)
       .join("");

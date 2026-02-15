@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { computeStatus, nowIso, type OnboardingCheckpoints } from "@/lib/onboarding";
 import { getCheckpoints, getTenants, updateCheckpoints, updateTenants } from "@/lib/onboardingStore";
 
@@ -13,7 +13,7 @@ type Payload = Partial<Pick<
   emergencyContactPhone?: string;
 };
 
-export async function PATCH(req: Request) {
+export async function PATCH(req: NextRequest) {
   const tenantId = req.cookies.get("tenant_session")?.value;
   if (!tenantId) {
     return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });

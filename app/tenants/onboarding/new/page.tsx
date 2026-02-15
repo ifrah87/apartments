@@ -5,18 +5,12 @@ import { useRouter } from "next/navigation";
 
 const DEFAULT_FORM = {
   name: "",
-  billingPhone: "",
-  financeContactName: "",
-  facilitiesContactName: "",
-  facilitiesContactEmail: "",
   propertyId: "",
   unitIds: "",
   leaseStart: "",
   leaseEnd: "",
   rentAmount: "",
-  serviceChargeAmount: "",
   dueDay: "1",
-  graceDays: "5",
   currency: "USD",
 };
 
@@ -25,9 +19,41 @@ export default function TenantsOnboardingNewPage() {
   const [form, setForm] = useState(DEFAULT_FORM);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autoEndDate, setAutoEndDate] = useState(true);
 
   const update = (field: keyof typeof DEFAULT_FORM) => (event: React.ChangeEvent<HTMLInputElement>) => {
     setForm((prev) => ({ ...prev, [field]: event.target.value }));
+  };
+
+  const computeEndDate = (start: string, months: number) => {
+    const parts = start.split("-").map(Number);
+    if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return "";
+    const [year, month, day] = parts;
+    if (!year || !month || !day) return "";
+
+    const baseMonthIndex = month - 1 + months;
+    const targetYear = year + Math.floor(baseMonthIndex / 12);
+    const targetMonth = ((baseMonthIndex % 12) + 12) % 12;
+    const daysInTargetMonth = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+    const targetDay = Math.min(day, daysInTargetMonth);
+    const targetDate = new Date(Date.UTC(targetYear, targetMonth, targetDay));
+    return targetDate.toISOString().slice(0, 10);
+  };
+
+  const handleStartDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.value;
+    setForm((prev) => {
+      const nextEnd = autoEndDate || !prev.leaseEnd ? computeEndDate(value, 6) : prev.leaseEnd;
+      return { ...prev, leaseStart: value, leaseEnd: nextEnd };
+    });
+    if (!form.leaseEnd) {
+      setAutoEndDate(true);
+    }
+  };
+
+  const handleEndDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setAutoEndDate(false);
+    setForm((prev) => ({ ...prev, leaseEnd: event.target.value }));
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -40,10 +66,6 @@ export default function TenantsOnboardingNewPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name,
-          billingPhone: form.billingPhone || undefined,
-          financeContactName: form.financeContactName || undefined,
-          facilitiesContactName: form.facilitiesContactName || undefined,
-          facilitiesContactEmail: form.facilitiesContactEmail || undefined,
           propertyId: form.propertyId,
           unitIds: form.unitIds
             .split(",")
@@ -52,9 +74,7 @@ export default function TenantsOnboardingNewPage() {
           leaseStart: form.leaseStart,
           leaseEnd: form.leaseEnd,
           rentAmount: Number(form.rentAmount || 0),
-          serviceChargeAmount: Number(form.serviceChargeAmount || 0) || undefined,
           dueDay: Number(form.dueDay || 1),
-          graceDays: Number(form.graceDays || 0),
           currency: form.currency || "USD",
         }),
       });
@@ -90,31 +110,6 @@ export default function TenantsOnboardingNewPage() {
             />
             <input
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              placeholder="Billing phone (optional)"
-              value={form.billingPhone}
-              onChange={update("billingPhone")}
-            />
-            <input
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              placeholder="Finance contact name"
-              value={form.financeContactName}
-              onChange={update("financeContactName")}
-            />
-            <input
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              placeholder="Facilities contact name"
-              value={form.facilitiesContactName}
-              onChange={update("facilitiesContactName")}
-            />
-            <input
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              placeholder="Facilities contact email"
-              type="email"
-              value={form.facilitiesContactEmail}
-              onChange={update("facilitiesContactEmail")}
-            />
-            <input
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
               placeholder="Property ID"
               value={form.propertyId}
               onChange={update("propertyId")}
@@ -131,14 +126,14 @@ export default function TenantsOnboardingNewPage() {
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
               type="date"
               value={form.leaseStart}
-              onChange={update("leaseStart")}
+              onChange={handleStartDateChange}
               required
             />
             <input
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
               type="date"
               value={form.leaseEnd}
-              onChange={update("leaseEnd")}
+              onChange={handleEndDateChange}
               required
             />
             <input
@@ -152,29 +147,12 @@ export default function TenantsOnboardingNewPage() {
             />
             <input
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              placeholder="Service charge amount"
-              type="number"
-              min="0"
-              value={form.serviceChargeAmount}
-              onChange={update("serviceChargeAmount")}
-            />
-            <input
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
               placeholder="Due day"
               type="number"
               min="1"
               max="28"
               value={form.dueDay}
               onChange={update("dueDay")}
-              required
-            />
-            <input
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              placeholder="Grace days"
-              type="number"
-              min="0"
-              value={form.graceDays}
-              onChange={update("graceDays")}
               required
             />
             <input

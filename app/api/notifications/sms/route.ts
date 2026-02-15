@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { sendSms } from "@/lib/twilio";
-import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
+import { normalizeId } from "@/lib/reports/tenantStatement";
 import { COMPANY_NAME, COMPANY_PHONE } from "@/lib/constants/branding";
-import { tenantsRepo } from "@/lib/repos";
+import { tenantsRepo, type TenantRecord } from "@/lib/repos";
 
 type SmsRequest = {
   tenantId?: string;
@@ -45,7 +45,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: false, error: "Tenant not found." }, { status: 404 });
       }
       if (!targetPhone) {
-        targetPhone = normalizePhone(tenant.phone);
+        const tenantWithPhone = tenant as TenantRecord & { phone?: string | null };
+        targetPhone = normalizePhone(tenantWithPhone.phone ?? undefined);
       }
       if (!messageBody && template === "late_rent") {
         messageBody = buildLateRentMessage(tenant);

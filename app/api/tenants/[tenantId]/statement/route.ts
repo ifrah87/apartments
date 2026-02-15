@@ -110,8 +110,19 @@ export async function GET(
 
     const additionalCharges: ChargeEntry[] = [];
 
+    const statementTenant = {
+      id: tenant.id,
+      name: tenant.name,
+      property_id: tenant.property_id ?? undefined,
+      building: tenant.building ?? undefined,
+      unit: tenant.unit ?? undefined,
+      reference: tenant.reference ?? undefined,
+      monthly_rent: tenant.monthly_rent ?? undefined,
+      due_day: tenant.due_day ?? undefined,
+    };
+
     const { rows, totals } = createStatement({
-      tenant,
+      tenant: statementTenant,
       start,
       end,
       payments: [...payments, ...manualEntries],

@@ -44,6 +44,12 @@ export default function OnboardingWizardPage() {
     refresh();
   }, [orgId]);
 
+  useEffect(() => {
+    if (data?.org?.status === "active") {
+      router.push("/tenants");
+    }
+  }, [data?.org?.status, router]);
+
   const checkpoints = data?.checkpoints;
   const completedCount = useMemo(() => {
     if (!checkpoints) return 0;

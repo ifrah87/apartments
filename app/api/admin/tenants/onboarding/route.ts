@@ -24,7 +24,6 @@ type CreatePayload = {
   leaseEnd: string;
   rentAmount: number;
   dueDay: number;
-  graceDays: number;
   currency: string;
 };
 
@@ -82,7 +81,7 @@ export async function POST(req: Request) {
       endDate: payload.leaseEnd,
       rentAmount: Number(payload.rentAmount || 0),
       dueDay: Number(payload.dueDay || 1),
-      graceDays: Number(payload.graceDays || 0),
+      graceDays: 0,
       currency: payload.currency || "USD",
     };
 

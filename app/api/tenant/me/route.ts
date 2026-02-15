@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getCheckpoints, getDocuments, getLeases, getTenants } from "@/lib/onboardingStore";
 
 export const runtime = "nodejs";
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   const tenantId = req.cookies.get("tenant_session")?.value;
   if (!tenantId) {
     return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });

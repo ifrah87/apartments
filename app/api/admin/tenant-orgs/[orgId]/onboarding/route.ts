@@ -15,6 +15,7 @@ import {
   updateCommercialLeases,
   updateTenantOrgs,
 } from "@/lib/commercialStore";
+import { tenantsRepo } from "@/lib/repos";
 
 export const runtime = "nodejs";
 
@@ -54,6 +55,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ orgId:
   const { orgId } = await params;
   try {
     const payload = (await req.json()) as PatchPayload;
+    const leases = await getCommercialLeases();
     const updates: Partial<OnboardingCheckpointsCommercial> = {
       leaseUploaded: payload.leaseUploaded,
       depositOrGuaranteeConfirmed: payload.depositOrGuaranteeConfirmed,
@@ -79,13 +81,32 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ orgId:
       return NextResponse.json({ ok: false, error: "Onboarding record not found." }, { status: 404 });
     }
 
+    let updatedOrg: TenantOrg | null = null;
+    let nextStatus: TenantOrg["status"] | null = null;
     await updateTenantOrgs((items) =>
       items.map((org) => {
         if (org.id !== orgId) return org;
-        const nextStatus = computeCommercialStatus(org.status, updatedCheckpoint!);
-        return { ...org, status: nextStatus, updatedAt: nowIso() } as TenantOrg;
+        nextStatus = computeCommercialStatus(org.status, updatedCheckpoint!);
+        updatedOrg = { ...org, status: nextStatus, updatedAt: nowIso() } as TenantOrg;
+        return updatedOrg;
       }),
     );
+
+    if (updatedOrg && nextStatus === "active") {
+      const lease = leases.find((item) => item.tenantOrgId === updatedOrg?.id);
+      await tenantsRepo.upsertTenants([
+        {
+          id: updatedOrg.id,
+          name: updatedOrg.name,
+          building: updatedOrg.propertyId ?? undefined,
+          property_id: updatedOrg.propertyId ?? undefined,
+          unit: updatedOrg.unitIds?.join(", ") || undefined,
+          monthly_rent: lease?.rentAmount ?? undefined,
+          due_day: lease?.dueDay ?? undefined,
+          reference: updatedOrg.id,
+        },
+      ]);
+    }
 
     return NextResponse.json({ ok: true, checkpoints: updatedCheckpoint });
   } catch (err: any) {
