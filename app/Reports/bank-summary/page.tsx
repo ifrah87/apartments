@@ -4,7 +4,7 @@ import UnreconciledTable from "@/components/UnreconciledTable";
 import { getTransactionCategories } from "@/lib/reports/categoryStore";
 import BankStatementExporter from "@/components/BankStatementExporter";
 
-type SearchParams = { start?: string; end?: string };
+type SearchParams = { start?: string; end?: string; view?: string };
 
 export const runtime = "nodejs";
 

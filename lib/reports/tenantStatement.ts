@@ -159,7 +159,7 @@ export function createStatement({ tenant, start, end, payments, additionalCharge
       balance += row.amount;
       return {
         date: row.date,
-        description: row.description,
+        description: row.description || "Charge",
         charge: row.amount,
         payment: 0,
         balance: Number(balance.toFixed(2)),
@@ -170,7 +170,7 @@ export function createStatement({ tenant, start, end, payments, additionalCharge
     balance -= row.amount;
     return {
       date: row.date,
-      description: row.description,
+      description: row.description || "Payment received",
       charge: 0,
       payment: row.amount,
       balance: Number(balance.toFixed(2)),

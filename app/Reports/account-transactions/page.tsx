@@ -10,7 +10,7 @@ export default async function AccountTransactionsPage() {
   const [transactions, categoryMap] = await Promise.all([fetchLedger(), getTransactionCategories()]);
   const rows = transactions.map((txn, idx) => ({
     ...txn,
-    id: String(txn.id ?? `${txn.date}-${txn.description}-${idx}`),
+    id: `${txn.date}-${(txn as any).description ?? (txn as any).particulars ?? "txn"}-${idx}`,
   }));
 
   return (

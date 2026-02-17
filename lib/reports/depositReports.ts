@@ -100,7 +100,7 @@ export async function buildDepositReport(filters: DepositFilters, properties: Pr
     summaryMap.set(id, entry);
   });
 
-  const rows: DepositReportRow[] = tenants
+  const rows = tenants
     .map((tenant) => {
       const tenantId = normalizeId(tenant.id);
       const summary = summaryMap.get(tenantId);
@@ -128,7 +128,7 @@ export async function buildDepositReport(filters: DepositFilters, properties: Pr
         lastActivityType: activity?.type,
       };
     })
-    .filter((row): row is DepositReportRow => Boolean(row))
+    .filter((row): row is NonNullable<typeof row> => row !== null)
     .sort((a, b) => (a.propertyName || "").localeCompare(b.propertyName || "") || (a.unit || "").localeCompare(b.unit || ""));
 
   const totals = rows.reduce(
@@ -148,7 +148,7 @@ export async function buildDepositReport(filters: DepositFilters, properties: Pr
     if (tenant) tenantIndex.set(row.tenantId, { tenant, propertyName: row.propertyName });
   });
 
-  const filteredTransactions: DepositTransactionRow[] = transactions
+  const filteredTransactions = transactions
     .map((txn) => {
       const tenantId = normalizeId(txn.tenant_id);
       const tenantInfo = tenantIndex.get(tenantId);
@@ -167,7 +167,7 @@ export async function buildDepositReport(filters: DepositFilters, properties: Pr
         note: txn.note,
       };
     })
-    .filter((row): row is DepositTransactionRow => Boolean(row))
+    .filter((row): row is NonNullable<typeof row> => row !== null)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   return {

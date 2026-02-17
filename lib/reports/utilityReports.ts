@@ -70,7 +70,7 @@ export async function buildUtilityChargesReport(filters: UtilityFilters, propert
   const end = filters.end ? new Date(filters.end) : undefined;
   const propertyMap = new Map(properties.map((property) => [property.property_id.toLowerCase(), property.name || property.property_id]));
 
-  const rows: UtilityChargeRow[] = charges
+  const rows = charges
     .map((charge) => {
       const category = (charge.category || "").toLowerCase();
       const communal = String(charge.communal || "").toLowerCase() === "true";
@@ -104,7 +104,7 @@ export async function buildUtilityChargesReport(filters: UtilityFilters, propert
         communal,
       };
     })
-    .filter((row): row is UtilityChargeRow => Boolean(row))
+    .filter((row): row is NonNullable<typeof row> => row !== null)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const totals = rows.reduce(

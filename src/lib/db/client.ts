@@ -1,4 +1,4 @@
-import { Pool, type QueryResult } from "pg";
+import { Pool, type QueryResult, type QueryResultRow } from "pg";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -32,7 +32,7 @@ export function getPool() {
   return globalThis.__orfane_pgPool;
 }
 
-export async function query<T = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
+export async function query<T extends QueryResultRow = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
   const pool = getPool();
   return pool.query<T>(text, params);
 }

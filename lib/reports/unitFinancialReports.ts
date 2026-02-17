@@ -147,7 +147,7 @@ export async function buildUnitFinancialReport(
     tenantIndex.set(unitKey(tenant.property_id || tenant.building, tenant.unit), tenant);
   });
 
-  const rows: UnitFinancialRow[] = units
+  const rows = units
     .map((unit) => {
       const propertyId = unit.property_id || "";
       if (propertyFilter && propertyId.toLowerCase() !== propertyFilter) return null;
@@ -173,7 +173,7 @@ export async function buildUnitFinancialReport(
         status: tenant ? "Occupied" : (unit.status || "Vacant"),
       };
     })
-    .filter((row): row is UnitFinancialRow => Boolean(row))
+    .filter((row): row is NonNullable<typeof row> => row !== null)
     .sort((a, b) => (a.propertyName || "").localeCompare(b.propertyName || "") || (a.unit || "").localeCompare(b.unit || ""));
 
   const totals = rows.reduce(

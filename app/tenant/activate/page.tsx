@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function TenantActivatePage() {
+function TenantActivateContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
@@ -39,5 +39,20 @@ export default function TenantActivatePage() {
         <p className="text-sm text-slate-600">One moment while we activate your account.</p>
       )}
     </div>
+  );
+}
+
+export default function TenantActivatePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-xl space-y-3">
+          <h1 className="text-2xl font-semibold text-slate-900">Activating your portal</h1>
+          <p className="text-sm text-slate-600">One moment while we activate your account.</p>
+        </div>
+      }
+    >
+      <TenantActivateContent />
+    </Suspense>
   );
 }

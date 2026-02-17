@@ -145,9 +145,9 @@ export async function buildBalanceSheet(filters: AccountingFilters = {}): Promis
   const rows = await fetchJournalEntries();
   const lines = normalizeEntries(rows, filters);
   const balances = accumulateAccountBalances(lines);
-  const assets = [];
-  const liabilities = [];
-  const equity = [];
+  const assets: BalanceSheetSection["rows"] = [];
+  const liabilities: BalanceSheetSection["rows"] = [];
+  const equity: BalanceSheetSection["rows"] = [];
 
   balances.forEach((entry, accountId) => {
     const balance = balanceForCategory(entry, entry.category);

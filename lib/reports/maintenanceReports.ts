@@ -81,7 +81,7 @@ export async function buildMaintenanceReport(filters: MaintenanceFilters, proper
   const propertyFilter = (filters.propertyId || "").toLowerCase();
   const statusFilter = (filters.status || "").toLowerCase();
 
-  const rows: MaintenanceRow[] = tickets
+  const rows = tickets
     .map((ticket) => {
       const propertyId = ticket.property_id || "";
       if (propertyFilter && propertyId.toLowerCase() !== propertyFilter) return null;
@@ -103,7 +103,7 @@ export async function buildMaintenanceReport(filters: MaintenanceFilters, proper
         description: ticket.description,
       };
     })
-    .filter((row): row is MaintenanceRow => Boolean(row))
+    .filter((row): row is NonNullable<typeof row> => row !== null)
     .sort((a, b) => {
       if (a.status === b.status) {
         if (a.priority === b.priority) {

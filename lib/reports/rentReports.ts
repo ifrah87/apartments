@@ -6,6 +6,8 @@ export type RentSummary = {
   overdueTotal: number;
   upcomingPayments: number;
   upcomingTotal: number;
+  atRiskTenants: number;
+  atRiskBalance: number;
 };
 
 export async function calculateRentSummary(): Promise<RentSummary> {
@@ -64,6 +66,8 @@ export async function calculateRentSummary(): Promise<RentSummary> {
     overdueTotal,
     upcomingPayments: upcoming.length,
     upcomingTotal,
+    atRiskTenants: 0,
+    atRiskBalance: 0,
   };
 }
 

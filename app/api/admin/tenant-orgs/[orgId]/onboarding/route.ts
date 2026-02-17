@@ -81,18 +81,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ orgId:
       return NextResponse.json({ ok: false, error: "Onboarding record not found." }, { status: 404 });
     }
 
-    let updatedOrg: TenantOrg | null = null;
-    let nextStatus: TenantOrg["status"] | null = null;
-    await updateTenantOrgs((items) =>
+    const updatedOrgs = await updateTenantOrgs((items) =>
       items.map((org) => {
         if (org.id !== orgId) return org;
-        nextStatus = computeCommercialStatus(org.status, updatedCheckpoint!);
-        updatedOrg = { ...org, status: nextStatus, updatedAt: nowIso() } as TenantOrg;
-        return updatedOrg;
+        const nextStatus = computeCommercialStatus(org.status, updatedCheckpoint!);
+        return { ...org, status: nextStatus, updatedAt: nowIso() } as TenantOrg;
       }),
     );
 
-    if (updatedOrg && nextStatus === "active") {
+    const updatedOrg = updatedOrgs.find((org) => org.id === orgId) ?? null;
+
+    if (updatedOrg && updatedOrg.status === "active") {
       const lease = leases.find((item) => item.tenantOrgId === updatedOrg?.id);
       await tenantsRepo.upsertTenants([
         {

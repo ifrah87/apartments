@@ -161,6 +161,17 @@ function buildChargeIndex(records: ChargeRecord[]): Map<string, ChargeEntry[]> {
   return map;
 }
 
+function buildPaymentEntries(payments: NormalizedPayment[]): PaymentEntry[] {
+  return payments
+    .filter((payment) => payment.date && payment.amount)
+    .map((payment) => ({
+      date: payment.date,
+      amount: payment.amount,
+      description: payment.description,
+      source: payment.source,
+    }));
+}
+
 function isWithinRange(dateString: string, start: Date, end: Date) {
   const value = new Date(dateString);
   return value >= start && value <= end;
@@ -463,7 +474,7 @@ export async function buildRentChargeReport(
   const propertyFilter = (filters.propertyId || "").toLowerCase();
   const textFilter = (filters.query || "").toLowerCase();
 
-  const rows: RentChargeRow[] = ctx.tenants
+  const rows = ctx.tenants
     .map((tenant) => {
       if (propertyFilter && (tenant.property_id || "").toLowerCase() !== propertyFilter) return null;
       if (textFilter) {
@@ -490,7 +501,7 @@ export async function buildRentChargeReport(
         notes: `Annual uplift ${(increasePct * 100).toFixed(1)}%`,
       };
     })
-    .filter((row): row is RentChargeRow => Boolean(row))
+    .filter((row): row is NonNullable<typeof row> => row !== null)
     .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate));
 
   const summary = {

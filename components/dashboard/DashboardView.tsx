@@ -18,13 +18,20 @@ type BankSummary = {
   lastUpdatedISO: string | null;
 };
 
+type AtRiskRow = OverdueRow & {
+  dueDate?: string;
+  paidDate?: string;
+  lateMonthsCount?: number;
+  lateMonthsWindow?: number;
+};
+
 type Props = {
   rent: RentSummary;
   bank: BankSummary;
   ledgerLink: string;
   cashflowSeries: CashflowPoint[];
   overdueRows: OverdueRow[];
-  atRiskRows: OverdueRow[];
+  atRiskRows: AtRiskRow[];
   recentIn: Txn[];
   recentOut: Txn[];
   occupancy: OccupancySummary;

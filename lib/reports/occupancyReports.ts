@@ -59,6 +59,11 @@ export type OccupancySummary = {
   averageDaysVacant: number;
 };
 
+export type TurnoverSummary = {
+  turnoverRate: number;
+  moveOuts: number;
+};
+
 async function fetchJson<T>(path: string): Promise<T> {
   const baseUrl = await getRequestBaseUrl();
   const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
@@ -131,14 +136,15 @@ export async function buildOccupancyReport(filters: OccupancyFilters, properties
     tenantMap.set(unitKey(tenant.property_id || tenant.building, tenant.unit), tenant);
   });
 
-  const rows: OccupancyRow[] = units
+  const rows = units
     .map((unit) => {
       const propertyId = unit.property_id || "";
       if (propertyFilter && propertyId.toLowerCase() !== propertyFilter) return null;
       if (bedsFilter && String(unit.beds || "").toLowerCase() !== bedsFilter.toLowerCase()) return null;
       const turnoverRecord = turnoverMap.get(unitKey(propertyId, unit.unit));
       const tenant = tenantMap.get(unitKey(propertyId, unit.unit));
-      const status = tenant ? "Occupied" : toTitle(unit.status) === "Occupied" ? "Occupied" : "Vacant";
+      const status: OccupancyRow["status"] =
+        tenant ? "Occupied" : toTitle(unit.status) === "Occupied" ? "Occupied" : "Vacant";
       if (statusFilter === "occupied" && status !== "Occupied") return null;
       if (statusFilter === "vacant" && status !== "Vacant") return null;
       const monthlyRent = toNumber(unit.rent);
@@ -159,7 +165,7 @@ export async function buildOccupancyReport(filters: OccupancyFilters, properties
         notes: turnoverRecord?.notes,
       };
     })
-    .filter((row): row is OccupancyRow => Boolean(row))
+    .filter((row): row is NonNullable<typeof row> => row !== null)
     .sort((a, b) => (a.propertyName || "").localeCompare(b.propertyName || "") || (a.unit || "").localeCompare(b.unit || ""));
 
   const totalUnits = rows.length;
