@@ -35,7 +35,7 @@ export default async function BankSummaryPage({ searchParams }: { searchParams: 
   const usedCategoryIds = new Set(Object.keys(categories || {}));
   const unreconciledRows = statementLines
     .filter(isUnreconciled)
-    .filter((line) => !usedCategoryIds.has(String(line.id ?? `${line.date}-${line.description}`)));
+    .filter((line) => !usedCategoryIds.has(`${line.date}-${line.description}-${line.amount}`));
   const showUnreconciledOnly = sp.view === "unreconciled";
   const visibleLines = showUnreconciledOnly ? unreconciledRows : statementLines;
 
@@ -110,7 +110,7 @@ export default async function BankSummaryPage({ searchParams }: { searchParams: 
           <BankStatementExporter
             fileName={`bank-statement-${start}-to-${end}`}
             rows={visibleLines.map((line) => ({
-              id: String(line.id ?? `${line.date}-${line.description}`),
+              id: `${line.date}-${line.description}-${line.amount}`,
               date: line.date,
               description: line.description || "",
               reference: line.reference || "",
@@ -145,7 +145,7 @@ export default async function BankSummaryPage({ searchParams }: { searchParams: 
                 <td className="px-6 py-3 text-right font-semibold text-slate-900">${formatNumber(openingBalance)}</td>
               </tr>
               {visibleLines.map((line) => (
-                <tr key={`${line.date}-${line.description}`} className="border-t border-slate-100">
+                <tr key={`${line.date}-${line.description}-${line.amount}`} className="border-t border-slate-100">
                   <td className="px-6 py-2 text-slate-600">{formatDisplayDate(line.date)}</td>
                   <td className="px-6 py-2 text-slate-900">{line.description || "—"}</td>
                   <td className="px-6 py-2 text-slate-500">{line.reference || "—"}</td>
@@ -167,7 +167,7 @@ export default async function BankSummaryPage({ searchParams }: { searchParams: 
       {unreconciledRows.length > 0 && (
         <UnreconciledTable
           rows={unreconciledRows.map((line) => ({
-            id: String(line.id ?? `${line.date}-${line.description}`),
+            id: `${line.date}-${line.description}-${line.amount}`,
             date: line.date,
             description: line.description || "",
             amount: line.amount,
