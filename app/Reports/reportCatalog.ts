@@ -35,6 +35,7 @@ export const REPORT_ROUTES = {
   deposits: "/reports/deposits",
   occupancy: "/reports/occupancy",
   leaseExpiry: "/reports/lease-expiry",
+  leaseStatements: "/reports/lease-statements",
   tenantLedger: "/reports/tenant-ledger",
   unitFinancials: "/reports/unit-financials",
   maintenance: "/reports/maintenance",
@@ -82,6 +83,7 @@ export const REPORT_GROUPS = [
     items: [
       { key: "occupancy", href: REPORT_ROUTES.occupancy, Icon: Users2 },
       { key: "leaseExpiry", href: REPORT_ROUTES.leaseExpiry, Icon: KeyRound },
+      { key: "leaseStatements", href: REPORT_ROUTES.leaseStatements, Icon: FileText },
       { key: "tenantLedger", href: REPORT_ROUTES.tenantLedger, Icon: Users2 },
       { key: "unitFinancials", href: REPORT_ROUTES.unitFinancials, Icon: CircleDollarSign },
       { key: "maintenance", href: REPORT_ROUTES.maintenance, Icon: Wrench },

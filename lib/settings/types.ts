@@ -81,6 +81,13 @@ export type ExpenseCategoriesSettings = {
   categories: ExpenseCategory[];
 };
 
+export type LeaseTemplateSettings = {
+  mode: "html" | "pdf" | "url";
+  htmlTemplate: string;
+  pdfDataUrl: string;
+  externalUrl: string;
+};
+
 export type SettingsPayload =
   | GeneralSettings
   | BrandingSettings
@@ -88,4 +95,5 @@ export type SettingsPayload =
   | PropertyTypesSettings
   | PaymentMethodsSettings
   | InitialReadingsSettings
-  | ExpenseCategoriesSettings;
+  | ExpenseCategoriesSettings
+  | LeaseTemplateSettings;

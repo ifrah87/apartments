@@ -36,7 +36,6 @@ export const TRANSLATIONS: Record<Language, TranslationTree> = {
         sop: "SOP",
         houseRules: "House Rules",
         reports: "Reports & Analytics",
-        integrations: "Integrations",
         contacts: "Contacts",
       },
       bankSync: "Bank sync:",
@@ -345,6 +344,7 @@ export const TRANSLATIONS: Record<Language, TranslationTree> = {
           items: {
             occupancy: { name: "Vacancy & Occupancy", desc: "Track unit availability & days vacant." },
             leaseExpiry: { name: "Lease Expiry", desc: "Leases expiring soon." },
+            leaseStatements: { name: "Lease Statements", desc: "Statements and exports for each lease." },
             tenantLedger: { name: "Tenant Ledger", desc: "All tenant payments & notes." },
             unitFinancials: { name: "Unit Financials", desc: "Income vs expense per unit." },
             maintenance: { name: "Maintenance", desc: "Tickets & resolution stats." },
@@ -360,93 +360,6 @@ export const TRANSLATIONS: Record<Language, TranslationTree> = {
     skyCafe: {
       title: "Sky Café",
       subtitle: "Welcome to the Sky Café dashboard.",
-    },
-    integrations: {
-      title: "Data Integrations",
-      subtitle: "Download the latest CSV exports powering this workspace.",
-      updatedLabel: "Last modified",
-      sizeLabel: "File size",
-      statusLabel: "Status",
-      checkedLabel: "Checked at",
-      statusActive: "Active · file found",
-      statusMissing: "Missing · file not found",
-      download: "Download CSV",
-      empty: "No CSV files found.",
-      filenameLabel: "File name",
-      files: {
-        bank_all_buildings_simple: {
-          label: "Bank transactions (simple)",
-          desc: "Feeds ledger, payments, and tenant statements.",
-        },
-        bank_balances: {
-          label: "Daily bank balances",
-          desc: "Used for dashboard balance and bank summary.",
-        },
-        bank_import_summary: {
-          label: "Bank import summary",
-          desc: "Supports reconciliation and matching reports.",
-        },
-        bank_reconciliation_items: {
-          label: "Bank reconciliation items",
-          desc: "Lists unreconciled items for accounting reports.",
-        },
-        deposit_transactions: {
-          label: "Deposit transactions",
-          desc: "Used in deposit flow and reporting.",
-        },
-        journal_entries: {
-          label: "Journal entries",
-          desc: "Feeds accounting export endpoints.",
-        },
-        kpi_dashboard: {
-          label: "KPI dashboard metrics",
-          desc: "Source for the KPI reporting widgets.",
-        },
-        maintenance_tickets: {
-          label: "Maintenance tickets",
-          desc: "Used in maintenance report/API.",
-        },
-        month_end_tasks: {
-          label: "Month-end tasks",
-          desc: "Drives the month-end checklist status.",
-        },
-        monthly_owner_summary: {
-          label: "Monthly owner summary",
-          desc: "Feeds owner statement exports.",
-        },
-        properties_all_buildings: {
-          label: "Properties master list",
-          desc: "Backs the properties page/API.",
-        },
-        tenant_charges: {
-          label: "Tenant charges",
-          desc: "Used in tenant statements.",
-        },
-        tenant_deposits: {
-          label: "Tenant deposits",
-          desc: "Feeds deposit balance APIs.",
-        },
-        tenants_all_buildings_simple_unique: {
-          label: "Tenants master list",
-          desc: "Backs tenant portal and reports.",
-        },
-        unit_expenses: {
-          label: "Unit expenses",
-          desc: "Used in expense/unit reporting.",
-        },
-        unit_inventory: {
-          label: "Unit inventory",
-          desc: "Feeds unit availability APIs.",
-        },
-        unit_turnover: {
-          label: "Unit turnover",
-          desc: "Used in turnover reporting.",
-        },
-        units_master_66: {
-          label: "Units master",
-          desc: "Backing data for units endpoint.",
-        },
-      },
     },
   },
   so: {
@@ -478,7 +391,6 @@ export const TRANSLATIONS: Record<Language, TranslationTree> = {
         sop: "Hawlgal",
         houseRules: "Xeerarka Guriga",
         reports: "Warbixinno & Falanqayn",
-        integrations: "Isdhexgal",
         contacts: "Xiriirrada",
       },
       bankSync: "Isku-dubarid Bangi:",
@@ -782,6 +694,7 @@ export const TRANSLATIONS: Record<Language, TranslationTree> = {
               desc: "La soco diyaarinta unugyada & maalmaha bannaan.",
             },
             leaseExpiry: { name: "Dhaca Heshiiska", desc: "Heshiisyada dhici doona dhawaan." },
+            leaseStatements: { name: "Bayaannada Heshiisyada", desc: "Warbixinno iyo dhoofin heshiis kasta." },
             tenantLedger: {
               name: "Ledger-ka Deganaha",
               desc: "Lacagaha iyo qoraallada degane kasta.",
@@ -806,93 +719,6 @@ export const TRANSLATIONS: Record<Language, TranslationTree> = {
     skyCafe: {
       title: "Sky Café",
       subtitle: "Ku soo dhawoow barnaamijka Sky Café.",
-    },
-    integrations: {
-      title: "Isdhexgalka Xogta",
-      subtitle: "Soo dejiso CSV-yadii ugu dambeeyay ee quudiya dashboard-kan.",
-      updatedLabel: "La cusboonaysiiyay",
-      sizeLabel: "Cabbirka faylka",
-      statusLabel: "Xaalad",
-      checkedLabel: "La hubiyay",
-      statusActive: "Firfircoon · faylka waa la helay",
-      statusMissing: "Maqan · faylka lama helin",
-      download: "Soo dejiso CSV",
-      empty: "CSV lagama helin galkaan.",
-      filenameLabel: "Magaca faylka",
-      files: {
-        bank_all_buildings_simple: {
-          label: "Xawaaladaha bangiga (fudud)",
-          desc: "Waxay quudiyaan ledger-ka, lacagaha, iyo bayaannada deganaha.",
-        },
-        bank_balances: {
-          label: "Dheelliga bangiga maalin kasta",
-          desc: "Looga faa'iideysto dashboard-ka iyo warbixinta bangiga.",
-        },
-        bank_import_summary: {
-          label: "Kooban soo dejinta bangiga",
-          desc: "Waxay taageertaa dib-u-heshiisiinta iyo isbarbardhigga.",
-        },
-        bank_reconciliation_items: {
-          label: "Qodobada aan la isu keenin",
-          desc: "Looga baahan yahay warbixinaha xisaabaadka.",
-        },
-        deposit_transactions: {
-          label: "Xawaaladaha amaanada",
-          desc: "Waxay quudiyaan socodka amanada iyo warbixinaha.",
-        },
-        journal_entries: {
-          label: "Diiwaannada buugga",
-          desc: "Waxay taageertaa dhoofinta xisaabaadka.",
-        },
-        kpi_dashboard: {
-          label: "Tusmooyinka KPI",
-          desc: "Xogta dashboard-ka KPI.",
-        },
-        maintenance_tickets: {
-          label: "Tigidhada dayactirka",
-          desc: "Looga isticmaalo warbixinta dayactirka.",
-        },
-        month_end_tasks: {
-          label: "Hawlaha dhammaadka bisha",
-          desc: "Waxay maamulaan liiska hubinta bisha.",
-        },
-        monthly_owner_summary: {
-          label: "Kooban bille mulkiile",
-          desc: "Waxay quudiyaan bayaannada mulkiilayaasha.",
-        },
-        properties_all_buildings: {
-          label: "Liiska hantida",
-          desc: "Waxay taageertaa bogga iyo API-ga hantida.",
-        },
-        tenant_charges: {
-          label: "Eedeymaha deganaha",
-          desc: "Looga baahan yahay bayaannada deganaha.",
-        },
-        tenant_deposits: {
-          label: "Amanada deganaha",
-          desc: "Waxay quudiyaan warbixinta amanada.",
-        },
-        tenants_all_buildings_simple_unique: {
-          label: "Liiska deganayaasha",
-          desc: "Waxay taageertaa albaabka deganaha iyo warbixinaha.",
-        },
-        unit_expenses: {
-          label: "Kharashaadka unugyada",
-          desc: "Looga isticmaalo warbixinta kharashaadka unugyada.",
-        },
-        unit_inventory: {
-          label: "Liiska unugyada",
-          desc: "Waxay quudiyaan API-ga diyaarinta unugyada.",
-        },
-        unit_turnover: {
-          label: "Isbeddelka unugyada",
-          desc: "Looga isticmaalo warbixinta isbeddelka.",
-        },
-        units_master_66: {
-          label: "Masters-ka unugyada",
-          desc: "Xogta aasaaska ee xogta unugyada.",
-        },
-      },
     },
   },
 } as const;

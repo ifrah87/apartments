@@ -6,6 +6,7 @@ import type {
   PaymentMethodsSettings,
   InitialReadingsSettings,
   ExpenseCategoriesSettings,
+  LeaseTemplateSettings,
 } from "./types";
 
 export const DEFAULT_GENERAL: GeneralSettings = {
@@ -121,4 +122,49 @@ export const DEFAULT_EXPENSE_CATEGORIES: ExpenseCategoriesSettings = {
       showOnPurchases: true,
     },
   ],
+};
+
+export const DEFAULT_LEASE_TEMPLATE: LeaseTemplateSettings = {
+  mode: "html",
+  htmlTemplate: `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Lease Agreement</title>
+    <style>
+      body { font-family: "Inter", Arial, sans-serif; color: #0f172a; margin: 40px; }
+      h1 { font-size: 24px; margin-bottom: 8px; }
+      h2 { font-size: 16px; margin-top: 24px; }
+      .muted { color: #475569; font-size: 12px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <h1>Lease Agreement</h1>
+    <p class="muted">Date: {{today}}</p>
+    <h2>Tenant Details</h2>
+    <table>
+      <tr><th>Property</th><td>{{property}}</td></tr>
+      <tr><th>Tenant Name</th><td>{{tenantName}}</td></tr>
+      <tr><th>Tenant Phone</th><td>{{tenantPhone}}</td></tr>
+      <tr><th>Unit</th><td>{{unit}}</td></tr>
+      <tr><th>Status</th><td>{{status}}</td></tr>
+    </table>
+
+    <h2>Lease Terms</h2>
+    <table>
+      <tr><th>Rent</th><td>{{rent}}</td></tr>
+      <tr><th>Deposit</th><td>{{deposit}}</td></tr>
+      <tr><th>Billing Cycle</th><td>{{cycle}}</td></tr>
+      <tr><th>Start Date</th><td>{{startDate}}</td></tr>
+      <tr><th>End Date</th><td>{{endDate}}</td></tr>
+      <tr><th>Lease Duration</th><td>{{leaseDuration}}</td></tr>
+    </table>
+
+    <p class="muted">This template can be edited in Settings → Lease Template.</p>
+  </body>
+</html>`,
+  pdfDataUrl: "",
+  externalUrl: "",
 };

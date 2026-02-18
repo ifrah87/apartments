@@ -12,6 +12,7 @@ import type {
   InitialReadingsSettings,
   ExpenseCategoriesSettings,
   ExpenseCategory,
+  LeaseTemplateSettings,
   SettingsPayload,
 } from "./types";
 import {
@@ -22,6 +23,7 @@ import {
   DEFAULT_PAYMENT_METHODS,
   DEFAULT_INITIAL_READINGS,
   DEFAULT_EXPENSE_CATEGORIES,
+  DEFAULT_LEASE_TEMPLATE,
 } from "./defaults";
 
 type NormalizeResult<T> = { value: T; errors: Record<string, string> };
@@ -34,6 +36,7 @@ const SETTINGS_META = {
   "payment-methods": { key: "settings.paymentMethods", defaults: DEFAULT_PAYMENT_METHODS },
   "initial-readings": { key: "settings.initialReadings", defaults: DEFAULT_INITIAL_READINGS },
   "expense-categories": { key: "settings.expenseCategories", defaults: DEFAULT_EXPENSE_CATEGORIES },
+  "lease-template": { key: "settings.leaseTemplate", defaults: DEFAULT_LEASE_TEMPLATE },
 } as const;
 
 export type SettingsKey = keyof typeof SETTINGS_META;
@@ -254,6 +257,34 @@ function normalizeExpenseCategories(input: unknown, strict: boolean): NormalizeR
   return { value: { categories }, errors };
 }
 
+function normalizeLeaseTemplate(input: unknown, strict: boolean): NormalizeResult<LeaseTemplateSettings> {
+  const errors: Record<string, string> = {};
+  const src = isRecord(input) ? input : {};
+  const modeRaw = asString(src.mode, DEFAULT_LEASE_TEMPLATE.mode);
+  const mode: LeaseTemplateSettings["mode"] =
+    modeRaw === "pdf" || modeRaw === "url" ? modeRaw : "html";
+  const value: LeaseTemplateSettings = {
+    mode,
+    htmlTemplate: asString(src.htmlTemplate, DEFAULT_LEASE_TEMPLATE.htmlTemplate),
+    pdfDataUrl: asOptionalString(src.pdfDataUrl),
+    externalUrl: asOptionalString(src.externalUrl),
+  };
+
+  if (strict) {
+    if (value.mode === "html" && !value.htmlTemplate.trim()) {
+      errors.htmlTemplate = "HTML template is required.";
+    }
+    if (value.mode === "pdf" && !value.pdfDataUrl.trim()) {
+      errors.pdfDataUrl = "PDF template is required.";
+    }
+    if (value.mode === "url" && !value.externalUrl.trim()) {
+      errors.externalUrl = "External URL is required.";
+    }
+  }
+
+  return { value, errors };
+}
+
 export function getSettingsMeta(key: string) {
   if (key in SETTINGS_META) {
     return SETTINGS_META[key as SettingsKey];
@@ -277,6 +308,8 @@ export function normalizeSettings(key: SettingsKey, input: unknown, strict = fal
       return normalizeInitialReadings(input, strict);
     case "expense-categories":
       return normalizeExpenseCategories(input, strict);
+    case "lease-template":
+      return normalizeLeaseTemplate(input, strict);
     default:
       return { value: input as SettingsPayload, errors: {} };
   }
