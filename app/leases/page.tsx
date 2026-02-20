@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
 import SectionCard from "@/components/ui/SectionCard";
@@ -44,8 +45,6 @@ const YEARS = ["2026", "2025", "2024", "All Years"];
 const CYCLE_OPTIONS: LeaseBillingCycle[] = ["Monthly", "Quarterly", "Semi-Annually", "Annually"];
 
 const DURATION_OPTIONS = ["Manual Date / Open", "6 Months", "12 Months", "24 Months"];
-
-const UNIT_OPTIONS = ["101", "102", "B1", "C1", "103", "11012", "1003"];
 
 const STATUS_VARIANTS: Record<LeaseAgreementStatus, "success" | "warning" | "danger" | "info"> = {
   Active: "success",
@@ -92,7 +91,7 @@ function buildDefaultForm(): LeaseFormState {
 }
 
 export default function LeasesPage() {
-  const [leases, setLeases] = useState<LeaseAgreement[]>(DEFAULT_LEASES);
+  const [leases, setLeases] = useState<LeaseAgreement[]>([]);
   const [search, setSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("All Months");
   const [yearFilter, setYearFilter] = useState("2026");
@@ -101,12 +100,16 @@ export default function LeasesPage() {
   const [leaseTemplate, setLeaseTemplate] = useState<LeaseTemplateSettings>(DEFAULT_LEASE_TEMPLATE);
   const [templateLoaded, setTemplateLoaded] = useState(false);
   const [templateError, setTemplateError] = useState<string | null>(null);
-  const [properties, setProperties] = useState<string[]>([]);
+  const [properties, setProperties] = useState<Array<{ id: string; label: string }>>([]);
+  const [units, setUnits] = useState<Array<{ id: string; unit: string; property_id?: string | null }>>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<LeaseFormState>(buildDefaultForm());
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [prefillDone, setPrefillDone] = useState(false);
+  const [lockUnitSelection, setLockUnitSelection] = useState(false);
+  const searchParams = useSearchParams();
 
   const loadLeases = async () => {
     try {
@@ -122,7 +125,7 @@ export default function LeasesPage() {
     } catch (err) {
       console.error("Failed to load lease agreements", err);
     }
-    setLeases(DEFAULT_LEASES);
+    setLeases([]);
   };
 
   const loadTemplate = async () => {
@@ -152,11 +155,21 @@ export default function LeasesPage() {
       if (res.ok && payload?.ok !== false) {
         const data = (payload?.ok ? payload.data : payload) as Array<{ name?: string; building?: string; property_id?: string }>;
         if (Array.isArray(data) && data.length) {
-          const names = data
-            .map((item) => item.name || item.building || item.property_id)
-            .filter(Boolean) as string[];
-          if (names.length) {
-            setProperties(Array.from(new Set(names)));
+          const options = data
+            .map((item) => {
+              const label = item.name || item.building || item.property_id;
+              const id = item.property_id || label;
+              return label && id ? { id, label } : null;
+            })
+            .filter(Boolean) as Array<{ id: string; label: string }>;
+          if (options.length) {
+            const deduped = new Map<string, { id: string; label: string }>();
+            options.forEach((option) => {
+              if (!deduped.has(option.id)) {
+                deduped.set(option.id, option);
+              }
+            });
+            setProperties(Array.from(deduped.values()));
             return;
           }
         }
@@ -164,17 +177,68 @@ export default function LeasesPage() {
     } catch (err) {
       console.error("Failed to load properties", err);
     }
-    const fallback = leases.map((lease) => lease.property).filter(Boolean) as string[];
-    setProperties(Array.from(new Set(fallback)));
+    const fallback = leases
+      .map((lease) => lease.property)
+      .filter(Boolean)
+      .map((label) => ({ id: label, label })) as Array<{ id: string; label: string }>;
+    const deduped = new Map<string, { id: string; label: string }>();
+    fallback.forEach((option) => {
+      if (!deduped.has(option.id)) {
+        deduped.set(option.id, option);
+      }
+    });
+    setProperties(Array.from(deduped.values()));
+  };
+
+  const loadUnits = async () => {
+    try {
+      const res = await fetch("/api/units", { cache: "no-store" });
+      const payload = await res.json().catch(() => null);
+      if (res.ok && payload?.ok !== false) {
+        const data = (payload?.ok ? payload.data : payload) as Array<{
+          id: string;
+          unit: string;
+          property_id?: string | null;
+        }>;
+        if (Array.isArray(data)) {
+          setUnits(data);
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load units", err);
+    }
+    setUnits([]);
   };
 
   useEffect(() => {
     loadLeases();
+    loadUnits();
   }, []);
 
   useEffect(() => {
     loadProperties();
   }, [leases]);
+
+  useEffect(() => {
+    if (prefillDone) return;
+    const open = searchParams?.get("open") || searchParams?.get("new");
+    const unit = searchParams?.get("unit") || "";
+    const property = searchParams?.get("property") || "";
+    if (open || unit || property) {
+      setEditingId(null);
+      setForm((prev) => ({
+        ...buildDefaultForm(),
+        property: property || prev.property,
+        unit: unit || prev.unit,
+      }));
+      setFormError(null);
+      setNotice(null);
+      setLockUnitSelection(Boolean(unit));
+      setShowModal(true);
+      setPrefillDone(true);
+    }
+  }, [prefillDone, searchParams]);
 
   const activeLeases = useMemo(() => leases.filter((lease) => lease.status === "Active"), [leases]);
   const securityDeposits = useMemo(
@@ -219,10 +283,34 @@ export default function LeasesPage() {
     });
   }, [leases, search, monthFilter, yearFilter]);
 
+  const propertyLabel = form.property.trim();
+  const normalizedPropertyLabel = propertyLabel.toLowerCase();
+  const selectedPropertyId = useMemo(() => {
+    if (!normalizedPropertyLabel) return "";
+    const match =
+      properties.find((property) => property.label.toLowerCase() === normalizedPropertyLabel) ||
+      properties.find((property) => property.id.toLowerCase() === normalizedPropertyLabel);
+    return match?.id || "";
+  }, [properties, normalizedPropertyLabel]);
+  const hasSelectedProperty = Boolean(selectedPropertyId);
+  const hasPropertyValue = Boolean(propertyLabel);
+
   const unitOptions = useMemo(() => {
-    const set = new Set([...UNIT_OPTIONS, ...leases.map((lease) => lease.unit).filter(Boolean)]);
+    if (lockUnitSelection && form.unit) {
+      return [form.unit];
+    }
+    if (!selectedPropertyId) {
+      return form.unit ? [form.unit] : [];
+    }
+    const set = new Set(
+      units
+        .filter((unit) => unit.property_id === selectedPropertyId)
+        .map((unit) => unit.unit)
+        .filter(Boolean),
+    );
+    if (form.unit) set.add(form.unit);
     return Array.from(set);
-  }, [leases]);
+  }, [lockUnitSelection, form.unit, selectedPropertyId, units]);
 
   const isEditing = editingId !== null;
 
@@ -231,6 +319,7 @@ export default function LeasesPage() {
     setForm(buildDefaultForm());
     setFormError(null);
     setNotice(null);
+    setLockUnitSelection(false);
     setShowModal(true);
   };
 
@@ -251,6 +340,7 @@ export default function LeasesPage() {
     });
     setFormError(null);
     setNotice(null);
+    setLockUnitSelection(false);
     setShowModal(true);
   };
 
@@ -258,6 +348,7 @@ export default function LeasesPage() {
     setShowModal(false);
     setFormError(null);
     setEditingId(null);
+    setLockUnitSelection(false);
   };
 
   const closePreview = () => {
@@ -299,6 +390,13 @@ export default function LeasesPage() {
     setFormError(null);
     setNotice(null);
 
+    const propertyId =
+      properties.find((property) => property.label.toLowerCase() === propertyLabel.toLowerCase())?.id || "";
+
+    if (!propertyLabel) {
+      setFormError("Property / Building is required.");
+      return;
+    }
     if (!form.unit.trim()) {
       setFormError("Apartment / Unit is required.");
       return;
@@ -314,7 +412,7 @@ export default function LeasesPage() {
 
     const payload: LeaseAgreement = {
       id: editingId ?? `lease-${Date.now()}`,
-      property: form.property.trim(),
+      property: propertyLabel,
       unit: form.unit.trim(),
       tenantName: form.tenantName.trim(),
       tenantPhone: form.tenantPhone.trim(),
@@ -329,6 +427,30 @@ export default function LeasesPage() {
 
     setSaving(true);
     try {
+      if (!isEditing) {
+        const resolvedPropertyId = propertyId || propertyLabel;
+        const unitName = payload.unit.toLowerCase();
+        const exists = units.some(
+          (unit) =>
+            unit.property_id === resolvedPropertyId && unit.unit && unit.unit.toLowerCase() === unitName,
+        );
+        if (!exists) {
+          const unitRes = await fetch("/api/units", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              unit: payload.unit,
+              property_id: resolvedPropertyId,
+              status: "Vacant",
+            }),
+          });
+          const unitData = await unitRes.json().catch(() => null);
+          if (!unitRes.ok || unitData?.ok === false) {
+            throw new Error(unitData?.error || "Failed to create the apartment unit.");
+          }
+          await loadUnits();
+        }
+      }
       const res = await fetch("/api/lease-agreements", {
         method: isEditing ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
@@ -580,30 +702,51 @@ export default function LeasesPage() {
                 <input
                   list="lease-properties"
                   value={form.property}
-                  onChange={(event) => setForm((prev) => ({ ...prev, property: event.target.value }))}
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100"
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      property: event.target.value,
+                      unit: lockUnitSelection ? prev.unit : "",
+                    }))
+                  }
+                  disabled={lockUnitSelection}
+                  autoComplete="off"
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
                   placeholder="Select or type a property..."
                 />
                 <datalist id="lease-properties">
                   {properties.map((property) => (
-                    <option key={property} value={property} />
+                    <option key={property.id} value={property.label} />
                   ))}
                 </datalist>
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Apartment / Unit</label>
-                <select
+                <input
+                  list={!lockUnitSelection && hasSelectedProperty && unitOptions.length ? "lease-units" : undefined}
                   value={form.unit}
                   onChange={(event) => setForm((prev) => ({ ...prev, unit: event.target.value }))}
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100"
-                >
-                  <option value="">Select an apartment...</option>
-                  {unitOptions.map((unit) => (
-                    <option key={unit} value={unit}>
-                      {unit}
-                    </option>
-                  ))}
-                </select>
+                  disabled={lockUnitSelection || (!hasPropertyValue && !lockUnitSelection)}
+                  autoComplete="off"
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
+                  placeholder="Select or type an apartment..."
+                />
+                {!lockUnitSelection && hasSelectedProperty && unitOptions.length ? (
+                  <datalist id="lease-units">
+                    {unitOptions.map((unit) => (
+                      <option key={unit} value={unit} />
+                    ))}
+                  </datalist>
+                ) : null}
+                {!lockUnitSelection && !hasPropertyValue ? (
+                  <p className="mt-2 text-xs text-slate-500">Select a property to add or choose a unit.</p>
+                ) : null}
+                {!lockUnitSelection && hasPropertyValue && !hasSelectedProperty ? (
+                  <p className="mt-2 text-xs text-slate-500">Type a new unit — this property isn’t in the list yet.</p>
+                ) : null}
+                {!lockUnitSelection && hasSelectedProperty && !unitOptions.length ? (
+                  <p className="mt-2 text-xs text-slate-500">No units found yet. Type a new one to add it.</p>
+                ) : null}
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">

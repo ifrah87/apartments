@@ -40,7 +40,7 @@ function normalizeCycle(cycle?: string): LeaseBillingCycle {
 
 export async function GET() {
   try {
-    const data = await datasetsRepo.getDataset<LeaseAgreement[]>(DATASET_KEY, DEFAULT_LEASES);
+    const data = await datasetsRepo.getDataset<LeaseAgreement[]>(DATASET_KEY, []);
     return NextResponse.json({ ok: true, data });
   } catch (err) {
     console.error("❌ failed to load lease agreements", err);
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
     const updated = await datasetsRepo.updateDataset<LeaseAgreement[]>(
       DATASET_KEY,
       (current) => [...normalizeList(current), entry],
-      DEFAULT_LEASES,
+      [],
     );
 
     return NextResponse.json({ ok: true, data: updated });
@@ -122,7 +122,7 @@ export async function PUT(req: NextRequest) {
         if (!found) throw new Error("Lease not found.");
         return next;
       },
-      DEFAULT_LEASES,
+      [],
     );
 
     return NextResponse.json({ ok: true, data: updated });
@@ -142,7 +142,7 @@ export async function DELETE(req: NextRequest) {
     const updated = await datasetsRepo.updateDataset<LeaseAgreement[]>(
       DATASET_KEY,
       (current) => normalizeList(current).filter((item) => item.id !== payload.id),
-      DEFAULT_LEASES,
+      [],
     );
 
     return NextResponse.json({ ok: true, data: updated });

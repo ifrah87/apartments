@@ -29,6 +29,7 @@ type TenantRecord = {
 type PropertyRecord = {
   property_id: string;
   name?: string;
+  building?: string;
 };
 
 type UnitServiceRecord = {
@@ -168,6 +169,15 @@ export default function UnitsPage() {
     return units.filter((unit) => unit.property_id === selectedPropertyId).length;
   }, [units, selectedPropertyId]);
 
+  const propertyLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    properties.forEach((property) => {
+      const label = property.name || property.building || property.property_id;
+      if (label) map.set(property.property_id, label);
+    });
+    return map;
+  }, [properties]);
+
   const occupiedCount = useMemo(() => {
     if (!selectedPropertyId) return 0;
     return units.filter((unit) => {
@@ -210,6 +220,8 @@ export default function UnitsPage() {
       propertyId: unit.property_id || selectedPropertyId || "",
     });
     setError(null);
+    setShowModal(true);
+    requestAnimationFrame(() => unitInputRef.current?.focus());
   };
 
   const resetForm = () => {
@@ -345,6 +357,7 @@ export default function UnitsPage() {
                 const unitCount = unitServiceCounts.get(unit.id) || 0;
                 const buildingCount = propertyId ? buildingServiceCounts.get(propertyId) || 0 : 0;
                 const serviceCount = unitCount + buildingCount;
+                const propertyLabel = propertyLabels.get(propertyId) || propertyId;
                 return (
                   <tr key={unit.id} className="border-t border-white/10">
                     <td className="py-3 text-slate-100">{unit.unit}</td>
@@ -398,7 +411,9 @@ export default function UnitsPage() {
                         </Link>
                         {!occupied ? (
                           <Link
-                            href={`/tenants/onboarding/new?propertyId=${propertyId}&unit=${unit.unit}`}
+                            href={`/leases?open=1&property=${encodeURIComponent(
+                              propertyLabel,
+                            )}&unit=${encodeURIComponent(unit.unit)}`}
                             className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-slate-900"
                           >
                             Lease
@@ -426,9 +441,13 @@ export default function UnitsPage() {
           <SectionCard className="w-full max-w-2xl space-y-4 p-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-slate-100">New Apartment</h2>
+                <h2 className="text-lg font-semibold text-slate-100">
+                  {mode === "edit" ? "Edit Apartment" : "New Apartment"}
+                </h2>
                 <p className="text-xs text-slate-400">
-                  Creating a lease will automatically update the apartment&apos;s occupancy status and rent amount.
+                  {mode === "edit"
+                    ? "Update the unit details below."
+                    : "Creating a lease will automatically update the apartment's occupancy status and rent amount."}
                 </p>
               </div>
               <button
@@ -481,7 +500,7 @@ export default function UnitsPage() {
                 disabled={saving}
                 className="flex-1 rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900 disabled:opacity-60"
               >
-                {saving ? "Saving..." : "Save"}
+                {saving ? "Saving..." : mode === "edit" ? "Save Changes" : "Save"}
               </button>
             </div>
           </SectionCard>

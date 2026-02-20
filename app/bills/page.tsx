@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
@@ -31,24 +31,19 @@ type InvoiceRow = {
   status: "Unpaid" | "Partially Paid" | "Paid";
 };
 
-const UNITS: UnitCard[] = [
-  { id: "101", unit: "Unit 101", tenant: "Jama", status: "billed" },
-  { id: "102", unit: "Unit 102", tenant: "A1", status: "billed" },
-  { id: "b1", unit: "Unit B1", tenant: "Abdirizak Xiin", status: "billed" },
-  { id: "c1", unit: "Unit C1", tenant: "Haji", status: "billed" },
-  { id: "103", unit: "Unit 103", tenant: "103", status: "billed" },
-  { id: "1003", unit: "Unit 1003", tenant: "Mahamud", status: "waiting" },
-];
+type UnitRecord = {
+  id: string;
+  unit: string;
+  property_id?: string | null;
+};
 
-const INVOICES: InvoiceRow[] = [
-  { id: "inv-101-mar", unit: "Unit 101", tenant: "Jama", period: "March 2026", total: 212.82, outstanding: 212.82, status: "Unpaid" },
-  { id: "inv-103-mar", unit: "Unit 103", tenant: "103", period: "March 2026", total: 100, outstanding: 100, status: "Unpaid" },
-  { id: "inv-b1-mar", unit: "Unit B1", tenant: "Abdirizak Xiin", period: "March 2026", total: 1005, outstanding: 1005, status: "Unpaid" },
-  { id: "inv-101-feb", unit: "Unit 101", tenant: "Jama", period: "February 2026", total: 522.25, outstanding: 0, status: "Paid" },
-  { id: "inv-102-feb", unit: "Unit 102", tenant: "A1", period: "February 2026", total: 3000, outstanding: 1700, status: "Partially Paid" },
-  { id: "inv-c1-feb", unit: "Unit C1", tenant: "Haji", period: "February 2026", total: 1538.2, outstanding: 1538.2, status: "Unpaid" },
-  { id: "inv-103-feb", unit: "Unit 103", tenant: "103", period: "February 2026", total: 100, outstanding: 100, status: "Unpaid" },
-];
+type TenantRecord = {
+  id: string;
+  name: string;
+  property_id?: string;
+  building?: string;
+  unit?: string;
+};
 
 const STATUS_VARIANTS: Record<InvoiceRow["status"], "success" | "warning" | "danger"> = {
   Paid: "success",
@@ -64,13 +59,61 @@ function formatCurrency(value: number) {
 
 export default function BillsPage() {
   const [query, setQuery] = useState("");
-  const [invoices, setInvoices] = useState<InvoiceRow[]>(INVOICES);
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [units, setUnits] = useState<UnitCard[]>([]);
   const [showGenerator, setShowGenerator] = useState(false);
   const [generatorQuery, setGeneratorQuery] = useState("");
   const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [generatorMonth, setGeneratorMonth] = useState("February");
   const [generatorYear, setGeneratorYear] = useState("2026");
+
+  useEffect(() => {
+    const loadUnits = async () => {
+      try {
+        const [unitsRes, tenantsRes] = await Promise.all([
+          fetch("/api/units", { cache: "no-store" }),
+          fetch("/api/tenants", { cache: "no-store" }),
+        ]);
+        const unitsPayload = await unitsRes.json().catch(() => null);
+        const tenantsPayload = await tenantsRes.json().catch(() => null);
+        const unitsData = unitsPayload?.ok ? unitsPayload.data : unitsPayload;
+        const tenantsData = tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload;
+
+        const tenantIndex = new Map<string, TenantRecord>();
+        if (Array.isArray(tenantsData)) {
+          tenantsData.forEach((tenant) => {
+            const property = tenant.property_id || tenant.building || "";
+            const unit = tenant.unit || "";
+            if (!property || !unit) return;
+            tenantIndex.set(`${property}::${unit}`.toLowerCase(), tenant);
+          });
+        }
+
+        const nextUnits: UnitCard[] = Array.isArray(unitsData)
+          ? unitsData.map((unit: UnitRecord) => {
+              const propertyId = unit.property_id || "";
+              const tenant = tenantIndex.get(`${propertyId}::${unit.unit}`.toLowerCase());
+              return {
+                id: unit.id,
+                unit: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
+                tenant: tenant?.name || "No tenant",
+                status: tenant ? "ready" : "waiting",
+              };
+            })
+          : [];
+
+        setUnits(nextUnits);
+        setInvoices([]);
+      } catch (err) {
+        console.error("Failed to load units for billing", err);
+        setUnits([]);
+        setInvoices([]);
+      }
+    };
+
+    loadUnits();
+  }, []);
 
   const visibleInvoices = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -90,13 +133,16 @@ export default function BillsPage() {
 
   const generatorUnits = useMemo(() => {
     const normalized = generatorQuery.trim().toLowerCase();
-    if (!normalized) return UNITS;
-    return UNITS.filter((unit) => {
+    if (!normalized) return units;
+    return units.filter((unit) => {
       return unit.unit.toLowerCase().includes(normalized) || unit.tenant.toLowerCase().includes(normalized);
     });
-  }, [generatorQuery]);
+  }, [generatorQuery, units]);
 
-  const readyUnitIds = useMemo(() => UNITS.filter((unit) => unit.status === "ready").map((unit) => unit.id), []);
+  const readyUnitIds = useMemo(
+    () => units.filter((unit) => unit.status === "ready").map((unit) => unit.id),
+    [units],
+  );
 
   const openGenerator = () => {
     setShowGenerator(true);

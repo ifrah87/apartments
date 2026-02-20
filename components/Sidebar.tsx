@@ -2,27 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  LayoutGrid,
-  Building2,
-  Home,
-  Users,
-  UserPlus,
-  Gauge,
-  Receipt,
-  BarChart3,
-  Wrench,
-  FileText,
-  Settings,
-} from "lucide-react";
+import { LayoutGrid, Building2, Home, Gauge, Receipt, BarChart3, Wrench, FileText, Settings } from "lucide-react";
 import { SidebarBrand } from "./SidebarBrand";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutGrid },
   { href: "/properties", label: "Properties", icon: Building2 },
   { href: "/units", label: "Units", icon: Home },
-  { href: "/tenants", label: "Tenants", icon: Users },
-  { href: "/tenants/onboarding", label: "Onboarding", icon: UserPlus, indent: true },
+  // Tenants/Onboarding removed from main nav
   { href: "/readings", label: "Readings", icon: Gauge },
   { href: "/bills", label: "Bills", icon: Receipt },
   { href: "/leases", label: "Leases", icon: FileText },

@@ -18,3 +18,42 @@ export async function GET(req: NextRequest) {
     return handleError(err);
   }
 }
+
+export async function POST(req: NextRequest) {
+  try {
+    const payload = await req.json();
+    const data = await unitsRepo.createUnit(payload);
+    return NextResponse.json({ ok: true, data }, { status: 201 });
+  } catch (err) {
+    console.error("❌ /api/units POST failed:", err);
+    return handleError(err);
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const payload = await req.json();
+    if (!payload?.id) {
+      return NextResponse.json({ ok: false, error: "id is required." }, { status: 400 });
+    }
+    const data = await unitsRepo.updateUnit(String(payload.id), payload);
+    return NextResponse.json({ ok: true, data });
+  } catch (err) {
+    console.error("❌ /api/units PUT failed:", err);
+    return handleError(err);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const payload = await req.json();
+    if (!payload?.id) {
+      return NextResponse.json({ ok: false, error: "id is required." }, { status: 400 });
+    }
+    await unitsRepo.deleteUnit(String(payload.id));
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("❌ /api/units DELETE failed:", err);
+    return handleError(err);
+  }
+}
