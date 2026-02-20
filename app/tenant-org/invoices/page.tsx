@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import SectionCard from "@/components/ui/SectionCard";
 import type { Invoice } from "@/lib/commercial";
+import { fetchSettings } from "@/lib/settings/client";
+import { DEFAULT_BANK } from "@/lib/settings/defaults";
+import type { BankSettings } from "@/lib/settings/types";
 
 export default function TenantOrgInvoicesPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [bankSettings, setBankSettings] = useState<BankSettings>(DEFAULT_BANK);
 
   useEffect(() => {
     fetch("/api/tenant-org/invoices", { cache: "no-store" })
@@ -13,6 +17,14 @@ export default function TenantOrgInvoicesPage() {
       .then((data) => setInvoices(data.invoices || []))
       .catch(() => setInvoices([]));
   }, []);
+
+  useEffect(() => {
+    fetchSettings<BankSettings>("bank", DEFAULT_BANK).then(setBankSettings);
+  }, []);
+
+  const defaultAccount = useMemo(() => {
+    return bankSettings.accounts.find((acct) => acct.isDefault) || bankSettings.accounts[0];
+  }, [bankSettings.accounts]);
 
   return (
     <div className="space-y-6">
@@ -69,11 +81,15 @@ export default function TenantOrgInvoicesPage() {
       <SectionCard className="p-4">
         <h2 className="text-lg font-semibold text-slate-900">Payment instructions</h2>
         <div className="mt-2 text-sm text-slate-600">
-          <p>Bank: Orfane Commercial Bank</p>
-          <p>Account: 092381992</p>
-          <p>Sort code: 11-22-33</p>
+          <p>Bank: {defaultAccount?.bankName || "—"}</p>
+          <p>Account: {defaultAccount?.accountNumber || "—"}</p>
+          {defaultAccount?.iban ? <p>IBAN: {defaultAccount.iban}</p> : null}
+          {defaultAccount?.swift ? <p>SWIFT: {defaultAccount.swift}</p> : null}
           <p>Reference format: ORG-{invoices[0]?.tenantOrgId?.slice(0, 6) || "XXXXXX"}</p>
         </div>
+        {bankSettings.tenantInstructions ? (
+          <p className="mt-3 text-xs text-slate-500">{bankSettings.tenantInstructions}</p>
+        ) : null}
       </SectionCard>
     </div>
   );

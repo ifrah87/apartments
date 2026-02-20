@@ -26,6 +26,15 @@ type TenantRecord = {
   monthly_rent?: string;
 };
 
+type LeaseAgreement = {
+  id: string;
+  property?: string;
+  unit: string;
+  tenantName: string;
+  status?: string;
+  rent?: number;
+};
+
 type PropertyRecord = {
   property_id: string;
   name?: string;
@@ -69,6 +78,7 @@ const EMPTY_FORM: UnitFormState = { unit: "", type: "", propertyId: "" };
 export default function UnitsPage() {
   const [units, setUnits] = useState<UnitRecord[]>([]);
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
+  const [leases, setLeases] = useState<LeaseAgreement[]>([]);
   const [properties, setProperties] = useState<PropertyRecord[]>([]);
   const [unitServices, setUnitServices] = useState<UnitServiceRecord[]>([]);
   const [buildingServices, setBuildingServices] = useState<BuildingServiceRecord[]>([]);
@@ -78,15 +88,25 @@ export default function UnitsPage() {
   const [form, setForm] = useState<UnitFormState>(EMPTY_FORM);
   const [mode, setMode] = useState<"create" | "edit">("create");
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const unitInputRef = useRef<HTMLInputElement | null>(null);
   const [showModal, setShowModal] = useState(false);
 
   const loadData = async () => {
     try {
-      const [unitsRes, tenantsRes, propertiesRes, unitServicesRes, buildingServicesRes, typesRes] = await Promise.all([
+      const [
+        unitsRes,
+        tenantsRes,
+        leasesRes,
+        propertiesRes,
+        unitServicesRes,
+        buildingServicesRes,
+        typesRes,
+      ] = await Promise.all([
         fetch("/api/units", { cache: "no-store" }),
         fetch("/api/tenants", { cache: "no-store" }),
+        fetch("/api/lease-agreements", { cache: "no-store" }),
         fetch("/api/properties", { cache: "no-store" }),
         fetch("/api/unit-services", { cache: "no-store" }),
         fetch("/api/building-services", { cache: "no-store" }),
@@ -95,6 +115,7 @@ export default function UnitsPage() {
 
       const unitsPayload = await unitsRes.json().catch(() => null);
       const tenantsPayload = await tenantsRes.json().catch(() => null);
+      const leasesPayload = await leasesRes.json().catch(() => null);
       const propertiesPayload = await propertiesRes.json().catch(() => null);
       const unitServicesPayload = await unitServicesRes.json().catch(() => null);
       const buildingServicesPayload = await buildingServicesRes.json().catch(() => null);
@@ -104,6 +125,7 @@ export default function UnitsPage() {
       setTenants(
         tenantsPayload?.ok === false ? [] : (tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload) || [],
       );
+      setLeases(leasesPayload?.ok === false ? [] : (leasesPayload?.ok ? leasesPayload.data : leasesPayload) || []);
       setProperties(
         propertiesPayload?.ok === false ? [] : (propertiesPayload?.ok ? propertiesPayload.data : propertiesPayload) || [],
       );
@@ -123,6 +145,7 @@ export default function UnitsPage() {
       console.error("Failed to load units data", err);
       setUnits([]);
       setTenants([]);
+      setLeases([]);
     }
   };
 
@@ -142,11 +165,34 @@ export default function UnitsPage() {
     tenants.forEach((tenant) => {
       const property = tenant.property_id || tenant.building || "";
       const unit = tenant.unit || "";
-      const key = `${property}::${unit}`.toLowerCase();
-      if (property && unit) map.set(key, tenant);
+      if (property && unit) {
+        const key = `${property}::${unit}`.toLowerCase();
+        map.set(key, tenant);
+      }
+      if (unit) {
+        const fallbackKey = `::${unit}`.toLowerCase();
+        if (!map.has(fallbackKey)) map.set(fallbackKey, tenant);
+      }
     });
     return map;
   }, [tenants]);
+
+  const activeLeaseIndex = useMemo(() => {
+    const map = new Map<string, LeaseAgreement>();
+    leases
+      .filter((lease) => (lease.status || "Active").toLowerCase() === "active")
+      .forEach((lease) => {
+        const unit = (lease.unit || "").trim();
+        if (!unit) return;
+        const unitKey = unit.toLowerCase();
+        const property = (lease.property || "").trim();
+        if (property) {
+          map.set(`${property.toLowerCase()}::${unitKey}`, lease);
+        }
+        map.set(`::${unitKey}`, lease);
+      });
+    return map;
+  }, [leases]);
 
   const unitServiceCounts = useMemo(() => {
     const map = new Map<string, number>();
@@ -164,10 +210,12 @@ export default function UnitsPage() {
     return map;
   }, [buildingServices]);
 
-  const propertyUnitsCount = useMemo(() => {
-    if (!selectedPropertyId) return units.length;
-    return units.filter((unit) => unit.property_id === selectedPropertyId).length;
-  }, [units, selectedPropertyId]);
+  const scopedUnits = useMemo(
+    () => (selectedPropertyId ? units.filter((unit) => unit.property_id === selectedPropertyId) : units),
+    [units, selectedPropertyId],
+  );
+
+  const propertyUnitsCount = scopedUnits.length;
 
   const propertyLabels = useMemo(() => {
     const map = new Map<string, string>();
@@ -178,26 +226,45 @@ export default function UnitsPage() {
     return map;
   }, [properties]);
 
+  const findActiveLease = (unit: UnitRecord) => {
+    const unitKey = (unit.unit || "").toLowerCase();
+    if (!unitKey) return null;
+    const propertyId = unit.property_id || "";
+    const propertyLabel = propertyLabels.get(propertyId) || "";
+    const keys = [];
+    if (propertyId) keys.push(`${propertyId.toLowerCase()}::${unitKey}`);
+    if (propertyLabel) keys.push(`${propertyLabel.toLowerCase()}::${unitKey}`);
+    keys.push(`::${unitKey}`);
+    for (const key of keys) {
+      const lease = activeLeaseIndex.get(key);
+      if (lease) return lease;
+    }
+    return null;
+  };
+
+  const hasLeaseData = leases.length > 0;
+
   const occupiedCount = useMemo(() => {
-    if (!selectedPropertyId) return 0;
-    return units.filter((unit) => {
-      if (unit.property_id !== selectedPropertyId) return false;
+    return scopedUnits.filter((unit) => {
+      if (hasLeaseData) return Boolean(findActiveLease(unit));
       const key = `${unit.property_id || ""}::${unit.unit}`.toLowerCase();
-      return tenantIndex.has(key);
+      return tenantIndex.has(key) || tenantIndex.has(`::${unit.unit}`.toLowerCase());
     }).length;
-  }, [units, selectedPropertyId, tenantIndex]);
+  }, [scopedUnits, tenantIndex, hasLeaseData, activeLeaseIndex, propertyLabels]);
 
   const grossTarget = useMemo(() => {
-    if (!selectedPropertyId) return 0;
-    return units
-      .filter((unit) => unit.property_id === selectedPropertyId)
-      .reduce((sum, unit) => {
-        const key = `${unit.property_id || ""}::${unit.unit}`.toLowerCase();
-        const tenant = tenantIndex.get(key);
-        const rent = tenant?.monthly_rent ?? unit.rent ?? 0;
+    return scopedUnits.reduce((sum, unit) => {
+      if (hasLeaseData) {
+        const lease = findActiveLease(unit);
+        const rent = lease?.rent ?? unit.rent ?? 0;
         return sum + Number(rent || 0);
-      }, 0);
-  }, [units, selectedPropertyId, tenantIndex]);
+      }
+      const key = `${unit.property_id || ""}::${unit.unit}`.toLowerCase();
+      const tenant = tenantIndex.get(key) || tenantIndex.get(`::${unit.unit}`.toLowerCase());
+      const rent = tenant?.monthly_rent ?? unit.rent ?? 0;
+      return sum + Number(rent || 0);
+    }, 0);
+  }, [scopedUnits, tenantIndex, hasLeaseData, activeLeaseIndex, propertyLabels]);
 
   const filteredUnits = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -287,6 +354,33 @@ export default function UnitsPage() {
     }
   };
 
+  const deleteUnit = async (unit: UnitRecord, occupied: boolean) => {
+    const forceDelete = occupied
+      ? confirm(
+          `Unit ${unit.unit} has an active lease/tenant. Delete anyway? This will remove related tenants, leases, deposits, and charges.`,
+        )
+      : confirm(`Delete unit ${unit.unit}?`);
+    if (!forceDelete) return;
+    setDeletingId(unit.id);
+    setError(null);
+    try {
+      const res = await fetch("/api/units", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: unit.id, force: occupied }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || "Failed to delete unit.");
+      }
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete unit.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const vacantCount = Math.max(propertyUnitsCount - occupiedCount, 0);
 
   return (
@@ -352,8 +446,9 @@ export default function UnitsPage() {
               {filteredUnits.map((unit) => {
                 const propertyId = unit.property_id || selectedPropertyId || "";
                 const tenantKey = `${propertyId}::${unit.unit}`.toLowerCase();
-                const tenant = tenantIndex.get(tenantKey);
-                const occupied = Boolean(tenant);
+                const tenant = tenantIndex.get(tenantKey) || tenantIndex.get(`::${unit.unit}`.toLowerCase());
+                const lease = hasLeaseData ? findActiveLease(unit) : null;
+                const occupied = hasLeaseData ? Boolean(lease) : Boolean(tenant);
                 const unitCount = unitServiceCounts.get(unit.id) || 0;
                 const buildingCount = propertyId ? buildingServiceCounts.get(propertyId) || 0 : 0;
                 const serviceCount = unitCount + buildingCount;
@@ -363,17 +458,21 @@ export default function UnitsPage() {
                     <td className="py-3 text-slate-100">{unit.unit}</td>
                     <td className="py-3 text-slate-300">{unit.type || "—"}</td>
                     <td className="py-3 text-slate-300">
-                      {tenant ? (
+                      {occupied ? (
                         <span className="inline-flex items-center gap-2 text-slate-100">
                           <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                          {tenant.name}
+                          {lease?.tenantName || tenant?.name || "Occupied"}
                         </span>
                       ) : (
                         "No Tenant"
                       )}
                     </td>
                     <td className="py-3 text-slate-100">
-                      {tenant?.monthly_rent ? `$${Number(tenant.monthly_rent).toLocaleString()}` : "—"}
+                      {lease?.rent
+                        ? `$${Number(lease.rent).toLocaleString()}`
+                        : tenant?.monthly_rent
+                        ? `$${Number(tenant.monthly_rent).toLocaleString()}`
+                        : "—"}
                     </td>
                     <td className="py-3">
                       <div className="flex flex-wrap items-center gap-2">
@@ -402,6 +501,14 @@ export default function UnitsPage() {
                           className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-white/20"
                         >
                           Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteUnit(unit, occupied)}
+                          disabled={deletingId === unit.id}
+                          className="rounded-full border border-rose-400/40 px-3 py-1 text-xs font-semibold text-rose-200 hover:border-rose-400/70 disabled:opacity-60"
+                        >
+                          {deletingId === unit.id ? "Deleting..." : "Delete"}
                         </button>
                         <Link
                           href={`/units/${unit.id}/services`}

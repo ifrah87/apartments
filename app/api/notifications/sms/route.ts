@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { sendSms } from "@/lib/twilio";
 import { normalizeId } from "@/lib/reports/tenantStatement";
-import { COMPANY_NAME, COMPANY_PHONE } from "@/lib/constants/branding";
+import { buildCompanyProfile, getOrganizationSnapshot } from "@/lib/settings/organization";
 import { tenantsRepo, type TenantRecord } from "@/lib/repos";
 
 type SmsRequest = {
@@ -24,10 +24,10 @@ function normalizePhone(value?: string) {
   return `+${digits}`;
 }
 
-function buildLateRentMessage(tenant: TenantRecord) {
+function buildLateRentMessage(tenant: TenantRecord, companyName: string, companyPhone?: string) {
   const tenantName = tenant.name || "tenant";
-  const phone = COMPANY_PHONE ? ` Call ${COMPANY_PHONE} if you need help.` : "";
-  return `Hi ${tenantName}, this is a reminder from ${COMPANY_NAME} that your rent is past due. Please log in to the tenant portal to pay.${phone}`;
+  const phone = companyPhone ? ` Call ${companyPhone} if you need help.` : "";
+  return `Hi ${tenantName}, this is a reminder from ${companyName} that your rent is past due. Please log in to the tenant portal to pay.${phone}`;
 }
 
 export async function POST(req: Request) {
@@ -49,7 +49,9 @@ export async function POST(req: Request) {
         targetPhone = normalizePhone(tenantWithPhone.phone ?? undefined);
       }
       if (!messageBody && template === "late_rent") {
-        messageBody = buildLateRentMessage(tenant);
+        const organization = await getOrganizationSnapshot();
+        const company = buildCompanyProfile(organization);
+        messageBody = buildLateRentMessage(tenant, company.name, company.phone);
       }
     }
 

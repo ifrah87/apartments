@@ -46,6 +46,12 @@ const CYCLE_OPTIONS: LeaseBillingCycle[] = ["Monthly", "Quarterly", "Semi-Annual
 
 const DURATION_OPTIONS = ["Manual Date / Open", "6 Months", "12 Months", "24 Months"];
 
+const DURATION_MONTHS: Record<string, number> = {
+  "6 Months": 6,
+  "12 Months": 12,
+  "24 Months": 24,
+};
+
 const STATUS_VARIANTS: Record<LeaseAgreementStatus, "success" | "warning" | "danger" | "info"> = {
   Active: "success",
   Terminated: "danger",
@@ -54,6 +60,14 @@ const STATUS_VARIANTS: Record<LeaseAgreementStatus, "success" | "warning" | "dan
 
 const formatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const dateFormatter = new Intl.DateTimeFormat("en-GB");
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 function formatCurrency(value: number) {
   return formatter.format(value || 0);
@@ -64,6 +78,22 @@ function formatDate(value?: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return dateFormatter.format(date);
+}
+
+function addMonthsToIso(startDate: string, months: number) {
+  const match = startDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || !Number.isFinite(day)) return "";
+  const totalMonths = monthIndex + months;
+  const targetYear = year + Math.floor(totalMonths / 12);
+  const targetMonth = ((totalMonths % 12) + 12) % 12;
+  const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+  const targetDay = Math.min(day, lastDay);
+  const target = new Date(Date.UTC(targetYear, targetMonth, targetDay));
+  return target.toISOString().slice(0, 10);
 }
 
 function getPeriod(lease: LeaseAgreement) {
@@ -109,6 +139,7 @@ export default function LeasesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [prefillDone, setPrefillDone] = useState(false);
   const [lockUnitSelection, setLockUnitSelection] = useState(false);
+  const [customUnit, setCustomUnit] = useState("");
   const searchParams = useSearchParams();
 
   const loadLeases = async () => {
@@ -235,6 +266,7 @@ export default function LeasesPage() {
       setFormError(null);
       setNotice(null);
       setLockUnitSelection(Boolean(unit));
+      setCustomUnit("");
       setShowModal(true);
       setPrefillDone(true);
     }
@@ -299,18 +331,41 @@ export default function LeasesPage() {
     if (lockUnitSelection && form.unit) {
       return [form.unit];
     }
-    if (!selectedPropertyId) {
+    if (!units.length) {
       return form.unit ? [form.unit] : [];
     }
-    const set = new Set(
-      units
-        .filter((unit) => unit.property_id === selectedPropertyId)
-        .map((unit) => unit.unit)
-        .filter(Boolean),
-    );
+    const normalizedProperty = normalizedPropertyLabel;
+    let filtered = [] as Array<{ unit: string }>;
+    if (hasSelectedProperty) {
+      filtered = units.filter((unit) => unit.property_id === selectedPropertyId);
+      if (!filtered.length) {
+        filtered = units;
+      }
+    } else if (normalizedProperty) {
+      filtered = units.filter((unit) => {
+        const prop = (unit.property_id || "").toLowerCase();
+        if (!prop) return true;
+        return prop === normalizedProperty;
+      });
+      if (!filtered.length) {
+        filtered = units;
+      }
+    } else {
+      filtered = units;
+    }
+    const set = new Set(filtered.map((unit) => unit.unit).filter(Boolean));
     if (form.unit) set.add(form.unit);
     return Array.from(set);
-  }, [lockUnitSelection, form.unit, selectedPropertyId, units]);
+  }, [lockUnitSelection, form.unit, hasSelectedProperty, normalizedPropertyLabel, selectedPropertyId, units]);
+
+  useEffect(() => {
+    if (lockUnitSelection) return;
+    if (!form.unit) return;
+    if (unitOptions.includes(form.unit)) return;
+    if (!customUnit) {
+      setCustomUnit(form.unit);
+    }
+  }, [lockUnitSelection, form.unit, unitOptions, customUnit]);
 
   const isEditing = editingId !== null;
 
@@ -320,6 +375,7 @@ export default function LeasesPage() {
     setFormError(null);
     setNotice(null);
     setLockUnitSelection(false);
+    setCustomUnit("");
     setShowModal(true);
   };
 
@@ -341,6 +397,7 @@ export default function LeasesPage() {
     setFormError(null);
     setNotice(null);
     setLockUnitSelection(false);
+    setCustomUnit("");
     setShowModal(true);
   };
 
@@ -349,6 +406,7 @@ export default function LeasesPage() {
     setFormError(null);
     setEditingId(null);
     setLockUnitSelection(false);
+    setCustomUnit("");
   };
 
   const closePreview = () => {
@@ -397,7 +455,8 @@ export default function LeasesPage() {
       setFormError("Property / Building is required.");
       return;
     }
-    if (!form.unit.trim()) {
+    const unitValue = customUnit.trim() || form.unit.trim();
+    if (!unitValue) {
       setFormError("Apartment / Unit is required.");
       return;
     }
@@ -410,10 +469,11 @@ export default function LeasesPage() {
       return;
     }
 
+    const cleanedPropertyLabel = propertyLabel.trim();
     const payload: LeaseAgreement = {
       id: editingId ?? `lease-${Date.now()}`,
-      property: propertyLabel,
-      unit: form.unit.trim(),
+      property: cleanedPropertyLabel,
+      unit: unitValue,
       tenantName: form.tenantName.trim(),
       tenantPhone: form.tenantPhone.trim(),
       status: form.status,
@@ -427,14 +487,65 @@ export default function LeasesPage() {
 
     setSaving(true);
     try {
+      const resolvedPropertyId = (propertyId || cleanedPropertyLabel).trim();
+      const tenantId = `tenant-${slugify(resolvedPropertyId)}-${slugify(payload.unit)}`;
+      const tenantRes = await fetch("/api/tenants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: tenantId,
+          name: payload.tenantName,
+          unit: payload.unit,
+          property_id: resolvedPropertyId,
+          building: propertyLabel,
+          monthly_rent: payload.rent,
+        }),
+      });
+      const tenantData = await tenantRes.json().catch(() => null);
+      if (!tenantRes.ok || tenantData?.ok === false) {
+        throw new Error(tenantData?.error || "Failed to save tenant.");
+      }
+
       if (!isEditing) {
-        const resolvedPropertyId = propertyId || propertyLabel;
-        const unitName = payload.unit.toLowerCase();
-        const exists = units.some(
-          (unit) =>
-            unit.property_id === resolvedPropertyId && unit.unit && unit.unit.toLowerCase() === unitName,
-        );
-        if (!exists) {
+        let latestUnits = units;
+        try {
+          const unitsRes = await fetch(`/api/units?ts=${Date.now()}`, { cache: "no-store" });
+          const unitsPayload = await unitsRes.json().catch(() => null);
+          if (unitsRes.ok && unitsPayload?.ok !== false) {
+            latestUnits = (unitsPayload?.ok ? unitsPayload.data : unitsPayload) as Array<{
+              id: string;
+              unit: string;
+              property_id?: string | null;
+            }>;
+          }
+        } catch (err) {
+          console.warn("Failed to refresh units list", err);
+        }
+
+        const unitName = payload.unit.trim().toLowerCase();
+        const normalizedPropertyId = resolvedPropertyId.toLowerCase();
+        const normalizedPropertyLabel = cleanedPropertyLabel.toLowerCase();
+        const matchedUnit = latestUnits.find((unit) => {
+          const existingUnit = (unit.unit || "").trim().toLowerCase();
+          if (!existingUnit || existingUnit !== unitName) return false;
+          const existingProperty = (unit.property_id || "").trim().toLowerCase();
+          if (!existingProperty) return true;
+          return (
+            existingProperty === normalizedPropertyId ||
+            existingProperty === normalizedPropertyLabel
+          );
+        });
+
+        if (matchedUnit) {
+          if (!matchedUnit.property_id && resolvedPropertyId) {
+            await fetch("/api/units", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: matchedUnit.id, property_id: resolvedPropertyId }),
+            });
+            await loadUnits();
+          }
+        } else {
           const unitRes = await fetch("/api/units", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -549,7 +660,7 @@ export default function LeasesPage() {
         <SectionCard className="border-l-2 border-l-violet-400/70 p-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Security Deposits</p>
           <p className="mt-2 text-2xl font-semibold text-violet-200">{formatCurrency(securityDeposits)}</p>
-          <p className="mt-1 text-sm text-slate-400">Held in escrow</p>
+          <p className="mt-1 text-sm text-slate-400">Security deposits</p>
         </SectionCard>
         <SectionCard className="border-l-2 border-l-amber-400/70 p-5">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Expiring Soon</p>
@@ -702,13 +813,16 @@ export default function LeasesPage() {
                 <input
                   list="lease-properties"
                   value={form.property}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setForm((prev) => ({
                       ...prev,
                       property: event.target.value,
                       unit: lockUnitSelection ? prev.unit : "",
-                    }))
-                  }
+                    }));
+                    if (!lockUnitSelection) {
+                      setCustomUnit("");
+                    }
+                  }}
                   disabled={lockUnitSelection}
                   autoComplete="off"
                   className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
@@ -722,27 +836,49 @@ export default function LeasesPage() {
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Apartment / Unit</label>
-                <input
-                  list={!lockUnitSelection && hasSelectedProperty && unitOptions.length ? "lease-units" : undefined}
-                  value={form.unit}
-                  onChange={(event) => setForm((prev) => ({ ...prev, unit: event.target.value }))}
-                  disabled={lockUnitSelection || (!hasPropertyValue && !lockUnitSelection)}
-                  autoComplete="off"
-                  className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
-                  placeholder="Select or type an apartment..."
-                />
-                {!lockUnitSelection && hasSelectedProperty && unitOptions.length ? (
-                  <datalist id="lease-units">
-                    {unitOptions.map((unit) => (
-                      <option key={unit} value={unit} />
-                    ))}
-                  </datalist>
-                ) : null}
+                {lockUnitSelection ? (
+                  <input
+                    value={form.unit}
+                    disabled
+                    className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
+                  />
+                ) : (
+                  <>
+                    {unitOptions.length ? (
+                      <select
+                        value={unitOptions.includes(form.unit) && !customUnit ? form.unit : ""}
+                        onChange={(event) => {
+                          setForm((prev) => ({ ...prev, unit: event.target.value }));
+                          setCustomUnit("");
+                        }}
+                        disabled={!hasPropertyValue}
+                        className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        <option value="">Select an apartment...</option>
+                        {unitOptions.map((unit) => (
+                          <option key={unit} value={unit}>
+                            {unit}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
+                    <input
+                      value={customUnit}
+                      onChange={(event) => setCustomUnit(event.target.value)}
+                      disabled={!hasPropertyValue}
+                      autoComplete="off"
+                      className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
+                      placeholder={unitOptions.length ? "Or type a new apartment..." : "Type a new apartment..."}
+                    />
+                  </>
+                )}
                 {!lockUnitSelection && !hasPropertyValue ? (
                   <p className="mt-2 text-xs text-slate-500">Select a property to add or choose a unit.</p>
                 ) : null}
                 {!lockUnitSelection && hasPropertyValue && !hasSelectedProperty ? (
-                  <p className="mt-2 text-xs text-slate-500">Type a new unit — this property isn’t in the list yet.</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    This property isn’t in the list yet. Showing units without a property, or type a new unit.
+                  </p>
                 ) : null}
                 {!lockUnitSelection && hasSelectedProperty && !unitOptions.length ? (
                   <p className="mt-2 text-xs text-slate-500">No units found yet. Type a new one to add it.</p>
@@ -817,7 +953,17 @@ export default function LeasesPage() {
                   <input
                     type="date"
                     value={form.startDate}
-                    onChange={(event) => setForm((prev) => ({ ...prev, startDate: event.target.value }))}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setForm((prev) => {
+                        const next = { ...prev, startDate: value };
+                        const months = DURATION_MONTHS[prev.leaseDuration];
+                        if (months && value) {
+                          next.endDate = addMonthsToIso(value, months);
+                        }
+                        return next;
+                      });
+                    }}
                     className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100"
                   />
                 </div>
@@ -828,7 +974,17 @@ export default function LeasesPage() {
                   <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Lease Duration</label>
                   <select
                     value={form.leaseDuration}
-                    onChange={(event) => setForm((prev) => ({ ...prev, leaseDuration: event.target.value }))}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setForm((prev) => {
+                        const next = { ...prev, leaseDuration: value };
+                        const months = DURATION_MONTHS[value];
+                        if (months && prev.startDate) {
+                          next.endDate = addMonthsToIso(prev.startDate, months);
+                        }
+                        return next;
+                      });
+                    }}
                     className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100"
                   >
                     {DURATION_OPTIONS.map((option) => (

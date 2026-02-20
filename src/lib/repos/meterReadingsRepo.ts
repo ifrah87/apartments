@@ -32,6 +32,7 @@ export type MeterReadingInput = {
   reading_date?: string;
   reading_value?: number | string;
   proof_url?: string | null;
+  baseline?: boolean;
 };
 
 function toNumber(value: unknown) {
@@ -96,28 +97,34 @@ export async function createReading(payload: MeterReadingInput): Promise<MeterRe
   const meterType = payload.meter_type?.trim();
   const readingDate = payload.reading_date?.trim();
   const readingValue = toNumber(payload.reading_value);
+  const isBaseline = payload.baseline === true;
 
   if (!unit) throw badRequest("Unit is required.");
   if (!meterType) throw badRequest("Meter type is required.");
   if (!readingDate) throw badRequest("Reading date is required.");
   if (readingValue === null) throw badRequest("Reading value is required.");
 
-  const { rows: prevRows } = await query<{ reading_value: number }>(
-    `SELECT reading_value
-     FROM meter_readings
-     WHERE unit = $1 AND meter_type = $2
-     ORDER BY reading_date DESC, created_at DESC
-     LIMIT 1`,
-    [unit, meterType],
-  );
-  let prevValue = prevRows[0]?.reading_value !== undefined ? Number(prevRows[0].reading_value) : undefined;
-  if (prevValue === undefined) {
-    const settings = await getInitialReadingsSettings();
-    if (meterType === "water") prevValue = settings.initialReadings.water ?? 0;
-    else if (meterType === "electricity") prevValue = settings.initialReadings.electricity ?? 0;
-    else prevValue = 0;
+  let prevValue: number | undefined;
+  if (isBaseline) {
+    prevValue = readingValue;
+  } else {
+    const { rows: prevRows } = await query<{ reading_value: number }>(
+      `SELECT reading_value
+       FROM meter_readings
+       WHERE unit = $1 AND meter_type = $2
+       ORDER BY reading_date DESC, created_at DESC
+       LIMIT 1`,
+      [unit, meterType],
+    );
+    prevValue = prevRows[0]?.reading_value !== undefined ? Number(prevRows[0].reading_value) : undefined;
+    if (prevValue === undefined) {
+      const settings = await getInitialReadingsSettings();
+      if (meterType === "water") prevValue = settings.initialReadings.water ?? 0;
+      else if (meterType === "electricity") prevValue = settings.initialReadings.electricity ?? 0;
+      else prevValue = 0;
+    }
   }
-  const usage = Number((readingValue - prevValue).toFixed(2));
+  const usage = Number((readingValue - (prevValue ?? 0)).toFixed(2));
 
   const { rows } = await query(
     `INSERT INTO meter_readings (id, unit, tenant_id, meter_type, reading_date, reading_value, prev_value, usage, amount, proof_url)

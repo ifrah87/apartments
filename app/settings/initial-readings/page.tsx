@@ -1,253 +1,262 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import SettingsShell from "@/components/settings/SettingsShell";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { Calendar, ChevronLeft } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
-import { DEFAULT_INITIAL_READINGS } from "@/lib/settings/defaults";
-import type { InitialReadingsSettings } from "@/lib/settings/types";
-import { fetchSettings, saveSettings } from "@/lib/settings/client";
+
+type UnitOption = {
+  id: string;
+  unit: string;
+  property_id?: string | null;
+};
+
+type TenantOption = {
+  id: string;
+  name?: string;
+  unit?: string | null;
+  property_id?: string | null;
+  building?: string | null;
+};
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function InitialReadingsPage() {
-  const [form, setForm] = useState<InitialReadingsSettings>(DEFAULT_INITIAL_READINGS);
+  const [units, setUnits] = useState<UnitOption[]>([]);
+  const [tenants, setTenants] = useState<TenantOption[]>([]);
+  const [unitsLoading, setUnitsLoading] = useState(true);
+  const [tenantsLoading, setTenantsLoading] = useState(true);
+  const [selectedUnit, setSelectedUnit] = useState("");
+  const [readingDate, setReadingDate] = useState(() => todayISO());
+  const [waterValue, setWaterValue] = useState("");
+  const [electricityValue, setElectricityValue] = useState("");
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   useEffect(() => {
-    fetchSettings<InitialReadingsSettings>("initial-readings", DEFAULT_INITIAL_READINGS).then(setForm);
+    setUnitsLoading(true);
+    fetch(`/api/units?ts=${Date.now()}`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((payload) =>
+        setUnits(payload?.ok === false ? [] : (payload?.ok ? payload.data : payload) || []),
+      )
+      .catch(() => setUnits([]))
+      .finally(() => setUnitsLoading(false));
   }, []);
 
-  const handleSave = async () => {
-    const nextErrors: Record<string, string> = {};
-    if (!form.enabledMeters.length) nextErrors.enabledMeters = "Select at least one meter type.";
-    if (form.defaultReadingDay && (form.defaultReadingDay < 1 || form.defaultReadingDay > 28)) {
-      nextErrors.defaultReadingDay = "Day must be between 1 and 28.";
-    }
-    if (form.rules.min !== undefined && form.rules.max !== undefined && form.rules.min > form.rules.max) {
-      nextErrors.rules = "Min cannot be greater than max.";
-    }
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) {
-      setToast({ type: "error", message: "Please fix the highlighted fields." });
-      return;
-    }
-    setSaving(true);
-    const response = await saveSettings("initial-readings", form);
-    setSaving(false);
-    if (!response.ok) {
-      setToast({ type: "error", message: response.error || "Failed to save settings." });
-      return;
-    }
-    setForm(response.data || form);
-    setToast({ type: "success", message: "Initial readings settings saved." });
-  };
+  useEffect(() => {
+    setTenantsLoading(true);
+    fetch(`/api/dashboard/occupancy?ts=${Date.now()}`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((payload) =>
+        setTenants(payload?.ok === false ? [] : (payload?.ok ? payload.data : payload) || []),
+      )
+      .catch(() => setTenants([]))
+      .finally(() => setTenantsLoading(false));
+  }, []);
 
-  const handleReset = () => {
-    setForm(DEFAULT_INITIAL_READINGS);
-    setToast({ type: "success", message: "Reset to defaults." });
-  };
-
-  const toggleMeter = (meter: "electricity" | "water") => {
-    setForm((prev) => {
-      const enabled = prev.enabledMeters.includes(meter)
-        ? prev.enabledMeters.filter((m) => m !== meter)
-        : [...prev.enabledMeters, meter];
-      return { ...prev, enabledMeters: enabled };
+  const tenantByUnit = useMemo(() => {
+    const map = new Map<string, string>();
+    tenants.forEach((tenant) => {
+      if (!tenant.unit || !tenant.name) return;
+      if (!map.has(tenant.unit)) map.set(tenant.unit, tenant.name);
     });
+    return map;
+  }, [tenants]);
+
+  const unitOptions = useMemo<UnitOption[]>(() => {
+    if (units.length) return units;
+    const map = new Map<string, UnitOption>();
+    tenants.forEach((tenant) => {
+      if (!tenant.unit) return;
+      if (map.has(tenant.unit)) return;
+      map.set(tenant.unit, {
+        id: `tenant-${tenant.id}`,
+        unit: tenant.unit,
+        property_id: tenant.property_id ?? tenant.building ?? null,
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.unit.localeCompare(b.unit));
+  }, [tenants, units]);
+
+  const baselinePeriod = useMemo(() => {
+    if (!readingDate) return "—";
+    return new Date(readingDate).toLocaleString("en", { month: "long", year: "numeric" });
+  }, [readingDate]);
+
+  const handleSave = async () => {
+    setNotice(null);
+    if (!selectedUnit) {
+      setNotice({ type: "error", message: "Select an apartment first." });
+      return;
+    }
+    if (!readingDate) {
+      setNotice({ type: "error", message: "Select a baseline date." });
+      return;
+    }
+    if (!waterValue && !electricityValue) {
+      setNotice({ type: "error", message: "Enter at least one baseline meter value." });
+      return;
+    }
+
+    const payloads = [
+      waterValue
+        ? {
+            unit: selectedUnit,
+            meter_type: "water",
+            reading_date: readingDate,
+            reading_value: waterValue,
+            baseline: true,
+          }
+        : null,
+      electricityValue
+        ? {
+            unit: selectedUnit,
+            meter_type: "electricity",
+            reading_date: readingDate,
+            reading_value: electricityValue,
+            baseline: true,
+          }
+        : null,
+    ].filter(Boolean) as Array<Record<string, unknown>>;
+
+    setSaving(true);
+    try {
+      const results = await Promise.all(
+        payloads.map(async (payload) => {
+          const res = await fetch("/api/meter-readings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const body = await res.json().catch(() => null);
+          if (!res.ok || body?.ok === false) {
+            throw new Error(body?.error || "Failed to save initial readings.");
+          }
+          return body;
+        }),
+      );
+      if (results.length) {
+        setNotice({ type: "success", message: "Initial readings saved." });
+      }
+    } catch (err) {
+      setNotice({ type: "error", message: err instanceof Error ? err.message : "Failed to save initial readings." });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <SettingsShell
-      title="Initial Readings"
-      description="Configure baseline meter rules for onboarding units."
-      onSave={handleSave}
-      onReset={handleReset}
-      saving={saving}
-      toast={toast}
-      onDismissToast={() => setToast(null)}
-    >
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <SectionCard className="p-6">
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <Link
+          href="/settings"
+          className="inline-flex items-center gap-1 text-xs uppercase tracking-[0.18em] text-slate-400 hover:text-accent"
+        >
+          <ChevronLeft className="h-3 w-3" />
+          Back to Settings
+        </Link>
+        <h1 className="text-2xl font-semibold text-slate-100">Setup Initial Readings</h1>
+        <p className="text-sm text-slate-400">Establish baseline meter values for new deployments.</p>
+      </div>
+
+      {notice ? (
+        <div
+          role="status"
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            notice.type === "success"
+              ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+              : "border-rose-400/30 bg-rose-400/10 text-rose-200"
+          }`}
+        >
+          {notice.message}
+        </div>
+      ) : null}
+
+      <div className="flex justify-center">
+        <SectionCard className="w-full max-w-xl p-6">
           <div className="space-y-5 text-sm text-slate-300">
-            <div>
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Meter types enabled</p>
-              <div className="mt-3 flex flex-wrap gap-3">
-                {(["electricity", "water"] as const).map((meter) => (
-                  <label
-                    key={meter}
-                    className="flex items-center gap-2 rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-200"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.enabledMeters.includes(meter)}
-                      onChange={() => toggleMeter(meter)}
-                    />
-                    {meter === "electricity" ? "Electricity" : "Water"}
-                  </label>
-                ))}
-              </div>
-              {errors.enabledMeters ? <p className="mt-2 text-xs text-rose-300">{errors.enabledMeters}</p> : null}
+            <div className="rounded-xl border border-accent/20 bg-accent/10 px-4 py-3 text-xs text-slate-100">
+              Use this form for new deployments where meters already have a value. This sets the baseline.
+              No usage/bill will be generated for these numbers.
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label>
-                Electricity unit
-                <input
-                  value={form.units.electricity}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, units: { ...prev.units, electricity: event.target.value } }))
-                  }
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-100"
-                />
-              </label>
-              <label>
-                Water unit
-                <input
-                  value={form.units.water}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, units: { ...prev.units, water: event.target.value } }))
-                  }
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-100"
-                />
-              </label>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label>
-                Default electricity reading
-                <input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  value={form.initialReadings.electricity}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      initialReadings: {
-                        ...prev.initialReadings,
-                        electricity: Number(event.target.value) || 0,
-                      },
-                    }))
-                  }
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-100"
-                />
-              </label>
-              <label>
-                Default water reading
-                <input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  value={form.initialReadings.water}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      initialReadings: {
-                        ...prev.initialReadings,
-                        water: Number(event.target.value) || 0,
-                      },
-                    }))
-                  }
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-100"
-                />
-              </label>
-            </div>
-
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={form.requireProof}
-                onChange={(event) => setForm((prev) => ({ ...prev, requireProof: event.target.checked }))}
-              />
-              Require proof image for initial readings
+            <label className="space-y-2">
+              <span className="text-xs uppercase tracking-[0.18em] text-slate-500">Apartment</span>
+              <select
+                value={selectedUnit}
+                onChange={(event) => setSelectedUnit(event.target.value)}
+                className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100"
+              >
+                <option value="">Select apartment</option>
+                {unitOptions.map((entry) => {
+                  const tenantName = tenantByUnit.get(entry.unit);
+                  const label = tenantName ? `${entry.unit} - ${tenantName}` : entry.unit;
+                  return (
+                    <option key={entry.id} value={entry.unit}>
+                      {label}
+                    </option>
+                  );
+                })}
+              </select>
+              {!unitOptions.length && !unitsLoading && !tenantsLoading ? (
+                <p className="text-xs text-slate-500">No apartments found yet. Add units to enable selection.</p>
+              ) : null}
             </label>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label>
-                Default reading day (1–28)
+            <label className="space-y-2">
+              <span className="text-xs uppercase tracking-[0.18em] text-slate-500">Baseline Date</span>
+              <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-slate-100">
+                <Calendar className="h-4 w-4 text-slate-400" />
+                <input
+                  type="date"
+                  value={readingDate}
+                  onChange={(event) => setReadingDate(event.target.value)}
+                  className="w-full bg-transparent text-sm text-slate-100 outline-none"
+                />
+              </div>
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                Baseline period: {baselinePeriod}
+              </p>
+            </label>
+
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Initial Meter Values</p>
+              <label className="space-y-2">
+                <span className="text-xs text-slate-400">Baseline Water Billing (m³)</span>
                 <input
                   type="number"
-                  min={1}
-                  max={28}
-                  value={form.defaultReadingDay || ""}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, defaultReadingDay: Number(event.target.value) || 1 }))
-                  }
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-100"
+                  step="0.01"
+                  min={0}
+                  value={waterValue}
+                  onChange={(event) => setWaterValue(event.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100"
                 />
-                {errors.defaultReadingDay ? <p className="mt-1 text-xs text-rose-300">{errors.defaultReadingDay}</p> : null}
+              </label>
+              <label className="space-y-2">
+                <span className="text-xs text-slate-400">Baseline Electricity Billing (kWh)</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={electricityValue}
+                  onChange={(event) => setElectricityValue(event.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100"
+                />
               </label>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={form.rules.allowZero}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, rules: { ...prev.rules, allowZero: event.target.checked } }))
-                  }
-                />
-                Allow zero reading
-              </label>
-              <label>
-                Minimum allowed
-                <input
-                  type="number"
-                  value={form.rules.min ?? ""}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      rules: { ...prev.rules, min: event.target.value === "" ? undefined : Number(event.target.value) },
-                    }))
-                  }
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-100"
-                />
-              </label>
-              <label>
-                Maximum allowed
-                <input
-                  type="number"
-                  value={form.rules.max ?? ""}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      rules: { ...prev.rules, max: event.target.value === "" ? undefined : Number(event.target.value) },
-                    }))
-                  }
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-100"
-                />
-              </label>
-            </div>
-            {errors.rules ? <p className="text-xs text-rose-300">{errors.rules}</p> : null}
-          </div>
-        </SectionCard>
-
-        <SectionCard className="p-6">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Summary</p>
-          <div className="mt-4 space-y-3 text-sm text-slate-300">
-            <div>
-              <p className="text-xs text-slate-500">Enabled meters</p>
-              <p>{form.enabledMeters.map((m) => (m === "electricity" ? "Electricity" : "Water")).join(", ") || "—"}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Default units</p>
-              <p>Electricity: {form.units.electricity}</p>
-              <p>Water: {form.units.water}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Default initial readings</p>
-              <p>Electricity: {form.initialReadings.electricity}</p>
-              <p>Water: {form.initialReadings.water}</p>
-            </div>
-            <div>
-              <p className="text-xs text-slate-500">Rules</p>
-              <p>Require proof: {form.requireProof ? "Yes" : "No"}</p>
-              <p>Allow zero: {form.rules.allowZero ? "Yes" : "No"}</p>
-            </div>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={handleSave}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-slate-900 shadow-[0_10px_20px_rgba(56,189,248,0.25)] hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {saving ? "Saving..." : "Save Initial Values"}
+            </button>
           </div>
         </SectionCard>
       </div>
-    </SettingsShell>
+    </div>
   );
 }

@@ -10,8 +10,8 @@ import type {
 } from "./types";
 
 export const DEFAULT_GENERAL: GeneralSettings = {
-  orgName: "Orfane Real Estate",
-  displayName: "Orfane",
+  orgName: "Orfane Tower",
+  displayName: "Orfane Tower",
   email: "ops@orfane.com",
   phone: "",
   address: "",
@@ -21,7 +21,7 @@ export const DEFAULT_GENERAL: GeneralSettings = {
 };
 
 export const DEFAULT_BRANDING: BrandingSettings = {
-  appName: "Orfane Real Estate",
+  appName: "Orfane Tower",
   tagline: "Property operations & finance",
   logoPath: "/logos/orfane-logo-crop.png",
   brandMode: "icon_text",
@@ -33,7 +33,7 @@ export const DEFAULT_BANK: BankSettings = {
       id: "acct_default",
       nickname: "Business Bank Account",
       bankName: "",
-      holder: "Orfane Real Estate",
+      holder: "Orfane Tower",
       accountNumber: "",
       iban: "",
       swift: "",

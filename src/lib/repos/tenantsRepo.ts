@@ -142,6 +142,15 @@ export async function createTenant(payload: TenantInput): Promise<TenantRecord> 
     const { rows } = await query(
       `INSERT INTO tenants (id, name, building, property_id, unit, monthly_rent, due_day, reference)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name,
+         building = EXCLUDED.building,
+         property_id = EXCLUDED.property_id,
+         unit = EXCLUDED.unit,
+         monthly_rent = EXCLUDED.monthly_rent,
+         due_day = EXCLUDED.due_day,
+         reference = EXCLUDED.reference,
+         updated_at = now()
        RETURNING id, name, building, property_id, unit, monthly_rent, due_day, reference`,
       [
         id,

@@ -7,7 +7,7 @@ import {
   type TenantRecord,
   type StatementRow,
 } from "@/lib/reports/tenantStatement";
-import { COMPANY_ADDRESS, COMPANY_EMAIL, COMPANY_NAME, COMPANY_PHONE } from "@/lib/constants/branding";
+import { buildCompanyProfile, getOrganizationSnapshot, type CompanyProfile } from "@/lib/settings/organization";
 
 export const runtime = "nodejs";
 
@@ -18,6 +18,21 @@ type ChargeRow = {
   description?: string;
   category?: string;
 };
+
+const MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
 function toISO(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -35,6 +50,11 @@ function monthRange(reference: Date) {
 
 function monthLabel(reference: Date) {
   return reference.toLocaleString("en-US", { month: "long", year: "numeric" });
+}
+
+function toMonthIndex(value: string) {
+  const idx = MONTHS.findIndex((month) => month.toLowerCase() === value.toLowerCase());
+  return idx >= 0 ? idx : null;
 }
 
 function dueDateForMonth(reference: Date, dueDayRaw: string | number | undefined) {
@@ -67,6 +87,7 @@ function buildInvoiceSection(
   rows: StatementRow[],
   total: number,
   reference: Date,
+  company: CompanyProfile,
 ) {
   const lineItems = rows.filter((row) => row.entryType === "charge" && row.charge > 0);
   if (!lineItems.length) return "";
@@ -74,6 +95,7 @@ function buildInvoiceSection(
   const unitLabel = tenant.unit ? `Unit ${tenant.unit}` : "Unit —";
   const invoiceNumber = `INV-${toISO(reference).slice(0, 7)}-${normalizeId(tenant.id)}`;
   const dueDate = dueDateForMonth(reference, tenant.due_day);
+  const fromLines = [company.address, company.phone, company.email].filter(Boolean);
 
   const lines = lineItems
     .map(
@@ -86,10 +108,15 @@ function buildInvoiceSection(
     )
     .join("");
 
+  const logo = company.logoPath
+    ? `<img class="logo" src="${company.logoPath}" alt="${company.name} logo" />`
+    : "";
+
   return `
     <section class="invoice">
       <div class="invoice-top">
         <div>
+          ${logo}
           <p class="tag">Draft invoice</p>
           <h1>Invoice</h1>
           <p class="muted">Billing period: ${monthLabel(reference)}</p>
@@ -109,10 +136,8 @@ function buildInvoiceSection(
         </div>
         <div>
           <h2>From</h2>
-          <p class="name">${COMPANY_NAME}</p>
-          <p>${COMPANY_ADDRESS}</p>
-          <p>${COMPANY_PHONE}</p>
-          <p>${COMPANY_EMAIL}</p>
+          <p class="name">${company.name}</p>
+          ${fromLines.map((line) => `<p>${line}</p>`).join("")}
         </div>
       </div>
       <table>
@@ -140,12 +165,24 @@ function buildInvoiceSection(
 
 export async function GET(req: NextRequest) {
   try {
-    const reference = new Date();
-    const { start, end } = monthRange(reference);
-    const tenants = await tenantsRepo.listTenants();
+    const organization = await getOrganizationSnapshot();
+    const company = buildCompanyProfile(organization);
     const { searchParams } = new URL(req.url);
     const requestedTenantId = searchParams.get("tenantId") || searchParams.get("tenant") || "";
     const mode = searchParams.get("mode") || "download";
+    const requestedMonth = searchParams.get("month") || "";
+    const requestedYear = searchParams.get("year") || "";
+    let reference = new Date();
+    if (requestedMonth || requestedYear) {
+      const monthIndex = toMonthIndex(requestedMonth || MONTHS[reference.getUTCMonth()]);
+      const year = Number(requestedYear || reference.getUTCFullYear());
+      if (monthIndex !== null && Number.isFinite(year)) {
+        reference = new Date(Date.UTC(year, monthIndex, 1));
+      }
+    }
+
+    const { start, end } = monthRange(reference);
+    const tenants = await tenantsRepo.listTenants();
     const normalizedTenantId = normalizeId(requestedTenantId);
     const scopedTenants = normalizedTenantId
       ? tenants.filter((tenant) => {
@@ -178,7 +215,7 @@ export async function GET(req: NextRequest) {
           additionalCharges,
         });
         if (!totals.charges) return "";
-        return buildInvoiceSection(statementTenant, rows, totals.charges, reference);
+        return buildInvoiceSection(statementTenant, rows, totals.charges, reference, company);
       })
       .filter(Boolean)
       .join("");
@@ -197,6 +234,7 @@ export async function GET(req: NextRequest) {
       .invoice:last-child { page-break-after: auto; }
       .invoice { page-break-after: always; }
       .invoice-top { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
+      .logo { height: 52px; width: auto; display: block; margin-bottom: 12px; }
       h1 { margin: 8px 0 4px; font-size: 28px; letter-spacing: 0.05em; text-transform: uppercase; }
       h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; color: #64748b; }
       .tag { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #9f1239; font-weight: 700; }

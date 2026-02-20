@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import SectionCard from "@/components/ui/SectionCard";
-import { fetchLedger } from "@/lib/reports/ledger";
+import { buildRentLedger } from "@/lib/reports/rentLedger";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -45,7 +45,7 @@ export default async function LedgerPage({
   const property = (typeof sp.property === "string" ? sp.property : "") || "";
 
   const [entries, properties] = await Promise.all([
-    fetchLedger({ start, end, propertyId: property || undefined }),
+    buildRentLedger({ start, end, propertyId: property || undefined }),
     getProperties(),
   ]);
 

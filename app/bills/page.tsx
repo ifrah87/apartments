@@ -18,13 +18,19 @@ type UnitCard = {
   id: string;
   unit: string;
   tenant: string;
+  hasTenant: boolean;
+};
+
+type BillingUnit = UnitCard & {
   status: "ready" | "billed" | "waiting";
 };
 
 type InvoiceRow = {
   id: string;
-  unit: string;
-  tenant: string;
+  unitId: string;
+  unitLabel: string;
+  tenantId: string;
+  tenantName: string;
   period: string;
   total: number;
   outstanding: number;
@@ -57,6 +63,25 @@ function formatCurrency(value: number) {
   return formatter.format(value || 0);
 }
 
+function normalizeInvoice(row: any): InvoiceRow {
+  const status = row?.status;
+  const normalizedStatus: InvoiceRow["status"] =
+    status === "Paid" || status === "Partially Paid" || status === "Unpaid" ? status : "Unpaid";
+  const unitLabel = row?.unitLabel || row?.unit || row?.unit_name || "Unit";
+  const tenantName = row?.tenantName || row?.tenant || "Tenant";
+  return {
+    id: String(row?.id ?? ""),
+    unitId: String(row?.unitId ?? row?.unit_id ?? ""),
+    unitLabel: String(unitLabel),
+    tenantId: String(row?.tenantId ?? row?.tenant_id ?? ""),
+    tenantName: String(tenantName),
+    period: String(row?.period ?? ""),
+    total: Number(row?.total ?? 0),
+    outstanding: Number(row?.outstanding ?? row?.total ?? 0),
+    status: normalizedStatus,
+  };
+}
+
 export default function BillsPage() {
   const [query, setQuery] = useState("");
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
@@ -69,16 +94,19 @@ export default function BillsPage() {
   const [generatorYear, setGeneratorYear] = useState("2026");
 
   useEffect(() => {
-    const loadUnits = async () => {
+    const loadData = async () => {
       try {
-        const [unitsRes, tenantsRes] = await Promise.all([
+        const [unitsRes, tenantsRes, invoicesRes] = await Promise.all([
           fetch("/api/units", { cache: "no-store" }),
           fetch("/api/tenants", { cache: "no-store" }),
+          fetch("/api/bills", { cache: "no-store" }),
         ]);
         const unitsPayload = await unitsRes.json().catch(() => null);
         const tenantsPayload = await tenantsRes.json().catch(() => null);
+        const invoicesPayload = await invoicesRes.json().catch(() => null);
         const unitsData = unitsPayload?.ok ? unitsPayload.data : unitsPayload;
         const tenantsData = tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload;
+        const invoicesData = invoicesPayload?.ok ? invoicesPayload.data : invoicesPayload;
 
         const tenantIndex = new Map<string, TenantRecord>();
         if (Array.isArray(tenantsData)) {
@@ -98,13 +126,13 @@ export default function BillsPage() {
                 id: unit.id,
                 unit: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
                 tenant: tenant?.name || "No tenant",
-                status: tenant ? "ready" : "waiting",
+                hasTenant: Boolean(tenant),
               };
             })
           : [];
 
         setUnits(nextUnits);
-        setInvoices([]);
+        setInvoices(Array.isArray(invoicesData) ? invoicesData.map(normalizeInvoice) : []);
       } catch (err) {
         console.error("Failed to load units for billing", err);
         setUnits([]);
@@ -112,36 +140,71 @@ export default function BillsPage() {
       }
     };
 
-    loadUnits();
+    loadData();
   }, []);
+
+  const billingPeriod = useMemo(
+    () => `${generatorMonth} ${generatorYear}`,
+    [generatorMonth, generatorYear],
+  );
+
+  const billingUnits = useMemo<BillingUnit[]>(() => {
+    const billedUnitIds = new Set(
+      invoices.filter((invoice) => invoice.period === billingPeriod).map((invoice) => invoice.unitId),
+    );
+    return units.map((unit) => ({
+      ...unit,
+      status: unit.hasTenant ? (billedUnitIds.has(unit.id) ? "billed" : "ready") : "waiting",
+    }));
+  }, [units, invoices, billingPeriod]);
 
   const visibleInvoices = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return invoices;
     return invoices.filter((invoice) => {
       return (
-        invoice.unit.toLowerCase().includes(normalized) ||
-        invoice.tenant.toLowerCase().includes(normalized)
+        invoice.unitLabel.toLowerCase().includes(normalized) ||
+        invoice.tenantName.toLowerCase().includes(normalized)
       );
     });
   }, [query, invoices]);
 
-  const handleDeleteInvoice = (invoice: InvoiceRow) => {
-    if (!confirm(`Delete invoice for ${invoice.unit}?`)) return;
-    setInvoices((prev) => prev.filter((row) => row.id !== invoice.id));
+  const handleDeleteInvoice = async (invoice: InvoiceRow) => {
+    if (!confirm(`Delete invoice for ${invoice.unitLabel}?`)) return;
+    try {
+      const res = await fetch("/api/bills", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: invoice.id }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.ok) {
+        alert(payload?.error || "Failed to delete invoice.");
+        return;
+      }
+        const data = payload?.data;
+        if (Array.isArray(data)) {
+          setInvoices(data.map(normalizeInvoice));
+        } else {
+          setInvoices((prev) => prev.filter((row) => row.id !== invoice.id));
+        }
+    } catch (err) {
+      console.error("Failed to delete invoice", err);
+      alert("Failed to delete invoice.");
+    }
   };
 
   const generatorUnits = useMemo(() => {
     const normalized = generatorQuery.trim().toLowerCase();
-    if (!normalized) return units;
-    return units.filter((unit) => {
+    if (!normalized) return billingUnits;
+    return billingUnits.filter((unit) => {
       return unit.unit.toLowerCase().includes(normalized) || unit.tenant.toLowerCase().includes(normalized);
     });
-  }, [generatorQuery, units]);
+  }, [generatorQuery, billingUnits]);
 
   const readyUnitIds = useMemo(
-    () => units.filter((unit) => unit.status === "ready").map((unit) => unit.id),
-    [units],
+    () => billingUnits.filter((unit) => unit.status === "ready").map((unit) => unit.id),
+    [billingUnits],
   );
 
   const openGenerator = () => {
@@ -156,7 +219,7 @@ export default function BillsPage() {
     setGenerating(false);
   };
 
-  const toggleUnit = (unit: UnitCard) => {
+  const toggleUnit = (unit: BillingUnit) => {
     if (unit.status !== "ready") return;
     setSelectedUnits((prev) => (prev.includes(unit.id) ? prev.filter((id) => id !== unit.id) : [...prev, unit.id]));
   };
@@ -165,19 +228,87 @@ export default function BillsPage() {
     setSelectedUnits(readyUnitIds);
   };
 
-  const runGenerator = () => {
+  const runGenerator = async () => {
     if (!selectedUnits.length) return;
     setGenerating(true);
-    const popup = window.open("/api/invoices/monthly?mode=view", "_blank", "noopener,noreferrer");
-    if (!popup) {
-      alert("Popup blocked. Please allow popups to preview invoices.");
-      setGenerating(false);
-      return;
-    }
-    setTimeout(() => {
-      setGenerating(false);
+    const popup = window.open("about:blank", "_blank", "noopener,noreferrer");
+    try {
+      const res = await fetch("/api/bills", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          unitIds: selectedUnits,
+          month: generatorMonth,
+          year: generatorYear,
+        }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.ok) {
+        popup?.close();
+        alert(payload?.error || "Failed to generate invoices.");
+        setGenerating(false);
+        return;
+      }
+
+      if (Array.isArray(payload?.data)) {
+        setInvoices(payload.data.map(normalizeInvoice));
+      }
+
+      if (Array.isArray(payload?.skipped) && payload.skipped.length) {
+        alert(`Skipped: ${payload.skipped.join(", ")}`);
+      }
+
+      const params = new URLSearchParams({
+        mode: "view",
+        month: generatorMonth,
+        year: generatorYear,
+      });
+      if (popup) {
+        popup.location.href = `/api/invoices/monthly?${params.toString()}`;
+      } else {
+        window.open(`/api/invoices/monthly?${params.toString()}`, "_blank", "noopener,noreferrer");
+      }
+      setSelectedUnits([]);
       setShowGenerator(false);
-    }, 600);
+    } catch (err) {
+      console.error("Failed to generate invoices", err);
+      popup?.close();
+      alert("Failed to generate invoices.");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const parsePeriod = (period: string) => {
+    const parts = period.trim().split(" ");
+    if (parts.length < 2) return { month: "", year: "" };
+    const year = parts.pop() || "";
+    const month = parts.join(" ");
+    return { month, year };
+  };
+
+  const buildInvoiceUrl = (invoice: InvoiceRow, mode: "view" | "download") => {
+    const { month, year } = parsePeriod(invoice.period);
+    const params = new URLSearchParams({ mode });
+    if (invoice.tenantId) params.set("tenantId", invoice.tenantId);
+    if (month) params.set("month", month);
+    if (year) params.set("year", year);
+    return `/api/invoices/monthly?${params.toString()}`;
+  };
+
+  const handleViewInvoice = (invoice: InvoiceRow) => {
+    window.open(buildInvoiceUrl(invoice, "view"), "_blank", "noopener,noreferrer");
+  };
+
+  const handleExportInvoice = (invoice: InvoiceRow) => {
+    window.open(buildInvoiceUrl(invoice, "download"), "_blank", "noopener,noreferrer");
+  };
+
+  const handleWhatsAppInvoice = (invoice: InvoiceRow) => {
+    const invoiceUrl = new URL(buildInvoiceUrl(invoice, "view"), window.location.origin).toString();
+    const message = `Invoice for ${invoice.tenantName} (${invoice.period}) - ${formatCurrency(invoice.total)}. ${invoiceUrl}`;
+    const href = `https://wa.me/?text=${encodeURIComponent(message)}`;
+    window.open(href, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -254,8 +385,8 @@ export default function BillsPage() {
               {visibleInvoices.map((invoice) => (
                 <tr key={invoice.id} className="border-t border-white/10 hover:bg-white/5">
                   <td className="px-4 py-3">
-                    <div className="font-semibold text-slate-100">{invoice.unit}</div>
-                    <div className="text-xs text-slate-400">{invoice.tenant}</div>
+                    <div className="font-semibold text-slate-100">{invoice.unitLabel}</div>
+                    <div className="text-xs text-slate-400">{invoice.tenantName}</div>
                   </td>
                   <td className="px-4 py-3">{invoice.period}</td>
                   <td className="px-4 py-3 text-slate-100">{formatCurrency(invoice.total)}</td>
@@ -271,13 +402,22 @@ export default function BillsPage() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button className="rounded-lg border border-white/10 p-2 text-slate-200 hover:border-white/20">
+                      <button
+                        onClick={() => handleViewInvoice(invoice)}
+                        className="rounded-lg border border-white/10 p-2 text-slate-200 hover:border-white/20"
+                      >
                         <Eye className="h-4 w-4" />
                       </button>
-                      <button className="rounded-lg border border-white/10 p-2 text-slate-200 hover:border-white/20">
+                      <button
+                        onClick={() => handleExportInvoice(invoice)}
+                        className="rounded-lg border border-white/10 p-2 text-slate-200 hover:border-white/20"
+                      >
                         <FileDown className="h-4 w-4" />
                       </button>
-                      <button className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-200">
+                      <button
+                        onClick={() => handleWhatsAppInvoice(invoice)}
+                        className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-200"
+                      >
                         <MessageCircle className="h-3 w-3" />
                         WhatsApp
                       </button>

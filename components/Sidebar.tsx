@@ -22,12 +22,12 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-4 z-40 flex h-[calc(100vh-1rem)] w-64 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 shadow-[0_10px_40px_rgba(2,6,23,0.45)]">
+    <aside className="sticky top-0 z-40 flex h-screen w-64 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 shadow-[0_10px_40px_rgba(2,6,23,0.45)]">
       <div className="-mt-2">
         <SidebarBrand />
         <div className="mx-4 mt-0 h-px bg-white/5" />
       </div>
-      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-4 pb-4" aria-label="Primary">
+      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-4 pb-4 pt-10" aria-label="Primary">
         {NAV.map(({ href, label, icon: Icon, indent }) => {
           const active = pathname === href || (href !== "/" && pathname?.startsWith(href));
           const paddingClass = indent ? "pl-11" : "pl-9";

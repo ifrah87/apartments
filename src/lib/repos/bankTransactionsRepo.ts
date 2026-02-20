@@ -81,36 +81,95 @@ export async function listTransactions(filters: BankTransactionFilters = {}): Pr
   const clauses: string[] = [];
   const params: any[] = [];
 
-  if (filters.start) {
-    params.push(filters.start);
-    clauses.push(`date >= $${params.length}`);
-  }
-  if (filters.end) {
-    params.push(filters.end);
-    clauses.push(`date <= $${params.length}`);
-  }
-  if (filters.propertyId) {
-    params.push(filters.propertyId);
-    clauses.push(`property_id = $${params.length}`);
-  }
-  if (filters.tenantId) {
-    params.push(filters.tenantId);
-    clauses.push(`tenant_id = $${params.length}`);
-  }
-  if (filters.type) {
-    params.push(filters.type);
-    clauses.push(`type = $${params.length}`);
-  }
+  const buildNewSchemaQuery = () => {
+    clauses.length = 0;
+    params.length = 0;
+    if (filters.start) {
+      params.push(filters.start);
+      clauses.push(`date >= $${params.length}`);
+    }
+    if (filters.end) {
+      params.push(filters.end);
+      clauses.push(`date <= $${params.length}`);
+    }
+    if (filters.propertyId) {
+      params.push(filters.propertyId);
+      clauses.push(`property_id = $${params.length}`);
+    }
+    if (filters.tenantId) {
+      params.push(filters.tenantId);
+      clauses.push(`tenant_id = $${params.length}`);
+    }
+    if (filters.type) {
+      params.push(filters.type);
+      clauses.push(`type = $${params.length}`);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    return {
+      sql: `SELECT id, date, description, amount, type, property_id, tenant_id, reference, category_id, matched_tenant_id, match_amount, match_note
+            FROM bank_transactions
+            ${where}
+            ORDER BY date DESC, id DESC`,
+      params: [...params],
+    };
+  };
 
-  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const { rows } = await query(
-    `SELECT id, date, description, amount, type, property_id, tenant_id, reference, category_id, matched_tenant_id, match_amount, match_note
-     FROM bank_transactions
-     ${where}
-     ORDER BY date DESC, id DESC`,
-    params,
-  );
-  return rows.map(normalizeTxnRow);
+  const buildLegacyQuery = () => {
+    const legacyClauses: string[] = [];
+    const legacyParams: any[] = [];
+    if (filters.start) {
+      legacyParams.push(filters.start);
+      legacyClauses.push(`txn_date >= $${legacyParams.length}`);
+    }
+    if (filters.end) {
+      legacyParams.push(filters.end);
+      legacyClauses.push(`txn_date <= $${legacyParams.length}`);
+    }
+    if (filters.type) {
+      if (filters.type === "credit") {
+        legacyClauses.push(`deposit > 0`);
+      } else if (filters.type === "debit") {
+        legacyClauses.push(`withdrawal > 0`);
+      }
+    }
+    const where = legacyClauses.length ? `WHERE ${legacyClauses.join(" AND ")}` : "";
+    return {
+      sql: `SELECT
+              id::text as id,
+              txn_date as date,
+              COALESCE(particulars, '') as description,
+              (COALESCE(deposit, 0) - COALESCE(withdrawal, 0)) as amount,
+              CASE WHEN COALESCE(deposit, 0) > 0 THEN 'credit' WHEN COALESCE(withdrawal, 0) > 0 THEN 'debit' ELSE NULL END as type,
+              NULL::text as property_id,
+              NULL::text as tenant_id,
+              COALESCE(ref, '') as reference,
+              NULL::text as category_id,
+              NULL::text as matched_tenant_id,
+              NULL::numeric as match_amount,
+              NULL::text as match_note
+            FROM bank_transactions
+            ${where}
+            ORDER BY txn_date DESC, id DESC`,
+      params: legacyParams,
+    };
+  };
+
+  const isMissingColumn = (err: unknown) => {
+    const code = (err as { code?: string })?.code;
+    const message = err instanceof Error ? err.message : String(err);
+    return code === "42703" || message.includes("column \"date\" does not exist");
+  };
+
+  try {
+    const { sql, params } = buildNewSchemaQuery();
+    const { rows } = await query(sql, params);
+    return rows.map(normalizeTxnRow);
+  } catch (err) {
+    if (!isMissingColumn(err)) throw err;
+    const { sql, params } = buildLegacyQuery();
+    const { rows } = await query(sql, params);
+    return rows.map(normalizeTxnRow);
+  }
 }
 
 export async function createTransaction(payload: BankTransactionInput): Promise<BankTransaction> {

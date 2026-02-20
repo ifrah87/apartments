@@ -81,7 +81,20 @@ function normalizeServiceList(value: unknown): ServiceRecord[] {
 export async function GET() {
   try {
     const data = await datasetsRepo.getDataset<ServiceRecord[]>(DATASET_KEY, DEFAULT_SERVICES);
-    return NextResponse.json({ ok: true, data });
+    const current = normalizeServiceList(data);
+    const hasCleaning = current.some((service) => service.id === "cleaning");
+    if (hasCleaning) {
+      return NextResponse.json({ ok: true, data: current });
+    }
+
+    const merged = [...current];
+    DEFAULT_SERVICES.forEach((service) => {
+      if (!merged.some((item) => item.id === service.id)) {
+        merged.push(service);
+      }
+    });
+    const updated = await datasetsRepo.setDataset<ServiceRecord[]>(DATASET_KEY, merged);
+    return NextResponse.json({ ok: true, data: updated });
   } catch (err) {
     console.error("❌ failed to load services", err);
     return handleError(err);
