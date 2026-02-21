@@ -163,21 +163,21 @@ export async function buildRentLedger(filters: RentLedgerFilters = {}): Promise<
       return acc;
     }, []);
 
-  const bankEntries: RentLedgerEntry[] = bankTransactions
-    .map((txn) => {
-      const explicitTenantId = normalizeId(txn.tenant_id || txn.matched_tenant_id || "");
-      let tenant = explicitTenantId ? tenantIndex.byId.get(explicitTenantId) : undefined;
-      if (!tenant) {
-        const desc = (txn.description || "").toLowerCase();
-        tenant = relevantTenants.find((candidate) => {
-          if (candidate.name && desc.includes(candidate.name.toLowerCase())) return true;
-          if (candidate.unit && desc.includes(candidate.unit.toLowerCase())) return true;
-          if (candidate.reference && desc.includes(candidate.reference.toLowerCase())) return true;
-          return false;
-        });
-      }
-      if (!tenant) return null;
-      return {
+  const bankEntries: RentLedgerEntry[] = bankTransactions.flatMap((txn) => {
+    const explicitTenantId = normalizeId(txn.tenant_id || txn.matched_tenant_id || "");
+    let tenant = explicitTenantId ? tenantIndex.byId.get(explicitTenantId) : undefined;
+    if (!tenant) {
+      const desc = (txn.description || "").toLowerCase();
+      tenant = relevantTenants.find((candidate) => {
+        if (candidate.name && desc.includes(candidate.name.toLowerCase())) return true;
+        if (candidate.unit && desc.includes(candidate.unit.toLowerCase())) return true;
+        if (candidate.reference && desc.includes(candidate.reference.toLowerCase())) return true;
+        return false;
+      });
+    }
+    if (!tenant) return [];
+    return [
+      {
         date: txn.date,
         description: txn.description || `Payment • ${tenant.name}`,
         property_id: tenant.property_id || tenant.building || txn.property_id || undefined,
@@ -185,9 +185,9 @@ export async function buildRentLedger(filters: RentLedgerFilters = {}): Promise<
         reference: tenant.reference || tenant.unit || tenant.name,
         amount: Number(txn.amount || 0),
         raw: { source: "bank", txnId: txn.id },
-      } satisfies RentLedgerEntry;
-    })
-    .filter((entry): entry is RentLedgerEntry => entry !== null);
+      },
+    ];
+  });
 
   return [...chargeEntries, ...depositEntries, ...manualEntries, ...bankEntries];
 }
