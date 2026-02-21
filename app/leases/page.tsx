@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -121,6 +121,14 @@ function buildDefaultForm(): LeaseFormState {
 }
 
 export default function LeasesPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-slate-400">Loading leases…</div>}>
+      <LeasesPageInner />
+    </Suspense>
+  );
+}
+
+function LeasesPageInner() {
   const [leases, setLeases] = useState<LeaseAgreement[]>([]);
   const [search, setSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("All Months");
