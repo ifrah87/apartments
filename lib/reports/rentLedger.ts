@@ -127,14 +127,14 @@ export async function buildRentLedger(filters: RentLedgerFilters = {}): Promise<
 
   const depositEntries: RentLedgerEntry[] = leases
     .filter((lease) => lease && lease.deposit && lease.deposit > 0 && lease.status !== "Terminated")
-    .map((lease) => {
+    .reduce<RentLedgerEntry[]>((acc, lease) => {
       const tenant = findTenantForLease(lease, tenantIndex);
-      if (propertyFilter && !tenant && normalizeKey(lease.property || "") !== propertyFilter) return null;
+      if (propertyFilter && !tenant && normalizeKey(lease.property || "") !== propertyFilter) return acc;
       const dateValue = parseDate(lease.startDate) || start;
-      if (dateValue < start || dateValue > end) return null;
+      if (dateValue < start || dateValue > end) return acc;
       const tenantName = tenant?.name || lease.tenantName || "Tenant";
       const unit = lease.unit || tenant?.unit || "";
-      return {
+      acc.push({
         date: toISO(dateValue),
         description: `Security deposit • ${tenantName}${unit ? ` (Unit ${unit})` : ""}`,
         property_id: tenant?.property_id || tenant?.building || lease.property || undefined,
@@ -142,9 +142,9 @@ export async function buildRentLedger(filters: RentLedgerFilters = {}): Promise<
         reference: tenant?.reference || unit || tenantName,
         amount: -Math.abs(Number(lease.deposit || 0)),
         raw: { source: "deposit", leaseId: lease.id },
-      } satisfies RentLedgerEntry;
-    })
-    .filter((entry): entry is RentLedgerEntry => Boolean(entry));
+      });
+      return acc;
+    }, []);
 
   const manualEntries: RentLedgerEntry[] = manualPayments
     .filter((entry) => withinRange(entry.date, start, end))
