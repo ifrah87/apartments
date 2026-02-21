@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { datasetsRepo, tenantsRepo, unitsRepo, type RepoError } from "@/lib/repos";
-import { createStatement, normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
+import { datasetsRepo, tenantsRepo, unitsRepo, type RepoError, type TenantRecord as RepoTenantRecord } from "@/lib/repos";
+import { createStatement, normalizeId } from "@/lib/reports/tenantStatement";
 
 export const runtime = "nodejs";
 
@@ -64,8 +64,8 @@ function monthRange(reference: Date) {
   return { start, end };
 }
 
-function buildTenantIndex(tenants: TenantRecord[]) {
-  const map = new Map<string, TenantRecord>();
+function buildTenantIndex(tenants: RepoTenantRecord[]) {
+  const map = new Map<string, RepoTenantRecord>();
   tenants.forEach((tenant) => {
     const unit = tenant.unit || "";
     if (!unit) return;
