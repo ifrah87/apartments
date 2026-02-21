@@ -1,6 +1,7 @@
 import { bankTransactionsRepo, datasetsRepo, tenantsRepo } from "@/lib/repos";
 import { listManualPayments } from "@/lib/reports/manualPayments";
-import { createStatement, normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
+import { createStatement, normalizeId } from "@/lib/reports/tenantStatement";
+import type { TenantRecord as RepoTenantRecord } from "@/lib/repos/tenantsRepo";
 import type { LeaseAgreement } from "@/lib/leases";
 
 export type RentLedgerEntry = {
@@ -44,15 +45,15 @@ function withinRange(date: string, start: Date, end: Date) {
   return normalized >= start && normalized <= end;
 }
 
-function matchesProperty(tenant: TenantRecord, propertyFilter: string) {
+function matchesProperty(tenant: RepoTenantRecord, propertyFilter: string) {
   if (!propertyFilter) return true;
   const key = propertyFilter.toLowerCase();
   return (tenant.property_id || "").toLowerCase() === key || (tenant.building || "").toLowerCase() === key;
 }
 
-function buildTenantIndex(tenants: TenantRecord[]) {
-  const byId = new Map<string, TenantRecord>();
-  const byUnit = new Map<string, TenantRecord>();
+function buildTenantIndex(tenants: RepoTenantRecord[]) {
+  const byId = new Map<string, RepoTenantRecord>();
+  const byUnit = new Map<string, RepoTenantRecord>();
   tenants.forEach((tenant) => {
     const id = normalizeId(tenant.id);
     if (id) byId.set(id, tenant);
