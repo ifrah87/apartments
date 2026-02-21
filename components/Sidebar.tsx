@@ -5,7 +5,14 @@ import { usePathname } from "next/navigation";
 import { LayoutGrid, Building2, Home, Gauge, Receipt, BarChart3, Wrench, FileText, Settings } from "lucide-react";
 import { SidebarBrand } from "./SidebarBrand";
 
-const NAV = [
+type NavItem = {
+  href: string;
+  label: string;
+  icon: typeof LayoutGrid;
+  indent?: boolean;
+};
+
+const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutGrid },
   { href: "/properties", label: "Properties", icon: Building2 },
   { href: "/units", label: "Units", icon: Home },
