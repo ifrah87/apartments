@@ -148,10 +148,10 @@ export async function buildRentLedger(filters: RentLedgerFilters = {}): Promise<
 
   const manualEntries: RentLedgerEntry[] = manualPayments
     .filter((entry) => withinRange(entry.date, start, end))
-    .map((entry) => {
+    .reduce<RentLedgerEntry[]>((acc, entry) => {
       const tenant = tenantIndex.byId.get(normalizeId(entry.tenant_id));
-      if (!tenant) return null;
-      return {
+      if (!tenant) return acc;
+      acc.push({
         date: entry.date,
         description: entry.description || `Manual payment • ${tenant.name}`,
         property_id: tenant.property_id || tenant.building || undefined,
@@ -159,9 +159,9 @@ export async function buildRentLedger(filters: RentLedgerFilters = {}): Promise<
         reference: tenant.reference || tenant.unit || tenant.name,
         amount: Number(entry.amount || 0),
         raw: { source: "manual", tenantId: tenant.id },
-      } satisfies RentLedgerEntry;
-    })
-    .filter((entry): entry is RentLedgerEntry => Boolean(entry));
+      });
+      return acc;
+    }, []);
 
   const bankEntries: RentLedgerEntry[] = bankTransactions
     .map((txn) => {
