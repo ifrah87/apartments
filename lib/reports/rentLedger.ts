@@ -187,7 +187,7 @@ export async function buildRentLedger(filters: RentLedgerFilters = {}): Promise<
         raw: { source: "bank", txnId: txn.id },
       } satisfies RentLedgerEntry;
     })
-    .filter((entry): entry is RentLedgerEntry => Boolean(entry));
+    .filter((entry): entry is RentLedgerEntry => entry !== null);
 
   return [...chargeEntries, ...depositEntries, ...manualEntries, ...bankEntries];
 }
