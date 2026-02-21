@@ -117,7 +117,6 @@ function buildInvoiceSection(
       <div class="invoice-top">
         <div>
           ${logo}
-          <p class="tag">Draft invoice</p>
           <h1>Invoice</h1>
           <p class="muted">Billing period: ${monthLabel(reference)}</p>
         </div>
@@ -158,7 +157,6 @@ function buildInvoiceSection(
           </tr>
         </tfoot>
       </table>
-      <p class="note">Draft only. Send to tenant after review.</p>
     </section>
   `;
 }
