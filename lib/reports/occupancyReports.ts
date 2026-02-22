@@ -120,7 +120,7 @@ export async function buildOccupancyReport(filters: OccupancyFilters, properties
   const [units, turnover, tenants] = await Promise.all([
     fetchJson<UnitInventory[]>("/api/unit-inventory").catch(() => [] as UnitInventory[]),
     fetchJson<UnitTurnover[]>("/api/unit-turnover").catch(() => [] as UnitTurnover[]),
-    fetchJson<TenantRecord[]>("/api/dashboard/occupancy"),
+    fetchJson<TenantRecord[]>("/api/dashboard/occupancy").catch(() => [] as TenantRecord[]),
   ]);
   const propertyFilter = (filters.propertyId || "").toLowerCase();
   const statusFilter = filters.status || "all";
