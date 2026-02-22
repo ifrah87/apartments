@@ -17,10 +17,16 @@ export async function calculateRentSummary(): Promise<RentSummary> {
     fetch(`${baseUrl}/api/payments`, { cache: "no-store" }),
   ]);
 
-  const tenantsPayload = await tenantsRes.json();
-  const paymentsPayload = await paymentsRes.json();
-  const tenants = tenantsPayload?.ok === false ? [] : (tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload);
-  const payments = paymentsPayload?.ok === false ? [] : (paymentsPayload?.ok ? paymentsPayload.data : paymentsPayload);
+  const tenantsPayload = await safeJson(tenantsRes);
+  const paymentsPayload = await safeJson(paymentsRes);
+  const tenants =
+    tenantsPayload?.ok === false
+      ? []
+      : (tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload) ?? [];
+  const payments =
+    paymentsPayload?.ok === false
+      ? []
+      : (paymentsPayload?.ok ? paymentsPayload.data : paymentsPayload) ?? [];
 
   const referenceDate = deriveReferenceDate(payments);
   const thisMonth = referenceDate.getMonth();
@@ -72,6 +78,18 @@ export async function calculateRentSummary(): Promise<RentSummary> {
 }
 
 const DAY_IN_MS = 1000 * 60 * 60 * 24;
+
+async function safeJson(res: Response) {
+  if (!res.ok) return null;
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) return null;
+  try {
+    return await res.json();
+  } catch (err) {
+    console.warn("Failed to parse JSON response in rent summary", err);
+    return null;
+  }
+}
 
 function safeDate(value?: string | number | null): Date | null {
   if (!value) return null;
