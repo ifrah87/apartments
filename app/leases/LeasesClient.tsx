@@ -337,15 +337,28 @@ export default function LeasesClient() {
     const normalizedProperty = normalizedPropertyLabel;
     let filtered = [] as Array<{ unit: string }>;
     if (hasSelectedProperty) {
-      filtered = units.filter((unit) => unit.property_id === selectedPropertyId);
+      const selectedKey = selectedPropertyId.trim().toLowerCase();
+      const labelKey = normalizedPropertyLabel.trim();
+      const selectedSlug = slugify(selectedKey);
+      const labelSlug = slugify(labelKey);
+      filtered = units.filter((unit) => {
+        const prop = (unit.property_id || "").trim().toLowerCase();
+        if (!prop) return true;
+        if (prop === selectedKey || prop === labelKey) return true;
+        const propSlug = slugify(prop);
+        return propSlug === selectedSlug || propSlug === labelSlug;
+      });
       if (!filtered.length) {
         filtered = units;
       }
     } else if (normalizedProperty) {
+      const labelKey = normalizedProperty.trim();
+      const labelSlug = slugify(labelKey);
       filtered = units.filter((unit) => {
-        const prop = (unit.property_id || "").toLowerCase();
+        const prop = (unit.property_id || "").trim().toLowerCase();
         if (!prop) return true;
-        return prop === normalizedProperty;
+        if (prop === labelKey) return true;
+        return slugify(prop) === labelSlug;
       });
       if (!filtered.length) {
         filtered = units;

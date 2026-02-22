@@ -5,27 +5,19 @@ declare global {
   var __orfane_pgPool: Pool | undefined;
 }
 
-function getSslConfig() {
-  const caRaw = process.env.DATABASE_SSL_CA;
-  if (!caRaw) return undefined;
-
-  const ca = caRaw.replace(/\\n/g, "\n");
-
-  return {
-    ca,
-    rejectUnauthorized: true,
-  } as const;
-}
-
 export function getPool() {
-  if (!process.env.DATABASE_URL) {
-    throw new Error("DATABASE_URL is missing");
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is not set (configure it in Vercel Environment Variables).");
   }
+
+  const ca = process.env.DATABASE_SSL_CA?.replace(/\\n/g, "\n");
+  const ssl = ca ? { rejectUnauthorized: true, ca } : { rejectUnauthorized: true };
 
   if (!globalThis.__orfane_pgPool) {
     globalThis.__orfane_pgPool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: getSslConfig(),
+      connectionString,
+      ssl,
     });
   }
 
