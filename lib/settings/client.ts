@@ -14,7 +14,9 @@ export async function fetchSettings<T extends SettingsPayload>(key: string, fall
     if (!res.ok || payload?.ok === false) {
       return fallback;
     }
-    return (payload?.ok ? payload.data : payload) as T;
+    const data = (payload?.ok ? payload.data : payload) as T | undefined | null;
+    if (data == null) return fallback;
+    return data;
   } catch {
     return fallback;
   }
