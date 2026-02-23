@@ -1,9 +1,16 @@
 import { query } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
+  const stamp = {
+    routeVersion: "debug-db-v2",
+    builtAt: new Date().toISOString(),
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.RAILWAY_GIT_COMMIT || null,
+  };
   try {
     const r = await query("SELECT now() as now");
-    return Response.json({ ok: true, now: r.rows[0].now });
+    return Response.json({ ok: true, now: r.rows[0].now, ...stamp });
   } catch (err: any) {
     const causes = Array.isArray(err?.errors)
       ? err.errors.map((e: any) => ({
@@ -12,11 +19,12 @@ export async function GET() {
           code: e?.code,
           errno: e?.errno,
         }))
-      : undefined;
+      : null;
 
     return Response.json(
       {
         ok: false,
+        ...stamp,
         name: err?.name,
         message: err?.message,
         code: err?.code,
