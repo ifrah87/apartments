@@ -14,13 +14,13 @@ function missingDbEnv() {
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { key: string } }
+  { params }: { params: Promise<{ key: string }> }
 ) {
   if (missingDbEnv()) {
     return NextResponse.json({ ok: false, error: "Missing database configuration." }, { status: 500 });
   }
   try {
-    const { key } = params;
+    const { key } = await params;
     const meta = getSettingsMeta(key);
     if (!meta) {
       return NextResponse.json({ ok: false, error: "Unknown settings key." }, { status: 404 });
@@ -36,13 +36,13 @@ export async function GET(
 
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { key: string } }
+  { params }: { params: Promise<{ key: string }> }
 ) {
   if (missingDbEnv()) {
     return NextResponse.json({ ok: false, error: "Missing database configuration." }, { status: 500 });
   }
   try {
-    const { key } = params;
+    const { key } = await params;
     const meta = getSettingsMeta(key);
     if (!meta) {
       return NextResponse.json({ ok: false, error: "Unknown settings key." }, { status: 404 });
