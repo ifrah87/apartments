@@ -8,12 +8,19 @@ function handleError(err: unknown) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
+function missingDbEnv() {
+  return !process.env.DATABASE_URL || !process.env.DATABASE_SSL_CA;
+}
+
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ key: string }> }
+  { params }: { params: { key: string } }
 ) {
+  if (missingDbEnv()) {
+    return NextResponse.json({ ok: false, error: "Missing database configuration." }, { status: 500 });
+  }
   try {
-    const { key } = await params;
+    const { key } = params;
     const meta = getSettingsMeta(key);
     if (!meta) {
       return NextResponse.json({ ok: false, error: "Unknown settings key." }, { status: 404 });
@@ -29,10 +36,13 @@ export async function GET(
 
 export async function PUT(
   req: NextRequest,
-  { params }: { params: Promise<{ key: string }> }
+  { params }: { params: { key: string } }
 ) {
+  if (missingDbEnv()) {
+    return NextResponse.json({ ok: false, error: "Missing database configuration." }, { status: 500 });
+  }
   try {
-    const { key } = await params;
+    const { key } = params;
     const meta = getSettingsMeta(key);
     if (!meta) {
       return NextResponse.json({ ok: false, error: "Unknown settings key." }, { status: 404 });
