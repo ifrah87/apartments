@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/lib/db/client";
+import { query } from "@/lib/db";
 
 type BookmarkletTransaction = {
   date: string;

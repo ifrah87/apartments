@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { query } from "@/lib/db/client";
+import { query } from "@/lib/db";
 import { badRequest, notFound, type RepoError } from "./errors";
 
 export type TenantRecord = {

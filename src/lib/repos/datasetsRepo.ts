@@ -1,4 +1,4 @@
-import { query } from "@/lib/db/client";
+import { query } from "@/lib/db";
 import { badRequest } from "./errors";
 
 export type DatasetKey = string;

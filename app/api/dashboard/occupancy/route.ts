@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { query } from "@/lib/db/client";
+import { query } from "@/lib/db";
 
 function handleError(err: unknown) {
   const message = err instanceof Error ? err.message : "Unexpected error.";

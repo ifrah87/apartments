@@ -8,9 +8,14 @@ function handleError(err: unknown) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ key: string }> }) {
+export async function GET(_req: NextRequest, { params }: { params: { key: string } }) {
+  return Response.json({
+    ok: true,
+    hasUrl: !!process.env.DATABASE_URL,
+    hasCa: !!process.env.DATABASE_SSL_CA
+  });
   try {
-    const { key } = await params;
+    const { key } = params;
     const meta = getSettingsMeta(key);
     if (!meta) {
       return NextResponse.json({ ok: false, error: "Unknown settings key." }, { status: 404 });
@@ -24,9 +29,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ key
   }
 }
 
-export async function PUT(req: NextRequest, { params }: { params: Promise<{ key: string }> }) {
+export async function PUT(req: NextRequest, { params }: { params: { key: string } }) {
   try {
-    const { key } = await params;
+    const { key } = params;
     const meta = getSettingsMeta(key);
     if (!meta) {
       return NextResponse.json({ ok: false, error: "Unknown settings key." }, { status: 404 });

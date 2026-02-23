@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { query } from "@/lib/db/client";
+import { query } from "@/lib/db";
 import { DEFAULT_INITIAL_READINGS } from "@/lib/settings/defaults";
 import { normalizeSettings } from "@/lib/settings/server";
 import type { InitialReadingsSettings } from "@/lib/settings/types";
