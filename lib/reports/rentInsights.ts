@@ -23,9 +23,9 @@ type UnitRecord = {
 
 export type PropertyInfo = {
   id: string;
-  name: string | null;
-  code: string | null;
-  status: string | null;
+  name?: string;
+  code?: string;
+  status?: string;
 };
 
 type NormalizedPayment = {

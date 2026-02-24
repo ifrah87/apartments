@@ -18,8 +18,8 @@ export async function fetchPropertyOptions(): Promise<PropertyInfo[]> {
   if (!Array.isArray(data)) return [];
   return data.map((row) => ({
     id: String(row.id),
-    name: row.name ?? null,
-    code: row.code ?? null,
-    status: row.status ?? null,
+    name: row.name ?? undefined,
+    code: row.code ?? undefined,
+    status: row.status ?? undefined,
   })) as PropertyInfo[];
 }
