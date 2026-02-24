@@ -1,10 +1,9 @@
-import { Suspense } from "react";
+import { listPropertySummaries } from "@/lib/repos/propertiesRepo";
 import PropertiesClient from "./PropertiesClient";
 
-export default function PropertiesPage() {
-  return (
-    <Suspense fallback={<div className="p-4 text-slate-300">Loading…</div>}>
-      <PropertiesClient />
-    </Suspense>
-  );
+export const dynamic = "force-dynamic";
+
+export default async function PropertiesPage() {
+  const summaries = await listPropertySummaries();
+  return <PropertiesClient summaries={summaries} />;
 }

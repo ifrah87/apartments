@@ -14,6 +14,17 @@ export type PropertyRecord = {
 
 export type PropertyInput = Partial<PropertyRecord> & { name?: string };
 
+export type PropertySummary = {
+  id: string;
+  name: string;
+  code: string | null;
+  status: "active" | "archived";
+  totalUnits: number;
+  occupiedUnits: number;
+  vacantUnits: number;
+  monthlyRent: number;
+};
+
 function normalizePropertyRow(row: any): PropertyRecord {
   return {
     id: String(row.id),
@@ -49,6 +60,51 @@ export async function listProperties(includeArchived = true): Promise<PropertyRe
      ORDER BY created_at DESC`,
   );
   return rows.map(normalizePropertyRow);
+}
+
+export async function listPropertySummaries(): Promise<PropertySummary[]> {
+  const { rows } = await query(
+    `SELECT
+       p.id,
+       p.name,
+       p.code,
+       p.status,
+       COALESCE(u.total_units, 0)::int as total_units,
+       COALESCE(u.occupied_units, 0)::int as occupied_units,
+       COALESCE(u.vacant_units, 0)::int as vacant_units,
+       COALESCE(l.monthly_rent, 0)::numeric as monthly_rent
+     FROM properties p
+     LEFT JOIN (
+       SELECT
+         property_id,
+         COUNT(*) as total_units,
+         COUNT(*) FILTER (WHERE lower(status) = 'occupied') as occupied_units,
+         COUNT(*) FILTER (WHERE lower(status) = 'vacant') as vacant_units
+       FROM units
+       GROUP BY property_id
+     ) u ON u.property_id = p.id
+     LEFT JOIN (
+       SELECT
+         u.property_id,
+         SUM(l.rent) as monthly_rent
+       FROM leases l
+       JOIN units u ON u.id = l.unit_id
+       WHERE lower(l.status) = 'active'
+       GROUP BY u.property_id
+     ) l ON l.property_id = p.id
+     ORDER BY p.created_at DESC`,
+  );
+
+  return rows.map((row: any) => ({
+    id: String(row.id),
+    name: String(row.name),
+    code: row.code ?? null,
+    status: row.status === "archived" ? "archived" : "active",
+    totalUnits: Number(row.total_units || 0),
+    occupiedUnits: Number(row.occupied_units || 0),
+    vacantUnits: Number(row.vacant_units || 0),
+    monthlyRent: Number(row.monthly_rent || 0),
+  }));
 }
 
 export async function getProperty(id: string): Promise<PropertyRecord | null> {
@@ -120,6 +176,7 @@ export async function updateProperty(id: string, payload: PropertyInput): Promis
 
 export const propertiesRepo = {
   listProperties,
+  listPropertySummaries,
   getProperty,
   createProperty,
   updateProperty,
