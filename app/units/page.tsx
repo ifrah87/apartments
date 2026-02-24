@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 
 type UnitRecord = {
   id: string;
-  property_id?: string | null;
+  property_id: string | null;
   unit: string;
   floor?: string | null;
   type?: string | null;

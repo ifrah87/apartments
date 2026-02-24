@@ -4,7 +4,7 @@ import { badRequest, notFound } from "./errors";
 
 export type UnitRecord = {
   id: string;
-  property_id?: string | null;
+  property_id: string | null;
   unit: string;
   floor?: string | null;
   type?: string | null;
@@ -25,31 +25,79 @@ function toNumber(value: unknown) {
   return Number.isFinite(num) ? num : null;
 }
 
+function toInt(value: unknown) {
+  const num = toNumber(value);
+  if (num === null) return null;
+  return Math.trunc(num);
+}
+
+type UnitType = "3bed" | "2bed" | "studio";
+
+function normalizeUnitType(value: unknown): UnitType {
+  const raw = String(value ?? "").toLowerCase();
+  if (raw.includes("studio")) return "studio";
+  if (raw.includes("3")) return "3bed";
+  if (raw.includes("2")) return "2bed";
+  return "2bed";
+}
+
+function inferUnitType(unitNumber: number) {
+  const slot = unitNumber % 100;
+  const floor = Math.trunc(unitNumber / 100);
+  if (slot === 6) return "studio";
+  if (slot === 3) return "3bed";
+  if (floor <= 5 && slot === 1) return "3bed";
+  return "2bed";
+}
+
+function bedsFromType(unitType?: string | null) {
+  if (!unitType) return null;
+  if (unitType.startsWith("3")) return "3";
+  if (unitType.startsWith("2")) return "2";
+  if (unitType.includes("studio")) return "0";
+  return null;
+}
+
 function normalizeUnitRow(row: any): UnitRecord {
+  const unitNumber = row.unit_number ?? row.unitNumber ?? row.unit;
+  const unitType = row.unit_type ?? row.unitType ?? row.type ?? null;
   return {
     id: String(row.id),
     property_id: row.property_id ?? null,
-    unit: row.unit,
-    floor: row.floor ?? null,
-    type: row.type ?? null,
-    beds: row.beds ?? null,
+    unit: unitNumber !== undefined && unitNumber !== null ? String(unitNumber) : "",
+    floor: row.floor !== undefined && row.floor !== null ? String(row.floor) : null,
+    type: unitType,
+    beds: row.beds ?? bedsFromType(unitType),
     rent: row.rent !== null && row.rent !== undefined ? Number(row.rent) : null,
     status: row.status ?? null,
   };
 }
 
-function normalizeUnitInput(payload: UnitInput, requireUnit = true) {
-  const unit = payload.unit?.trim();
-  if (requireUnit && !unit) {
-    throw badRequest("Unit label is required.");
+function normalizeUnitInput(payload: UnitInput, requireUnit = true, requireType = true) {
+  const unitRaw = payload.unit?.trim();
+  const unitNumber = unitRaw ? toInt(unitRaw) : toInt(payload.unit);
+  if (requireUnit && !unitNumber) {
+    throw badRequest("Unit number is required.");
   }
+  const floor = toInt(payload.floor) ?? (unitNumber ? Math.trunc(unitNumber / 100) : null);
+  if (requireUnit && floor === null) {
+    throw badRequest("Floor is required.");
+  }
+  let unitType: UnitType | undefined;
+  if (payload.type !== undefined && payload.type !== null && payload.type !== "") {
+    unitType = normalizeUnitType(payload.type);
+  } else if (unitNumber) {
+    unitType = inferUnitType(unitNumber);
+  } else if (requireType) {
+    unitType = "2bed";
+  }
+
   return {
     id: payload.id ? String(payload.id) : undefined,
     property_id: payload.property_id ?? null,
-    unit: unit ?? payload.unit,
-    floor: payload.floor ?? null,
-    type: payload.type ?? null,
-    beds: payload.beds ?? null,
+    unit_number: unitNumber ?? undefined,
+    floor,
+    unit_type: unitType,
     rent: toNumber(payload.rent),
     status: payload.status ?? null,
   };
@@ -64,10 +112,10 @@ export async function listUnits(filters: UnitFilters = {}): Promise<UnitRecord[]
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const { rows } = await query(
-    `SELECT id, property_id, unit, floor, type, beds, rent, status
+    `SELECT id, property_id, unit_number, floor, unit_type, rent, status
      FROM units
      ${where}
-     ORDER BY unit ASC`,
+     ORDER BY unit_number ASC`,
     params,
   );
   return rows.map(normalizeUnitRow);
@@ -76,7 +124,7 @@ export async function listUnits(filters: UnitFilters = {}): Promise<UnitRecord[]
 export async function getUnit(id: string): Promise<UnitRecord | null> {
   if (!id) throw badRequest("Unit id is required.");
   const { rows } = await query(
-    `SELECT id, property_id, unit, floor, type, beds, rent, status
+    `SELECT id, property_id, unit_number, floor, unit_type, rent, status
      FROM units
      WHERE id = $1`,
     [id],
@@ -86,19 +134,18 @@ export async function getUnit(id: string): Promise<UnitRecord | null> {
 }
 
 export async function createUnit(payload: UnitInput): Promise<UnitRecord> {
-  const normalized = normalizeUnitInput(payload);
+  const normalized = normalizeUnitInput(payload, true, true);
   const id = normalized.id ?? randomUUID();
   const { rows } = await query(
-    `INSERT INTO units (id, property_id, unit, floor, type, beds, rent, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     RETURNING id, property_id, unit, floor, type, beds, rent, status`,
+    `INSERT INTO units (id, property_id, unit_number, floor, unit_type, rent, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     RETURNING id, property_id, unit_number, floor, unit_type, rent, status`,
     [
       id,
       normalized.property_id,
-      normalized.unit,
+      normalized.unit_number,
       normalized.floor,
-      normalized.type,
-      normalized.beds,
+      normalized.unit_type,
       normalized.rent,
       normalized.status,
     ],
@@ -108,15 +155,14 @@ export async function createUnit(payload: UnitInput): Promise<UnitRecord> {
 
 export async function updateUnit(id: string, payload: UnitInput): Promise<UnitRecord> {
   if (!id) throw badRequest("Unit id is required.");
-  const normalized = normalizeUnitInput(payload, false);
+  const normalized = normalizeUnitInput(payload, false, false);
   const fields: string[] = [];
   const params: any[] = [];
   const mapping: Array<[keyof typeof normalized, string]> = [
     ["property_id", "property_id"],
-    ["unit", "unit"],
+    ["unit_number", "unit_number"],
     ["floor", "floor"],
-    ["type", "type"],
-    ["beds", "beds"],
+    ["unit_type", "unit_type"],
     ["rent", "rent"],
     ["status", "status"],
   ];
@@ -138,7 +184,7 @@ export async function updateUnit(id: string, payload: UnitInput): Promise<UnitRe
     `UPDATE units
      SET ${fields.join(", ")}, updated_at = now()
      WHERE id = $${params.length}
-     RETURNING id, property_id, unit, floor, type, beds, rent, status`,
+     RETURNING id, property_id, unit_number, floor, unit_type, rent, status`,
     params,
   );
   if (!rows.length) throw notFound("Unit not found.");

@@ -8,7 +8,7 @@ import SectionCard from "@/components/ui/SectionCard";
 
 type UnitRecord = {
   id: string;
-  property_id?: string | null;
+  property_id: string | null;
   unit: string;
 };
 

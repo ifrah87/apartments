@@ -40,7 +40,7 @@ type InvoiceRow = {
 type UnitRecord = {
   id: string;
   unit: string;
-  property_id?: string | null;
+  property_id: string | null;
 };
 
 type TenantRecord = {

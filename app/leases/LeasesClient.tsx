@@ -613,21 +613,12 @@ export default function LeasesClient() {
     if (!confirm(`Delete lease for Unit ${lease.unit}?`)) return;
     setNotice(null);
     try {
-      const res = await fetch("/api/lease-agreements", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: lease.id }),
-      });
+      const res = await fetch(`/api/leases/${lease.id}`, { method: "DELETE" });
       const data = await res.json().catch(() => null);
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || "Failed to delete lease.");
       }
-      const updated = (data?.ok ? data.data : data) as LeaseAgreement[];
-      if (Array.isArray(updated)) {
-        setLeases(updated);
-      } else {
-        setLeases((prev) => prev.filter((item) => item.id !== lease.id));
-      }
+      setLeases((prev) => prev.filter((item) => item.id !== lease.id));
     } catch (err) {
       console.error(err);
       setNotice("API unavailable. Lease removed locally only.");

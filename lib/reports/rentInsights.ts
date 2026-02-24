@@ -18,7 +18,7 @@ type UnitRecord = {
   beds?: string;
   rent?: string | number;
   status?: string;
-  property_id?: string;
+  property_id: string | null;
 };
 
 export type PropertyInfo = {
