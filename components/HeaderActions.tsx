@@ -25,6 +25,7 @@ export default function HeaderActions() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const showLogin = auth?.authenticated === false && pathname !== "/login";
+  const hidePropertySelector = pathname === "/properties";
 
   useEffect(() => {
     const stored = window.localStorage.getItem("theme");
@@ -103,7 +104,7 @@ export default function HeaderActions() {
 
   return (
     <div className="flex flex-1 items-center justify-end gap-4">
-      {activeProperties.length ? (
+      {!hidePropertySelector && activeProperties.length ? (
         <label className="flex items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm text-slate-200">
           <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Property</span>
           <select
