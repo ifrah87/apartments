@@ -26,7 +26,6 @@ type PatchPayload = Partial<Pick<
   | "invoicesEnabled"
   | "portalInviteSent"
   | "contactsConfirmed"
-  | "houseRulesConfirmed"
   | "idCopyTaken"
   | "accessCardsIssued"
 >>;
@@ -62,7 +61,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ orgId:
       invoicesEnabled: payload.invoicesEnabled,
       portalInviteSent: payload.portalInviteSent,
       contactsConfirmed: payload.contactsConfirmed,
-      houseRulesConfirmed: payload.houseRulesConfirmed,
       idCopyTaken: payload.idCopyTaken,
       accessCardsIssued: payload.accessCardsIssued,
       updatedAt: nowIso(),

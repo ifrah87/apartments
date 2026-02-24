@@ -70,7 +70,7 @@ export default function OnboardingWizardPage() {
       return value === true;
     }).length;
   }, [checkpoints]);
-  const totalCheckpoints = 5;
+  const totalCheckpoints = 4;
   const progress = totalCheckpoints ? Math.round((completedCount / totalCheckpoints) * 100) : 0;
 
   const leaseDocExists = data?.documents?.some((doc) => doc.type === "lease");
@@ -205,12 +205,6 @@ export default function OnboardingWizardPage() {
               </button>
             </div>
           }
-        />
-        <ChecklistItem
-          title="House rules acknowledged"
-          description="Confirm house rules are accepted."
-          status={checkpoints.houseRulesConfirmed ? "done" : "pending"}
-          onToggle={() => updateCheckpoint({ houseRulesConfirmed: !checkpoints.houseRulesConfirmed })}
         />
         <ChecklistItem
           title="ID copy taken"

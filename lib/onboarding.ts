@@ -55,7 +55,7 @@ export type OnboardingCheckpoints = {
 export type DocumentRecord = {
   id: string;
   tenantId: string;
-  type: "lease" | "house_rules" | "welcome_pack" | "deposit_receipt" | "statement";
+  type: "lease" | "welcome_pack" | "deposit_receipt" | "statement";
   name: string;
   url: string;
   uploadedAt: string;

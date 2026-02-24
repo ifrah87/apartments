@@ -34,7 +34,6 @@ export type OnboardingCheckpointsCommercial = {
   leaseUploaded: boolean;
   invoicesEnabled: boolean;
   depositOrGuaranteeConfirmed: boolean;
-  houseRulesConfirmed?: boolean;
   idCopyTaken?: boolean;
   accessCardsIssued?: boolean;
   portalInviteSent: boolean;
@@ -61,7 +60,7 @@ export type Invoice = {
 export type CommercialDocument = {
   id: string;
   tenantOrgId: string;
-  type: "lease" | "house_rules" | "compliance" | "welcome_pack" | "statement";
+  type: "lease" | "compliance" | "welcome_pack" | "statement";
   name: string;
   url: string;
   uploadedAt: string;
@@ -91,7 +90,6 @@ export type Notice = {
 
 export const COMMERCIAL_REQUIRED_FOR_ACTIVE: (keyof OnboardingCheckpointsCommercial)[] = [
   "leaseUploaded",
-  "houseRulesConfirmed",
   "idCopyTaken",
   "accessCardsIssued",
   "depositOrGuaranteeConfirmed",
@@ -110,7 +108,6 @@ export function computeCommercialStatus(
 export function computeCommercialMissing(checkpoints: OnboardingCheckpointsCommercial) {
   const missing: string[] = [];
   if (!checkpoints.leaseUploaded) missing.push("Lease");
-  if (!checkpoints.houseRulesConfirmed) missing.push("House rules");
   if (!checkpoints.idCopyTaken) missing.push("ID copy");
   if (!checkpoints.accessCardsIssued) missing.push("Keys");
   if (!checkpoints.depositOrGuaranteeConfirmed) missing.push("Deposit + rent");

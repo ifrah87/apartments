@@ -97,7 +97,6 @@ export async function POST(req: Request) {
       leaseUploaded: false,
       invoicesEnabled: false,
       depositOrGuaranteeConfirmed: false,
-      houseRulesConfirmed: false,
       idCopyTaken: false,
       accessCardsIssued: false,
       portalInviteSent: false,
