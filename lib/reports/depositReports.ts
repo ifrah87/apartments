@@ -17,7 +17,7 @@ type RawDepositTxn = {
   note?: string;
 };
 
-type PropertyInfo = { property_id: string; name?: string };
+type PropertyInfo = { id: string; name?: string };
 
 export type DepositFilters = {
   propertyId?: string;
@@ -74,7 +74,7 @@ function toNumber(value: string | number | undefined | null) {
 
 function propertyName(propertyId: string | undefined, properties: PropertyInfo[]) {
   if (!propertyId) return undefined;
-  const match = properties.find((p) => (p.property_id || "").toLowerCase() === propertyId.toLowerCase());
+  const match = properties.find((p) => (p.id || "").toLowerCase() === propertyId.toLowerCase());
   return match?.name || propertyId;
 }
 

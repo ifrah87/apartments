@@ -93,7 +93,7 @@ export default async function UpcomingPaymentsPage({ searchParams }: { searchPar
         start={start}
         end={end}
         property={propertyId}
-        properties={properties.map((property) => ({ id: property.property_id, name: property.name }))}
+        properties={properties.map((property) => ({ id: property.id, name: property.name }))}
       />
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -202,7 +202,7 @@ function resolveDueDate(tenant: TenantRecord, referenceDate: Date): Date | null 
 
 function buildUpcomingRows(
   tenants: TenantRecord[],
-  properties: { property_id: string; name?: string }[],
+  properties: { id: string; name?: string }[],
   referenceDate: Date,
   paidIndex: Map<string, Set<string>>,
 ) {
@@ -216,7 +216,7 @@ function buildUpcomingRows(
     const monthKey = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}`;
     if (paidIndex.get(monthKey)?.has(tenantId)) return;
     const propertyId = tenant.property_id || tenant.building || "";
-    const propertyName = properties.find((p) => (p.property_id || "").toLowerCase() === propertyId.toLowerCase())?.name;
+    const propertyName = properties.find((p) => (p.id || "").toLowerCase() === propertyId.toLowerCase())?.name;
     rows.push({
       tenant: tenant.name,
       propertyId,

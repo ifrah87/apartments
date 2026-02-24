@@ -142,7 +142,7 @@ export async function listTransactions(filters: BankTransactionFilters = {}): Pr
               CASE WHEN COALESCE(deposit, 0) > 0 THEN 'credit' WHEN COALESCE(withdrawal, 0) > 0 THEN 'debit' ELSE NULL END as type,
               NULL::text as property_id,
               NULL::text as tenant_id,
-              COALESCE(ref, '') as reference,
+              COALESCE(cheque_no::text, tran_no::text, '') as reference,
               NULL::text as category_id,
               NULL::text as matched_tenant_id,
               NULL::numeric as match_amount,

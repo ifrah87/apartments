@@ -49,8 +49,8 @@ export default async function OccupancyReportPage({ searchParams }: { searchPara
             >
               <option value="">All properties</option>
               {properties.map((property) => (
-                <option key={property.property_id} value={property.property_id}>
-                  {property.name ?? property.property_id}
+                <option key={property.id} value={property.id}>
+                  {property.name ?? property.id}
                 </option>
               ))}
             </select>

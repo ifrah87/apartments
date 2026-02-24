@@ -164,10 +164,10 @@ export default function LeaseStatementsReportPage() {
     fetch("/api/properties", { cache: "no-store" })
       .then((res) => res.json())
       .then((payload) => {
-        const data = (payload?.ok ? payload.data : payload) as Array<{ name?: string; building?: string; property_id?: string }>;
+        const data = (payload?.ok ? payload.data : payload) as Array<{ id?: string; name?: string; building?: string }>;
         if (Array.isArray(data) && data.length) {
           const names = data
-            .map((item) => item.name || item.building || item.property_id)
+            .map((item) => item.name || item.building || item.id)
             .filter(Boolean) as string[];
           setProperties(Array.from(new Set(names)));
         }

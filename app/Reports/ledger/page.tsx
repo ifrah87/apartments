@@ -6,7 +6,7 @@ import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-type PropertyOption = { property_id: string; name?: string };
+type PropertyOption = { id: string; name?: string };
 
 function formatDate(date: string | undefined) {
   if (!date) return "—";
@@ -89,8 +89,8 @@ export default async function LedgerPage({
             >
               <option value="">All properties</option>
               {properties.map((p) => (
-                <option key={p.property_id} value={p.property_id}>
-                  {p.name ?? p.property_id}
+                <option key={p.id} value={p.id}>
+                  {p.name ?? p.id}
                 </option>
               ))}
             </select>

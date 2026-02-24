@@ -14,7 +14,7 @@ type TicketRecord = {
   description?: string;
 };
 
-type PropertyInfo = { property_id: string; name?: string };
+type PropertyInfo = { id: string; name?: string };
 
 export type MaintenanceFilters = {
   propertyId?: string;
@@ -72,7 +72,7 @@ function titleCase(value: string | undefined) {
 
 function getPropertyName(id: string | undefined, properties: PropertyInfo[]) {
   if (!id) return undefined;
-  const match = properties.find((p) => (p.property_id || "").toLowerCase() === id.toLowerCase());
+  const match = properties.find((p) => (p.id || "").toLowerCase() === id.toLowerCase());
   return match?.name || id;
 }
 

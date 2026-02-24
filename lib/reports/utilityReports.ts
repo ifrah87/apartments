@@ -60,7 +60,10 @@ function withinRange(date: Date, start?: Date, end?: Date) {
   return true;
 }
 
-export async function buildUtilityChargesReport(filters: UtilityFilters, properties: { property_id: string; name?: string }[]): Promise<UtilityReportResult> {
+export async function buildUtilityChargesReport(
+  filters: UtilityFilters,
+  properties: { id: string; name?: string }[],
+): Promise<UtilityReportResult> {
   const [tenants, charges] = await Promise.all([
     fetchJson<TenantRecord[]>("/api/tenants"),
     fetchJson<RawUtilityCharge[]>("/api/tenant-charges").catch(() => [] as RawUtilityCharge[]),
@@ -68,7 +71,7 @@ export async function buildUtilityChargesReport(filters: UtilityFilters, propert
   const propertyFilter = (filters.propertyId || "").toLowerCase();
   const start = filters.start ? new Date(filters.start) : undefined;
   const end = filters.end ? new Date(filters.end) : undefined;
-  const propertyMap = new Map(properties.map((property) => [property.property_id.toLowerCase(), property.name || property.property_id]));
+  const propertyMap = new Map(properties.map((property) => [property.id.toLowerCase(), property.name || property.id]));
 
   const rows = charges
     .map((charge) => {

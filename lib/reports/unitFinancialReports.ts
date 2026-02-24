@@ -2,7 +2,7 @@ import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { listManualPayments } from "@/lib/reports/manualPayments";
 import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
 
-type PropertyInfo = { property_id: string; name?: string };
+type PropertyInfo = { id: string; name?: string };
 
 type UnitInventory = {
   property_id: string;
@@ -111,7 +111,7 @@ function unitKey(propertyId: string | undefined, unit: string | undefined) {
 
 function getPropertyName(id: string | undefined, properties: PropertyInfo[]) {
   if (!id) return undefined;
-  const match = properties.find((p) => (p.property_id || "").toLowerCase() === id.toLowerCase());
+  const match = properties.find((p) => (p.id || "").toLowerCase() === id.toLowerCase());
   return match?.name || id;
 }
 

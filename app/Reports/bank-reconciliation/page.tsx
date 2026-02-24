@@ -36,8 +36,8 @@ export default async function BankReconciliationPage({ searchParams }: { searchP
             <select name="property" defaultValue={sp.property || ""} className="mt-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
               <option value="">All properties</option>
               {properties.map((property) => (
-                <option key={property.property_id} value={property.property_id}>
-                  {property.name ?? property.property_id}
+                <option key={property.id} value={property.id}>
+                  {property.name ?? property.id}
                 </option>
               ))}
             </select>
