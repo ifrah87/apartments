@@ -1,8 +1,7 @@
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { listManualPayments } from "@/lib/reports/manualPayments";
 import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
-
-type PropertyInfo = { id: string; name?: string };
+import type { PropertyInfo } from "@/lib/reports/rentInsights";
 
 type UnitInventory = {
   property_id: string;

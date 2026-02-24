@@ -1,5 +1,6 @@
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { fetchPropertyOptions } from "@/lib/reports/propertyHelpers";
+import type { PropertyInfo } from "@/lib/reports/rentInsights";
 import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
 
 type UnitInventory = {
@@ -20,8 +21,6 @@ type UnitTurnover = {
   days_vacant_ytd?: string;
   notes?: string;
 };
-
-type PropertyInfo = { id: string; name?: string; code?: string | null };
 
 export type OccupancyFilters = {
   propertyId?: string;

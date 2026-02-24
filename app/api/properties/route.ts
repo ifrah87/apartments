@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const includeArchived = searchParams.get("includeArchived") === "1";
     const where = includeArchived ? "" : "WHERE status <> 'archived'";
     const { rows } = await query(
-      `SELECT id, name, code, address, city, country, status, created_at
+      `SELECT id, name, code, status
        FROM public.properties
        ${where}
        ORDER BY created_at DESC`,
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     const { rows } = await query(
       `INSERT INTO public.properties (name, code, address, city, country)
        VALUES ($1,$2,$3,$4,$5)
-       RETURNING id, name, code, address, city, country, status, created_at`,
+       RETURNING id, name, code, status`,
       [name, code, address, city, country],
     );
     return NextResponse.json({ ok: true, data: rows[0] }, { status: 201 });

@@ -1,5 +1,6 @@
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
+import type { PropertyInfo } from "@/lib/reports/rentInsights";
 
 type RawDepositSummary = {
   tenant_id: string;
@@ -16,8 +17,6 @@ type RawDepositTxn = {
   amount: string;
   note?: string;
 };
-
-type PropertyInfo = { id: string; name?: string };
 
 export type DepositFilters = {
   propertyId?: string;

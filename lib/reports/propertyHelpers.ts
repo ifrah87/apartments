@@ -11,13 +11,15 @@ export async function fetchPropertyOptions(): Promise<PropertyInfo[]> {
   if (payload?.ok === false) return [];
   const data = (payload?.ok ? payload.data : payload) as Array<{
     id: string;
-    name: string;
+    name?: string | null;
     code?: string | null;
+    status?: string | null;
   }>;
   if (!Array.isArray(data)) return [];
   return data.map((row) => ({
     id: String(row.id),
-    name: row.name,
+    name: row.name ?? null,
     code: row.code ?? null,
+    status: row.status ?? null,
   })) as PropertyInfo[];
 }

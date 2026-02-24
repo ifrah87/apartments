@@ -237,7 +237,7 @@ export default function UnitServicesPage() {
           <p className="text-xs uppercase tracking-wide text-slate-400">Manage Services</p>
           <h1 className="text-2xl font-semibold text-slate-100">{heading}</h1>
           {property ? (
-            <p className="text-xs text-slate-400">{property.name || property.id}</p>
+            <p className="text-xs text-slate-400">{property.name ?? property.code ?? property.id}</p>
           ) : null}
         </div>
         <Link

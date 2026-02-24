@@ -43,7 +43,7 @@ function normalizePropertyInput(payload: PropertyInput) {
 export async function listProperties(includeArchived = true): Promise<PropertyRecord[]> {
   const where = includeArchived ? "" : "WHERE status <> 'archived'";
   const { rows } = await query(
-    `SELECT id, name, code, address, city, country, status, created_at
+    `SELECT id, name, code, status
      FROM properties
      ${where}
      ORDER BY created_at DESC`,

@@ -1,4 +1,5 @@
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
+import type { PropertyInfo } from "@/lib/reports/rentInsights";
 
 type TicketRecord = {
   ticket_id: string;
@@ -13,8 +14,6 @@ type TicketRecord = {
   cost?: string;
   description?: string;
 };
-
-type PropertyInfo = { id: string; name?: string };
 
 export type MaintenanceFilters = {
   propertyId?: string;
