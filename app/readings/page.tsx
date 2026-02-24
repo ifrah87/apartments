@@ -10,6 +10,8 @@ type ApiReading = {
   id: string;
   unit: string;
   description: string;
+  meter_type?: string;
+  reading_date?: string;
   prev_value: number;
   reading_value: number;
   usage: number;
@@ -124,6 +126,15 @@ export default function ReadingsPage() {
     });
     return match?.id ?? null;
   }, [tenants, unit, unitPropertyId]);
+
+  const lastReading = useMemo(() => {
+    const unitKey = unit.trim().toLowerCase();
+    if (!unitKey) return null;
+    const match = rows.find(
+      (row) => row.unit.toLowerCase() === unitKey && row.meter_type === meterType,
+    );
+    return match?.reading_value ?? null;
+  }, [rows, unit, meterType]);
 
   const handleDelete = (id: string) => {
     setRows((prev) => prev.filter((row) => row.id !== id));
@@ -301,14 +312,30 @@ export default function ReadingsPage() {
                   <div className="rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-xs uppercase tracking-wide text-slate-400">
                     {meterType === "electricity" ? "Electricity Billing (kWh)" : "Water Billing (m³)"}
                   </div>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="Enter reading value"
-                    value={meterValue}
-                    onChange={(event) => setMeterValue(event.target.value)}
-                    className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
-                  />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-[11px] uppercase tracking-wide text-slate-500">Last Reading</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={lastReading !== null ? String(lastReading) : ""}
+                        placeholder="No previous reading"
+                        disabled
+                        className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 disabled:opacity-70"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] uppercase tracking-wide text-slate-500">Current Reading</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="Enter reading value"
+                        value={meterValue}
+                        onChange={(event) => setMeterValue(event.target.value)}
+                        className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                      />
+                    </div>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Upload Proof (image)</label>

@@ -5,6 +5,19 @@ import { normalizeSettings } from "@/lib/settings/server";
 import type { InitialReadingsSettings } from "@/lib/settings/types";
 import { datasetsRepo } from "./datasetsRepo";
 import { badRequest } from "./errors";
+import { tenantsRepo } from "./tenantsRepo";
+
+const METER_RATE = 0.41;
+
+type TenantChargeRow = {
+  tenant_id: string;
+  date: string;
+  amount: number;
+  description?: string;
+  category?: string;
+  property_id?: string | null;
+  meter_reading_id?: string;
+};
 
 export type MeterReading = {
   id: string;
@@ -43,6 +56,12 @@ function toNumber(value: unknown) {
 
 function descriptionForType(meterType: string) {
   return meterType === "water" ? "Water Billing" : "Electricity Billing";
+}
+
+function buildChargeDescription(meterType: string, usage: number) {
+  const label = meterType === "water" ? "Water" : "Electricity";
+  const usageLabel = Number.isFinite(usage) ? usage.toFixed(2) : "0.00";
+  return `${label} usage ${usageLabel} @ ${METER_RATE}`;
 }
 
 async function getInitialReadingsSettings(): Promise<InitialReadingsSettings> {
@@ -125,6 +144,8 @@ export async function createReading(payload: MeterReadingInput): Promise<MeterRe
     }
   }
   const usage = Number((readingValue - (prevValue ?? 0)).toFixed(2));
+  const billableUsage = Math.max(usage, 0);
+  const amount = Number((billableUsage * METER_RATE).toFixed(2));
 
   const { rows } = await query(
     `INSERT INTO meter_readings (id, unit, tenant_id, meter_type, reading_date, reading_value, prev_value, usage, amount, proof_url)
@@ -139,12 +160,38 @@ export async function createReading(payload: MeterReadingInput): Promise<MeterRe
       readingValue,
       prevValue,
       usage,
-      0,
+      amount,
       payload.proof_url ?? null,
     ],
   );
 
-  return normalizeReadingRow(rows[0]);
+  const created = rows[0];
+
+  if (tenantId && amount > 0) {
+    const tenant = await tenantsRepo.getTenant(tenantId);
+    const propertyId = tenant?.property_id ?? tenant?.building ?? null;
+    const charge: TenantChargeRow = {
+      tenant_id: tenantId,
+      date: readingDate,
+      amount,
+      description: buildChargeDescription(meterType, usage),
+      category: "utilities",
+      property_id: propertyId,
+      meter_reading_id: created.id,
+    };
+
+    await datasetsRepo.updateDataset<TenantChargeRow[]>(
+      "tenant_charges",
+      (current) => {
+        const rows = Array.isArray(current) ? current : [];
+        if (rows.some((row) => row?.meter_reading_id === created.id)) return rows;
+        return [...rows, charge];
+      },
+      [],
+    );
+  }
+
+  return normalizeReadingRow(created);
 }
 
 export const meterReadingsRepo = {
