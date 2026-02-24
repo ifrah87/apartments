@@ -1,10 +1,12 @@
+import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 
 export async function DELETE(
-  _req: Request,
-  { params }: { params: { id: string } },
+  _req: NextRequest,
+  context: { params: Promise<{ id: string }> },
 ) {
-  const leaseId = params.id;
+  const { id } = await context.params;
+  const leaseId = id;
 
   try {
     await query("BEGIN");
@@ -15,9 +17,9 @@ export async function DELETE(
 
     await query("COMMIT");
 
-    return Response.json({ ok: true });
+    return NextResponse.json({ ok: true });
   } catch (error) {
     await query("ROLLBACK");
-    return Response.json({ ok: false, error }, { status: 500 });
+    return NextResponse.json({ ok: false, error }, { status: 500 });
   }
 }
