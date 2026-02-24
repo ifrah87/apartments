@@ -132,7 +132,9 @@ export default function LeasesClient() {
   const [templateLoaded, setTemplateLoaded] = useState(false);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [properties, setProperties] = useState<Array<{ id: string; label: string; status?: string | null }>>([]);
-  const [units, setUnits] = useState<Array<{ id: string; unit: string; property_id?: string | null }>>([]);
+  const [units, setUnits] = useState<
+    Array<{ id: string; unit: string; property_id?: string | null; has_active_lease?: boolean | null }>
+  >([]);
   const [currentPropertyId, setCurrentPropertyIdState] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<LeaseFormState>(buildDefaultForm());
@@ -234,6 +236,7 @@ export default function LeasesClient() {
           id: string;
           unit: string;
           property_id?: string | null;
+          has_active_lease?: boolean | null;
         }>;
         if (Array.isArray(data)) {
           setUnits(data);
@@ -356,30 +359,45 @@ export default function LeasesClient() {
 
   const unitOptions = useMemo(() => {
     if (lockUnitSelection && form.unit) {
-      return [form.unit];
+      return [{ unit: form.unit, hasActiveLease: false }];
     }
     if (!units.length) {
-      return form.unit ? [form.unit] : [];
+      return form.unit ? [{ unit: form.unit, hasActiveLease: false }] : [];
     }
-    let filtered = [] as Array<{ unit: string }>;
+    let filtered = [] as Array<{ unit: string; has_active_lease?: boolean | null }>;
     if (selectedPropertyId) {
       filtered = units.filter((unit) => unit.property_id === selectedPropertyId);
     } else {
       filtered = units;
     }
-    const set = new Set(filtered.map((unit) => unit.unit).filter(Boolean));
-    if (form.unit) set.add(form.unit);
-    return Array.from(set);
+    const map = new Map<string, { unit: string; hasActiveLease: boolean }>();
+    filtered.forEach((unit) => {
+      if (!unit.unit) return;
+      const key = unit.unit;
+      const existing = map.get(key);
+      const hasActiveLease = Boolean(unit.has_active_lease);
+      if (!existing) {
+        map.set(key, { unit: key, hasActiveLease });
+      } else if (hasActiveLease) {
+        existing.hasActiveLease = true;
+      }
+    });
+    if (form.unit && !map.has(form.unit)) {
+      map.set(form.unit, { unit: form.unit, hasActiveLease: false });
+    }
+    return Array.from(map.values());
   }, [lockUnitSelection, form.unit, selectedPropertyId, units]);
+
+  const unitOptionValues = useMemo(() => unitOptions.map((option) => option.unit), [unitOptions]);
 
   useEffect(() => {
     if (lockUnitSelection) return;
     if (!form.unit) return;
-    if (unitOptions.includes(form.unit)) return;
+    if (unitOptionValues.includes(form.unit)) return;
     if (!customUnit) {
       setCustomUnit(form.unit);
     }
-  }, [lockUnitSelection, form.unit, unitOptions, customUnit]);
+  }, [lockUnitSelection, form.unit, unitOptionValues, customUnit]);
 
   const isEditing = editingId !== null;
 
@@ -539,6 +557,7 @@ export default function LeasesClient() {
               id: string;
               unit: string;
               property_id?: string | null;
+              has_active_lease?: boolean | null;
             }>;
           }
         } catch (err) {
@@ -635,6 +654,7 @@ export default function LeasesClient() {
       setLeases((prev) => prev.filter((item) => item.id !== lease.id));
     }
   };
+
 
   return (
     <div className="space-y-6">
@@ -864,7 +884,7 @@ export default function LeasesClient() {
                   <>
                     {unitOptions.length ? (
                       <select
-                        value={unitOptions.includes(form.unit) && !customUnit ? form.unit : ""}
+                        value={unitOptionValues.includes(form.unit) && !customUnit ? form.unit : ""}
                         onChange={(event) => {
                           setForm((prev) => ({ ...prev, unit: event.target.value }));
                           setCustomUnit("");
@@ -873,9 +893,10 @@ export default function LeasesClient() {
                         className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         <option value="">Select an apartment...</option>
-                        {unitOptions.map((unit) => (
-                          <option key={unit} value={unit}>
-                            {unit}
+                        {unitOptions.map((option) => (
+                          <option key={option.unit} value={option.unit} disabled={option.hasActiveLease}>
+                            {option.unit}
+                            {option.hasActiveLease ? " — Occupied" : ""}
                           </option>
                         ))}
                       </select>

@@ -11,6 +11,7 @@ export type UnitRecord = {
   beds?: string | null;
   rent?: number | null;
   status?: string | null;
+  has_active_lease?: boolean | null;
 };
 
 export type UnitFilters = {
@@ -70,6 +71,7 @@ function normalizeUnitRow(row: any): UnitRecord {
     beds: row.beds ?? bedsFromType(unitType),
     rent: row.rent !== null && row.rent !== undefined ? Number(row.rent) : null,
     status: row.status ?? null,
+    has_active_lease: row.has_active_lease ?? null,
   };
 }
 
@@ -116,10 +118,16 @@ export async function listUnits(filters: UnitFilters = {}): Promise<UnitRecord[]
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const { rows } = await query(
-    `SELECT id, property_id, unit_number, floor, unit_type, rent, status
-     FROM units
+    `SELECT u.id, u.property_id, u.unit_number, u.floor, u.unit_type, u.rent, u.status,
+            EXISTS (
+              SELECT 1
+              FROM public.leases l
+              WHERE l.unit_id = u.id
+                AND l.status = 'active'
+            ) AS has_active_lease
+     FROM units u
      ${where}
-     ORDER BY unit_number ASC`,
+     ORDER BY u.unit_number ASC`,
     params,
   );
   return rows.map(normalizeUnitRow);
