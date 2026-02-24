@@ -655,6 +655,27 @@ export default function LeasesClient() {
     }
   };
 
+  const handleEndLease = async (id: string) => {
+    const confirmed = confirm("End this lease?");
+    if (!confirmed) return;
+    try {
+      const res = await fetch(`/api/leases/${id}/end`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endDate: new Date().toISOString().slice(0, 10) }),
+      });
+      if (!res.ok) {
+        const msg = await res.text();
+        alert("Failed: " + msg);
+        return;
+      }
+      window.location.reload();
+    } catch (err) {
+      console.error(err);
+      alert("Failed: Network/API unavailable.");
+    }
+  };
+
 
   return (
     <div className="space-y-6">
@@ -798,6 +819,15 @@ export default function LeasesClient() {
                       >
                         <PencilLine className="h-4 w-4" />
                       </button>
+                      {String(lease.status).toLowerCase() === "active" ? (
+                        <button
+                          className="text-yellow-400 hover:text-yellow-300"
+                          aria-label={`End lease for Unit ${lease.unit}`}
+                          onClick={() => handleEndLease(lease.id)}
+                        >
+                          End
+                        </button>
+                      ) : null}
                       <button
                         className="rounded-lg border border-rose-400/30 bg-rose-500/10 p-2 text-rose-200 hover:border-rose-400/60"
                         aria-label={`Delete lease for Unit ${lease.unit}`}
