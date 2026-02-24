@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { FileText, X } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { resolveCurrentPropertyId, setCurrentPropertyId } from "@/lib/currentProperty";
 
 type UnitRecord = {
   id: string;
@@ -36,9 +38,10 @@ type LeaseAgreement = {
 };
 
 type PropertyRecord = {
-  property_id: string;
-  name?: string;
-  building?: string;
+  id: string;
+  name: string;
+  code?: string | null;
+  status?: string | null;
 };
 
 type UnitServiceRecord = {
@@ -92,22 +95,43 @@ export default function UnitsPage() {
   const [error, setError] = useState<string | null>(null);
   const unitInputRef = useRef<HTMLInputElement | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const searchParams = useSearchParams();
 
-  const loadData = async () => {
+  const loadProperties = async () => {
     try {
+      const res = await fetch("/api/properties?includeArchived=1", { cache: "no-store" });
+      const payload = await res.json().catch(() => null);
+      const data = (payload?.ok ? payload.data : payload) as PropertyRecord[];
+      if (Array.isArray(data)) {
+        setProperties(data);
+        const resolved = resolveCurrentPropertyId(data);
+        if (resolved) {
+          setSelectedPropertyId(resolved);
+          setForm((prev) => ({ ...prev, propertyId: resolved }));
+        }
+      } else {
+        setProperties([]);
+      }
+    } catch (err) {
+      console.error("Failed to load properties", err);
+      setProperties([]);
+    }
+  };
+
+  const loadData = async (propertyId?: string) => {
+    try {
+      const unitsUrl = propertyId ? `/api/units?propertyId=${encodeURIComponent(propertyId)}` : "/api/units";
       const [
         unitsRes,
         tenantsRes,
         leasesRes,
-        propertiesRes,
         unitServicesRes,
         buildingServicesRes,
         typesRes,
       ] = await Promise.all([
-        fetch("/api/units", { cache: "no-store" }),
+        fetch(unitsUrl, { cache: "no-store" }),
         fetch("/api/tenants", { cache: "no-store" }),
         fetch("/api/lease-agreements", { cache: "no-store" }),
-        fetch("/api/properties", { cache: "no-store" }),
         fetch("/api/unit-services", { cache: "no-store" }),
         fetch("/api/building-services", { cache: "no-store" }),
         fetch("/api/settings/property-types", { cache: "no-store" }),
@@ -116,7 +140,6 @@ export default function UnitsPage() {
       const unitsPayload = await unitsRes.json().catch(() => null);
       const tenantsPayload = await tenantsRes.json().catch(() => null);
       const leasesPayload = await leasesRes.json().catch(() => null);
-      const propertiesPayload = await propertiesRes.json().catch(() => null);
       const unitServicesPayload = await unitServicesRes.json().catch(() => null);
       const buildingServicesPayload = await buildingServicesRes.json().catch(() => null);
       const typesPayload = await typesRes.json().catch(() => null);
@@ -126,9 +149,6 @@ export default function UnitsPage() {
         tenantsPayload?.ok === false ? [] : (tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload) || [],
       );
       setLeases(leasesPayload?.ok === false ? [] : (leasesPayload?.ok ? leasesPayload.data : leasesPayload) || []);
-      setProperties(
-        propertiesPayload?.ok === false ? [] : (propertiesPayload?.ok ? propertiesPayload.data : propertiesPayload) || [],
-      );
       setUnitServices(
         unitServicesPayload?.ok === false
           ? []
@@ -150,15 +170,21 @@ export default function UnitsPage() {
   };
 
   useEffect(() => {
-    loadData();
+    loadProperties();
   }, []);
 
   useEffect(() => {
-    if (!selectedPropertyId && properties.length) {
-      setSelectedPropertyId(properties[0].property_id);
-      setForm((prev) => ({ ...prev, propertyId: properties[0].property_id }));
+    loadData(selectedPropertyId || undefined);
+  }, [selectedPropertyId]);
+
+  useEffect(() => {
+    const paramId = searchParams.get("propertyId");
+    if (paramId && paramId !== selectedPropertyId) {
+      setSelectedPropertyId(paramId);
+      setCurrentPropertyId(paramId);
+      setForm((prev) => ({ ...prev, propertyId: paramId }));
     }
-  }, [properties, selectedPropertyId]);
+  }, [searchParams, selectedPropertyId]);
 
   const tenantIndex = useMemo(() => {
     const map = new Map<string, TenantRecord>();
@@ -220,8 +246,8 @@ export default function UnitsPage() {
   const propertyLabels = useMemo(() => {
     const map = new Map<string, string>();
     properties.forEach((property) => {
-      const label = property.name || property.building || property.property_id;
-      if (label) map.set(property.property_id, label);
+      const label = property.name || property.code || property.id;
+      if (label) map.set(property.id, label);
     });
     return map;
   }, [properties]);
@@ -247,8 +273,15 @@ export default function UnitsPage() {
   const occupiedCount = useMemo(() => {
     return scopedUnits.filter((unit) => {
       if (hasLeaseData) return Boolean(findActiveLease(unit));
-      const key = `${unit.property_id || ""}::${unit.unit}`.toLowerCase();
-      return tenantIndex.has(key) || tenantIndex.has(`::${unit.unit}`.toLowerCase());
+      const propertyKey = (unit.property_id || "").toLowerCase();
+      const label = propertyLabels.get(unit.property_id || "")?.toLowerCase();
+      const key = `${propertyKey}::${unit.unit}`.toLowerCase();
+      const labelKey = label ? `${label}::${unit.unit}`.toLowerCase() : null;
+      return (
+        tenantIndex.has(key) ||
+        (labelKey ? tenantIndex.has(labelKey) : false) ||
+        tenantIndex.has(`::${unit.unit}`.toLowerCase())
+      );
     }).length;
   }, [scopedUnits, tenantIndex, hasLeaseData, activeLeaseIndex, propertyLabels]);
 
@@ -259,8 +292,14 @@ export default function UnitsPage() {
         const rent = lease?.rent ?? unit.rent ?? 0;
         return sum + Number(rent || 0);
       }
-      const key = `${unit.property_id || ""}::${unit.unit}`.toLowerCase();
-      const tenant = tenantIndex.get(key) || tenantIndex.get(`::${unit.unit}`.toLowerCase());
+      const propertyKey = (unit.property_id || "").toLowerCase();
+      const label = propertyLabels.get(unit.property_id || "")?.toLowerCase();
+      const key = `${propertyKey}::${unit.unit}`.toLowerCase();
+      const labelKey = label ? `${label}::${unit.unit}`.toLowerCase() : null;
+      const tenant =
+        tenantIndex.get(key) ||
+        (labelKey ? tenantIndex.get(labelKey) : undefined) ||
+        tenantIndex.get(`::${unit.unit}`.toLowerCase());
       const rent = tenant?.monthly_rent ?? unit.rent ?? 0;
       return sum + Number(rent || 0);
     }, 0);
@@ -272,8 +311,11 @@ export default function UnitsPage() {
       if (selectedPropertyId && unit.property_id && unit.property_id !== selectedPropertyId) return false;
       if (!q) return true;
       const property = unit.property_id || "";
-      const tenant = tenantIndex.get(`${property}::${unit.unit}`.toLowerCase());
-      const haystack = `${unit.unit} ${unit.type || ""} ${tenant?.name || ""} ${property}`.toLowerCase();
+      const propertyLabel = propertyLabels.get(property) || "";
+      const key = `${property}::${unit.unit}`.toLowerCase();
+      const labelKey = propertyLabel ? `${propertyLabel}::${unit.unit}`.toLowerCase() : "";
+      const tenant = tenantIndex.get(key) || (labelKey ? tenantIndex.get(labelKey) : undefined);
+      const haystack = `${unit.unit} ${unit.type || ""} ${tenant?.name || ""} ${property} ${propertyLabel}`.toLowerCase();
       return haystack.includes(q);
     });
   }, [units, selectedPropertyId, search, tenantIndex]);
@@ -295,7 +337,7 @@ export default function UnitsPage() {
     setMode("create");
     setForm({
       ...EMPTY_FORM,
-      propertyId: selectedPropertyId || properties[0]?.property_id || "",
+      propertyId: selectedPropertyId || properties[0]?.id || "",
     });
     setError(null);
   };
@@ -317,6 +359,10 @@ export default function UnitsPage() {
       return;
     }
     const propertyId = form.propertyId || selectedPropertyId || undefined;
+    if (!propertyId) {
+      setError("Select a property before adding a unit.");
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -519,7 +565,7 @@ export default function UnitsPage() {
                         {!occupied ? (
                           <Link
                             href={`/leases?open=1&property=${encodeURIComponent(
-                              propertyLabel,
+                              propertyId,
                             )}&unit=${encodeURIComponent(unit.unit)}`}
                             className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-slate-900"
                           >

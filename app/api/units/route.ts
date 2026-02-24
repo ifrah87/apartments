@@ -63,16 +63,16 @@ export async function DELETE(req: NextRequest) {
     let deletedLeases: string[] = [];
     if (force) {
       const [properties, tenants, leases] = await Promise.all([
-        propertiesRepo.listProperties(),
+        propertiesRepo.listProperties(true),
         tenantsRepo.listTenants(),
         datasetsRepo.getDataset<LeaseAgreement[]>("lease_agreements", []),
       ]);
 
       const propertyCandidates = new Set<string>();
       if (unit.property_id) propertyCandidates.add(unit.property_id.toLowerCase());
-      const property = properties.find((p) => p.property_id === unit.property_id);
+      const property = properties.find((p) => p.id === unit.property_id);
       if (property?.name) propertyCandidates.add(property.name.toLowerCase());
-      if (property?.building) propertyCandidates.add(property.building.toLowerCase());
+      if (property?.code) propertyCandidates.add(property.code.toLowerCase());
 
       const unitLabel = (unit.unit || "").trim().toLowerCase();
       const matchesProperty = (value?: string | null) => {

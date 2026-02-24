@@ -8,6 +8,7 @@ import SectionCard from "@/components/ui/SectionCard";
 import { DEFAULT_LEASES, LeaseAgreement, LeaseBillingCycle, LeaseAgreementStatus } from "@/lib/leases";
 import { DEFAULT_LEASE_TEMPLATE } from "@/lib/settings/defaults";
 import type { LeaseTemplateSettings } from "@/lib/settings/types";
+import { getCurrentPropertyId, resolveCurrentPropertyId, setCurrentPropertyId } from "@/lib/currentProperty";
 import { FileDown, Plus, Search, PencilLine, Eye, Trash2, X, Info } from "lucide-react";
 
 type LeaseFormState = {
@@ -130,8 +131,9 @@ export default function LeasesClient() {
   const [leaseTemplate, setLeaseTemplate] = useState<LeaseTemplateSettings>(DEFAULT_LEASE_TEMPLATE);
   const [templateLoaded, setTemplateLoaded] = useState(false);
   const [templateError, setTemplateError] = useState<string | null>(null);
-  const [properties, setProperties] = useState<Array<{ id: string; label: string }>>([]);
+  const [properties, setProperties] = useState<Array<{ id: string; label: string; status?: string | null }>>([]);
   const [units, setUnits] = useState<Array<{ id: string; unit: string; property_id?: string | null }>>([]);
+  const [currentPropertyId, setCurrentPropertyIdState] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<LeaseFormState>(buildDefaultForm());
   const [saving, setSaving] = useState(false);
@@ -181,26 +183,32 @@ export default function LeasesClient() {
 
   const loadProperties = async () => {
     try {
-      const res = await fetch("/api/properties", { cache: "no-store" });
+      const res = await fetch("/api/properties?includeArchived=1", { cache: "no-store" });
       const payload = await res.json().catch(() => null);
       if (res.ok && payload?.ok !== false) {
-        const data = (payload?.ok ? payload.data : payload) as Array<{ name?: string; building?: string; property_id?: string }>;
+        const data = (payload?.ok ? payload.data : payload) as Array<{ id: string; name: string; code?: string | null; status?: string }>;
         if (Array.isArray(data) && data.length) {
           const options = data
             .map((item) => {
-              const label = item.name || item.building || item.property_id;
-              const id = item.property_id || label;
-              return label && id ? { id, label } : null;
+              const label = item.name || item.code || item.id;
+              return label ? { id: item.id, label, status: item.status ?? "active" } : null;
             })
-            .filter(Boolean) as Array<{ id: string; label: string }>;
+            .filter(Boolean) as Array<{ id: string; label: string; status?: string | null }>;
           if (options.length) {
-            const deduped = new Map<string, { id: string; label: string }>();
+            const deduped = new Map<string, { id: string; label: string; status?: string | null }>();
             options.forEach((option) => {
               if (!deduped.has(option.id)) {
                 deduped.set(option.id, option);
               }
             });
-            setProperties(Array.from(deduped.values()));
+            const next = Array.from(deduped.values());
+            setProperties(next);
+            const resolved = resolveCurrentPropertyId(next);
+            if (resolved) {
+              setForm((prev) => ({ ...prev, property: resolved }));
+              setCurrentPropertyId(resolved);
+              setCurrentPropertyIdState(resolved);
+            }
             return;
           }
         }
@@ -208,22 +216,18 @@ export default function LeasesClient() {
     } catch (err) {
       console.error("Failed to load properties", err);
     }
-    const fallback = leases
-      .map((lease) => lease.property)
-      .filter(Boolean)
-      .map((label) => ({ id: label, label })) as Array<{ id: string; label: string }>;
-    const deduped = new Map<string, { id: string; label: string }>();
-    fallback.forEach((option) => {
-      if (!deduped.has(option.id)) {
-        deduped.set(option.id, option);
-      }
-    });
-    setProperties(Array.from(deduped.values()));
+    setProperties([]);
+    const stored = getCurrentPropertyId();
+    if (stored) {
+      setForm((prev) => ({ ...prev, property: stored }));
+      setCurrentPropertyIdState(stored);
+    }
   };
 
-  const loadUnits = async () => {
+  const loadUnits = async (propertyId?: string) => {
     try {
-      const res = await fetch("/api/units", { cache: "no-store" });
+      const url = propertyId ? `/api/units?propertyId=${encodeURIComponent(propertyId)}` : "/api/units";
+      const res = await fetch(url, { cache: "no-store" });
       const payload = await res.json().catch(() => null);
       if (res.ok && payload?.ok !== false) {
         const data = (payload?.ok ? payload.data : payload) as Array<{
@@ -244,23 +248,36 @@ export default function LeasesClient() {
 
   useEffect(() => {
     loadLeases();
-    loadUnits();
+    loadProperties();
   }, []);
 
   useEffect(() => {
-    loadProperties();
-  }, [leases]);
+    loadUnits(currentPropertyId || undefined);
+  }, [currentPropertyId]);
+
+  useEffect(() => {
+    const paramId = searchParams.get("propertyId");
+    if (paramId && paramId !== currentPropertyId) {
+      setCurrentPropertyIdState(paramId);
+      setCurrentPropertyId(paramId);
+      setForm((prev) => ({ ...prev, property: paramId }));
+    }
+  }, [searchParams, currentPropertyId]);
 
   useEffect(() => {
     if (prefillDone) return;
     const open = searchParams?.get("open") || searchParams?.get("new");
     const unit = searchParams?.get("unit") || "";
     const property = searchParams?.get("property") || "";
+    const propertyMatch =
+      properties.find((item) => item.id === property) ||
+      properties.find((item) => item.label.toLowerCase() === property.toLowerCase());
+    const resolvedProperty = propertyMatch?.id || property;
     if (open || unit || property) {
       setEditingId(null);
       setForm((prev) => ({
         ...buildDefaultForm(),
-        property: property || prev.property,
+        property: resolvedProperty || prev.property,
         unit: unit || prev.unit,
       }));
       setFormError(null);
@@ -270,9 +287,26 @@ export default function LeasesClient() {
       setShowModal(true);
       setPrefillDone(true);
     }
-  }, [prefillDone, searchParams]);
+  }, [prefillDone, searchParams, properties]);
 
-  const activeLeases = useMemo(() => leases.filter((lease) => lease.status === "Active"), [leases]);
+  const propertyFilteredLeases = useMemo(() => {
+    if (!currentPropertyId) return leases;
+    const label = properties.find((property) => property.id === currentPropertyId)?.label || "";
+    const normalizedId = currentPropertyId.toLowerCase();
+    const normalizedLabel = label.toLowerCase();
+    return leases.filter((lease) => {
+      const key = (lease.property || "").toLowerCase();
+      if (!key) return false;
+      if (key === normalizedId) return true;
+      if (normalizedLabel && key === normalizedLabel) return true;
+      return false;
+    });
+  }, [leases, currentPropertyId, properties]);
+
+  const activeLeases = useMemo(
+    () => propertyFilteredLeases.filter((lease) => lease.status === "Active"),
+    [propertyFilteredLeases],
+  );
   const securityDeposits = useMemo(
     () => activeLeases.reduce((sum, lease) => sum + (lease.deposit || 0), 0),
     [activeLeases],
@@ -296,7 +330,7 @@ export default function LeasesClient() {
     const query = search.trim().toLowerCase();
     const monthIndex = MONTHS.indexOf(monthFilter);
     const targetMonth = monthIndex > 0 ? monthIndex - 1 : null;
-    return leases.filter((lease) => {
+    return propertyFilteredLeases.filter((lease) => {
       const matchesQuery =
         !query ||
         lease.unit.toLowerCase().includes(query) ||
@@ -313,19 +347,12 @@ export default function LeasesClient() {
         yearFilter === "All Years" || !hasValidDate ? true : date.getFullYear().toString() === yearFilter;
       return matchesMonth && matchesYear;
     });
-  }, [leases, search, monthFilter, yearFilter]);
+  }, [propertyFilteredLeases, search, monthFilter, yearFilter]);
 
-  const propertyLabel = form.property.trim();
-  const normalizedPropertyLabel = propertyLabel.toLowerCase();
-  const selectedPropertyId = useMemo(() => {
-    if (!normalizedPropertyLabel) return "";
-    const match =
-      properties.find((property) => property.label.toLowerCase() === normalizedPropertyLabel) ||
-      properties.find((property) => property.id.toLowerCase() === normalizedPropertyLabel);
-    return match?.id || "";
-  }, [properties, normalizedPropertyLabel]);
-  const hasSelectedProperty = Boolean(selectedPropertyId);
-  const hasPropertyValue = Boolean(propertyLabel);
+  const selectedPropertyId = form.property;
+  const propertyLabel = properties.find((property) => property.id === selectedPropertyId)?.label || selectedPropertyId || "";
+  const hasPropertyValue = Boolean(selectedPropertyId);
+  const hasSelectedProperty = Boolean(selectedPropertyId && properties.some((property) => property.id === selectedPropertyId));
 
   const unitOptions = useMemo(() => {
     if (lockUnitSelection && form.unit) {
@@ -334,42 +361,16 @@ export default function LeasesClient() {
     if (!units.length) {
       return form.unit ? [form.unit] : [];
     }
-    const normalizedProperty = normalizedPropertyLabel;
     let filtered = [] as Array<{ unit: string }>;
-    if (hasSelectedProperty) {
-      const selectedKey = selectedPropertyId.trim().toLowerCase();
-      const labelKey = normalizedPropertyLabel.trim();
-      const selectedSlug = slugify(selectedKey);
-      const labelSlug = slugify(labelKey);
-      filtered = units.filter((unit) => {
-        const prop = (unit.property_id || "").trim().toLowerCase();
-        if (!prop) return true;
-        if (prop === selectedKey || prop === labelKey) return true;
-        const propSlug = slugify(prop);
-        return propSlug === selectedSlug || propSlug === labelSlug;
-      });
-      if (!filtered.length) {
-        filtered = units;
-      }
-    } else if (normalizedProperty) {
-      const labelKey = normalizedProperty.trim();
-      const labelSlug = slugify(labelKey);
-      filtered = units.filter((unit) => {
-        const prop = (unit.property_id || "").trim().toLowerCase();
-        if (!prop) return true;
-        if (prop === labelKey) return true;
-        return slugify(prop) === labelSlug;
-      });
-      if (!filtered.length) {
-        filtered = units;
-      }
+    if (selectedPropertyId) {
+      filtered = units.filter((unit) => unit.property_id === selectedPropertyId);
     } else {
       filtered = units;
     }
     const set = new Set(filtered.map((unit) => unit.unit).filter(Boolean));
     if (form.unit) set.add(form.unit);
     return Array.from(set);
-  }, [lockUnitSelection, form.unit, hasSelectedProperty, normalizedPropertyLabel, selectedPropertyId, units]);
+  }, [lockUnitSelection, form.unit, selectedPropertyId, units]);
 
   useEffect(() => {
     if (lockUnitSelection) return;
@@ -384,7 +385,7 @@ export default function LeasesClient() {
 
   const startCreate = () => {
     setEditingId(null);
-    setForm(buildDefaultForm());
+    setForm({ ...buildDefaultForm(), property: currentPropertyId || "" });
     setFormError(null);
     setNotice(null);
     setLockUnitSelection(false);
@@ -393,9 +394,14 @@ export default function LeasesClient() {
   };
 
   const startEdit = (lease: LeaseAgreement) => {
+    const propertyId =
+      properties.find((property) => property.id === lease.property)?.id ||
+      properties.find((property) => property.label.toLowerCase() === (lease.property || "").toLowerCase())?.id ||
+      lease.property ||
+      "";
     setEditingId(lease.id);
     setForm({
-      property: lease.property ?? "",
+      property: propertyId,
       unit: lease.unit,
       tenantName: lease.tenantName,
       tenantPhone: lease.tenantPhone ?? "",
@@ -434,8 +440,10 @@ export default function LeasesClient() {
   };
 
   const renderTemplate = (lease: LeaseAgreement) => {
+    const propertyName =
+      properties.find((property) => property.id === lease.property)?.label || lease.property || "";
     const replacements: Record<string, string> = {
-      property: lease.property || "",
+      property: propertyName,
       tenantName: lease.tenantName || "",
       tenantPhone: lease.tenantPhone || "",
       unit: lease.unit,
@@ -461,10 +469,9 @@ export default function LeasesClient() {
     setFormError(null);
     setNotice(null);
 
-    const propertyId =
-      properties.find((property) => property.label.toLowerCase() === propertyLabel.toLowerCase())?.id || "";
+    const propertyId = selectedPropertyId;
 
-    if (!propertyLabel) {
+    if (!propertyId) {
       setFormError("Property / Building is required.");
       return;
     }
@@ -482,10 +489,10 @@ export default function LeasesClient() {
       return;
     }
 
-    const cleanedPropertyLabel = propertyLabel.trim();
+    const cleanedPropertyLabel = propertyLabel.trim() || propertyId;
     const payload: LeaseAgreement = {
       id: editingId ?? `lease-${Date.now()}`,
-      property: cleanedPropertyLabel,
+      property: propertyId,
       unit: unitValue,
       tenantName: form.tenantName.trim(),
       tenantPhone: form.tenantPhone.trim(),
@@ -500,7 +507,7 @@ export default function LeasesClient() {
 
     setSaving(true);
     try {
-      const resolvedPropertyId = (propertyId || cleanedPropertyLabel).trim();
+      const resolvedPropertyId = propertyId.trim();
       const tenantId = `tenant-${slugify(resolvedPropertyId)}-${slugify(payload.unit)}`;
       const tenantRes = await fetch("/api/tenants", {
         method: "POST",
@@ -522,7 +529,10 @@ export default function LeasesClient() {
       if (!isEditing) {
         let latestUnits = units;
         try {
-          const unitsRes = await fetch(`/api/units?ts=${Date.now()}`, { cache: "no-store" });
+          const unitsQuery = resolvedPropertyId
+            ? `propertyId=${encodeURIComponent(resolvedPropertyId)}&ts=${Date.now()}`
+            : `ts=${Date.now()}`;
+          const unitsRes = await fetch(`/api/units?${unitsQuery}`, { cache: "no-store" });
           const unitsPayload = await unitsRes.json().catch(() => null);
           if (unitsRes.ok && unitsPayload?.ok !== false) {
             latestUnits = (unitsPayload?.ok ? unitsPayload.data : unitsPayload) as Array<{
@@ -556,7 +566,7 @@ export default function LeasesClient() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ id: matchedUnit.id, property_id: resolvedPropertyId }),
             });
-            await loadUnits();
+            await loadUnits(resolvedPropertyId);
           }
         } else {
           const unitRes = await fetch("/api/units", {
@@ -572,7 +582,7 @@ export default function LeasesClient() {
           if (!unitRes.ok || unitData?.ok === false) {
             throw new Error(unitData?.error || "Failed to create the apartment unit.");
           }
-          await loadUnits();
+          await loadUnits(resolvedPropertyId);
         }
       }
       const res = await fetch("/api/lease-agreements", {
@@ -814,29 +824,33 @@ export default function LeasesClient() {
             <form onSubmit={handleSaveLease} className="mt-4 space-y-4">
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Property / Building</label>
-                <input
-                  list="lease-properties"
+                <select
                   value={form.property}
                   onChange={(event) => {
+                    const next = event.target.value;
                     setForm((prev) => ({
                       ...prev,
-                      property: event.target.value,
+                      property: next,
                       unit: lockUnitSelection ? prev.unit : "",
                     }));
+                    setCurrentPropertyId(next);
+                    setCurrentPropertyIdState(next);
                     if (!lockUnitSelection) {
                       setCustomUnit("");
                     }
                   }}
                   disabled={lockUnitSelection}
-                  autoComplete="off"
                   className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
-                  placeholder="Select or type a property..."
-                />
-                <datalist id="lease-properties">
-                  {properties.map((property) => (
-                    <option key={property.id} value={property.label} />
-                  ))}
-                </datalist>
+                >
+                  <option value="">Select a property...</option>
+                  {properties
+                    .filter((property) => (property.status || "active") === "active")
+                    .map((property) => (
+                      <option key={property.id} value={property.id}>
+                        {property.label}
+                      </option>
+                    ))}
+                </select>
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Apartment / Unit</label>

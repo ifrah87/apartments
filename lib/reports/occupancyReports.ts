@@ -21,7 +21,7 @@ type UnitTurnover = {
   notes?: string;
 };
 
-type PropertyInfo = { property_id: string; name?: string };
+type PropertyInfo = { id: string; name?: string; code?: string | null };
 
 export type OccupancyFilters = {
   propertyId?: string;
@@ -112,7 +112,13 @@ function computeDaysVacant(turnover: UnitTurnover | undefined, status: string) {
 
 function getPropertyName(id: string | undefined, properties: PropertyInfo[]) {
   if (!id) return undefined;
-  const match = properties.find((p) => (p.property_id || "").toLowerCase() === id.toLowerCase());
+  const key = id.toLowerCase();
+  const match = properties.find((p) => {
+    if (p.id && p.id.toLowerCase() === key) return true;
+    if (p.code && p.code.toLowerCase() === key) return true;
+    if (p.name && p.name.toLowerCase() === key) return true;
+    return false;
+  });
   return match?.name || id;
 }
 
@@ -187,8 +193,8 @@ export async function buildOccupancyReport(filters: OccupancyFilters, properties
   return { summary, rows };
 }
 
-export async function calculateOccupancySummary(): Promise<OccupancySummary> {
+export async function calculateOccupancySummary(propertyId?: string): Promise<OccupancySummary> {
   const properties = await fetchPropertyOptions();
-  const { summary } = await buildOccupancyReport({}, properties);
+  const { summary } = await buildOccupancyReport({ propertyId }, properties);
   return summary;
 }

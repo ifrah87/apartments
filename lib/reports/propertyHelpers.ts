@@ -9,5 +9,15 @@ export async function fetchPropertyOptions(): Promise<PropertyInfo[]> {
   }
   const payload = await res.json();
   if (payload?.ok === false) return [];
-  return (payload?.ok ? payload.data : payload) as PropertyInfo[];
+  const data = (payload?.ok ? payload.data : payload) as Array<{
+    id: string;
+    name: string;
+    code?: string | null;
+  }>;
+  if (!Array.isArray(data)) return [];
+  return data.map((row) => ({
+    id: String(row.id),
+    name: row.name,
+    code: row.code ?? null,
+  })) as PropertyInfo[];
 }

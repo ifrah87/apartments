@@ -29,4 +29,4 @@ SELECT
   END AS rent,
   'vacant'
 FROM all_units
-ON CONFLICT (unit_number) DO NOTHING;
+WHERE NOT EXISTS (SELECT 1 FROM public.units);

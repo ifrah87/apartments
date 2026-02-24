@@ -79,6 +79,10 @@ function normalizeUnitInput(payload: UnitInput, requireUnit = true, requireType 
   if (requireUnit && !unitNumber) {
     throw badRequest("Unit number is required.");
   }
+  const propertyId = payload.property_id ?? null;
+  if (requireUnit && !propertyId) {
+    throw badRequest("property_id is required.");
+  }
   const floor = toInt(payload.floor) ?? (unitNumber ? Math.trunc(unitNumber / 100) : null);
   if (requireUnit && floor === null) {
     throw badRequest("Floor is required.");
@@ -94,7 +98,7 @@ function normalizeUnitInput(payload: UnitInput, requireUnit = true, requireType 
 
   return {
     id: payload.id ? String(payload.id) : undefined,
-    property_id: payload.property_id ?? null,
+    property_id: propertyId,
     unit_number: unitNumber ?? undefined,
     floor,
     unit_type: unitType,

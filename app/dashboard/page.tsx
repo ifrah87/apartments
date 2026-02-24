@@ -7,15 +7,34 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { calculateRentSummary } from "@/lib/reports/rentReports";
 import { calculateOccupancySummary } from "@/lib/reports/occupancyReports";
 import { calculateBankSummary, fetchLedger, type Txn } from "@/lib/reports/ledger";
+import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 
 export const runtime = "nodejs";
 
-export default async function DashboardPage() {
+type SearchParams = {
+  propertyId?: string;
+};
+
+async function fetchProperties() {
+  const baseUrl = await getRequestBaseUrl();
+  const res = await fetch(`${baseUrl}/api/properties`, { cache: "no-store" }).catch(() => null);
+  if (!res || !res.ok) return [];
+  const payload = await res.json().catch(() => null);
+  const data = (payload?.ok ? payload.data : payload) as Array<{ id: string; name: string; code?: string | null }>;
+  return Array.isArray(data) ? data : [];
+}
+
+export default async function DashboardPage({ searchParams }: { searchParams?: SearchParams }) {
+  const propertyId = searchParams?.propertyId || "";
+  const properties = await fetchProperties();
+  const selectedProperty = propertyId ? properties.find((p) => p.id === propertyId) : null;
+  const propertyFilter = selectedProperty?.id || (propertyId || undefined);
+
   const [rent, occupancy, bank, ledgerEntries] = await Promise.all([
-    calculateRentSummary(),
-    calculateOccupancySummary(),
-    calculateBankSummary({}),
-    fetchLedger(),
+    calculateRentSummary(propertyFilter),
+    calculateOccupancySummary(propertyFilter),
+    calculateBankSummary({ propertyId: propertyFilter }),
+    fetchLedger({ propertyId: propertyFilter }),
   ]);
 
   const cashflowSeries = buildMonthlyCashflow(ledgerEntries);

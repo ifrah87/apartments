@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { LogOut, Moon, Sun } from "lucide-react";
 import { useTranslations } from "@/components/LanguageProvider";
 import type { Language } from "@/lib/i18n";
+import { getCurrentPropertyId, resolveCurrentPropertyId, setCurrentPropertyId } from "@/lib/currentProperty";
 
 const LANGUAGE_OPTIONS: { value: Language; labelKey: string }[] = [
   { value: "en", labelKey: "language.english" },
@@ -17,8 +18,12 @@ export default function HeaderActions() {
   const [auth, setAuth] = useState<{ authenticated: boolean; phone?: string } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [properties, setProperties] = useState<Array<{ id: string; name: string; status?: string | null }>>([]);
+  const [currentProperty, setCurrentProperty] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const showLogin = auth?.authenticated === false && pathname !== "/login";
 
   useEffect(() => {
@@ -37,6 +42,23 @@ export default function HeaderActions() {
       .then((res) => res.json())
       .then((data) => setAuth(data))
       .catch(() => setAuth({ authenticated: false }));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/properties?includeArchived=1", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((payload) => {
+        const data = (payload?.ok ? payload.data : payload) as Array<{ id: string; name: string; status?: string }>;
+        if (Array.isArray(data)) {
+          setProperties(data);
+          const resolved = resolveCurrentPropertyId(data);
+          setCurrentProperty(resolved);
+        }
+      })
+      .catch(() => {
+        setProperties([]);
+        setCurrentProperty(getCurrentPropertyId());
+      });
   }, []);
 
   useEffect(() => {
@@ -63,8 +85,40 @@ export default function HeaderActions() {
     window.localStorage.setItem("theme", next);
   };
 
+  const handlePropertyChange = (id: string) => {
+    setCurrentPropertyId(id);
+    setCurrentProperty(id);
+    const params = new URLSearchParams(searchParams?.toString());
+    if (id) {
+      params.set("propertyId", id);
+    } else {
+      params.delete("propertyId");
+    }
+    const next = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+    router.replace(next);
+    router.refresh();
+  };
+
+  const activeProperties = properties.filter((p) => (p.status || "active") === "active");
+
   return (
     <div className="flex flex-1 items-center justify-end gap-4">
+      {activeProperties.length ? (
+        <label className="flex items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm text-slate-200">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Property</span>
+          <select
+            value={currentProperty || ""}
+            onChange={(event) => handlePropertyChange(event.target.value)}
+            className="bg-transparent text-sm font-semibold text-slate-100 outline-none"
+          >
+            {activeProperties.map((property) => (
+              <option key={property.id} value={property.id}>
+                {property.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <button
         type="button"
         onClick={toggleTheme}

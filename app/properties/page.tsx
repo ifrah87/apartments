@@ -1,263 +1,312 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import SectionCard from "@/components/ui/SectionCard";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Badge } from "@/components/ui/Badge";
+import { getCurrentPropertyId, setCurrentPropertyId } from "@/lib/currentProperty";
 
-type Property = {
-  property_id: string;
-  name?: string;
-  total_units?: number;
-  units?: number;
-};
-
-type Tenant = {
+type PropertyRecord = {
   id: string;
   name: string;
-  property_id: string;
-  unit: string;
-  monthly_rent?: string;
-  due_day?: string;
+  code?: string | null;
+  city?: string | null;
+  country?: string | null;
+  status?: "active" | "archived";
+  created_at?: string | null;
+};
+
+type PropertyForm = {
+  name: string;
+  code: string;
+  city: string;
+  country: string;
+};
+
+const EMPTY_FORM: PropertyForm = {
+  name: "",
+  code: "",
+  city: "",
+  country: "",
 };
 
 export default function PropertiesPage() {
-  const [properties, setProperties] = useState<Property[]>([]);
-  const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [search, setSearch] = useState("");
+  const [properties, setProperties] = useState<PropertyRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState<PropertyForm>(EMPTY_FORM);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/properties?includeArchived=1", { cache: "no-store" });
+      const payload = await res.json().catch(() => null);
+      const data = (payload?.ok ? payload.data : payload) as PropertyRecord[];
+      setProperties(Array.isArray(data) ? data : []);
+    } catch {
+      setProperties([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    fetch(`/api/properties?ts=${Date.now()}`, { cache: "no-store" })
-      .then((res) => res.json())
-      .then((payload) =>
-        setProperties(payload?.ok === false ? [] : (payload?.ok ? payload.data : payload) || []),
-      )
-      .catch(() => setProperties([]));
+    load();
   }, []);
 
-  useEffect(() => {
-    fetch(`/api/tenants?ts=${Date.now()}`, { cache: "no-store" })
-      .then((res) => res.json())
-      .then((payload) =>
-        setTenants(payload?.ok === false ? [] : (payload?.ok ? payload.data : payload) || []),
-      )
-      .catch(() => setTenants([]));
-  }, []);
+  const activeProperties = useMemo(
+    () => properties.filter((property) => (property.status || "active") === "active"),
+    [properties],
+  );
 
-  const filteredTenants = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return tenants;
-    return tenants.filter((tenant) => {
-      const name = tenant.name?.toLowerCase() || "";
-      const unit = tenant.unit?.toLowerCase() || "";
-      const propertyId = tenant.property_id?.toLowerCase() || "";
-      return name.includes(q) || unit.includes(q) || propertyId.includes(q);
+  const handleSelect = (propertyId: string) => {
+    setCurrentPropertyId(propertyId);
+    const params = new URLSearchParams(searchParams?.toString());
+    params.set("propertyId", propertyId);
+    const next = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+    router.replace(next);
+    router.refresh();
+    setNotice("Current property updated.");
+  };
+
+  const handleCreate = async () => {
+    setError(null);
+    setNotice(null);
+    if (!form.name.trim()) {
+      setError("Name is required.");
+      return;
+    }
+    const res = await fetch("/api/properties", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: form.name.trim(),
+        code: form.code.trim() || undefined,
+        city: form.city.trim() || undefined,
+        country: form.country.trim() || undefined,
+      }),
     });
-  }, [tenants, search]);
+    const payload = await res.json().catch(() => null);
+    if (!res.ok || payload?.ok === false) {
+      setError(payload?.error || "Failed to create property.");
+      return;
+    }
+    setForm(EMPTY_FORM);
+    setShowModal(false);
+    await load();
+  };
+
+  const handleArchive = async (property: PropertyRecord, status: "active" | "archived") => {
+    setError(null);
+    setNotice(null);
+    const res = await fetch(`/api/properties/${property.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    const payload = await res.json().catch(() => null);
+    if (!res.ok || payload?.ok === false) {
+      setError(payload?.error || "Failed to update property.");
+      return;
+    }
+    await load();
+  };
+
+  const handleDelete = async (property: PropertyRecord) => {
+    if (!confirm(`Delete ${property.name}? This cannot be undone.`)) return;
+    setError(null);
+    setNotice(null);
+    const res = await fetch(`/api/properties/${property.id}`, { method: "DELETE" });
+    const payload = await res.json().catch(() => null);
+    if (res.status === 409) {
+      setNotice("Cannot delete. Property has units. Archive instead.");
+      return;
+    }
+    if (!res.ok || payload?.ok === false) {
+      setError(payload?.error || "Failed to delete property.");
+      return;
+    }
+    await load();
+  };
+
+  const currentPropertyId = getCurrentPropertyId();
 
   return (
     <div className="space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-3xl font-semibold text-slate-900">Properties</h1>
-        <p className="text-sm text-slate-500">
-          Overview, units, and tenants per building pulled straight from the CSV data.
-        </p>
-      </header>
-
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-panel/70 px-4 py-3 shadow-card-soft">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search building, unit, or tenant"
-          className="w-full rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-100 outline-none focus:ring-2 focus:ring-accent/30 sm:w-72"
-        />
-        <span className="text-xs text-slate-400">{tenants.length} tenants loaded</span>
-      </div>
-
-      <div className="grid gap-4">
-        {properties.map((property) => {
-          const tenantsForProperty = filteredTenants.filter(
-            (tenant) => tenant.property_id === property.property_id
-          );
-          return (
-            <PropertyPanel
-              key={property.property_id}
-              property={property}
-              tenants={tenantsForProperty}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function PropertyPanel({
-  property,
-  tenants,
-}: {
-  property: Property;
-  tenants: Tenant[];
-}) {
-  const [tab, setTab] = useState<"overview" | "units" | "tenants">("overview");
-  const [unitsOpen, setUnitsOpen] = useState(true);
-  const [tenantsOpen, setTenantsOpen] = useState(true);
-  const totalUnits = property.total_units ?? property.units ?? tenants.length;
-  const occupied = tenants.length;
-  const vacant = Math.max(totalUnits - occupied, 0);
-  const rent = tenants.reduce((sum, tenant) => sum + Number(tenant.monthly_rent || 0), 0);
-
-  return (
-    <div className="overflow-hidden rounded-3xl border border-white/10 bg-panel/80 bg-gradient-to-br from-white/5 to-transparent shadow-card-soft">
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 px-5 py-4">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900">
-            {property.name || `Building ${property.property_id}`}
-          </h2>
-          <p className="text-sm text-slate-500">
-            {totalUnits} units · {occupied} occupied · {vacant} vacant
-          </p>
-        </div>
-        <div className="flex gap-2 text-sm">
-          {(["overview", "units", "tenants"] as const).map((key) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={`rounded-full border px-3 py-1 font-medium transition ${
-                tab === key
-                  ? "border-accent/50 bg-accent/15 text-accent"
-                  : "border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-200"
-              }`}
-            >
-              {key.charAt(0).toUpperCase() + key.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {tab === "overview" && (
-        <div className="grid gap-4 px-5 py-6 sm:grid-cols-2 lg:grid-cols-4">
-          <SummaryCard label="Total Units" value={totalUnits}>
-            <span className="text-xs text-slate-500">From properties CSV</span>
-          </SummaryCard>
-          <SummaryCard label="Occupied" value={occupied}>
-            <span className="text-xs text-emerald-200">{vacant} vacant</span>
-          </SummaryCard>
-          <SummaryCard label="Vacant" value={vacant || "0"}>
-            <span className="text-xs text-slate-500">Auto-calculated</span>
-          </SummaryCard>
-          <SummaryCard label="Monthly Rent" value={`$${rent.toLocaleString()}`}>
-            <span className="text-xs text-slate-500">Sum of tenant rent</span>
-          </SummaryCard>
-        </div>
-      )}
-
-      {tab === "units" && (
-        <div className="space-y-3 px-5 py-6">
+      <PageHeader
+        title="Properties"
+        subtitle="Create, archive, and manage properties."
+        actions={
           <button
-            onClick={() => setUnitsOpen((prev) => !prev)}
-            className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-panel-2/60 px-4 py-2 text-sm font-semibold text-slate-200"
+            type="button"
+            onClick={() => setShowModal(true)}
+            className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900"
           >
-            <span>Units list</span>
-            <span>{unitsOpen ? "–" : "+"}</span>
+            Add Property
           </button>
-          {unitsOpen && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="text-xs uppercase tracking-wide text-slate-400">
-                  <tr>
-                    <th className="py-2">Unit</th>
-                    <th className="py-2">Tenant</th>
-                    <th className="py-2">Rent</th>
-                    <th className="py-2">Due Day</th>
-                    <th className="py-2">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tenants.map((tenant) => (
-                    <tr
-                      key={`${tenant.property_id}-${tenant.unit}`}
-                      className="border-t border-white/10"
-                    >
-                      <td className="py-2 font-medium text-slate-900">{tenant.unit}</td>
-                      <td className="py-2 text-slate-700">{tenant.name}</td>
-                      <td className="py-2 text-slate-900">
-                        ${Number(tenant.monthly_rent || 0).toLocaleString()}
+        }
+      />
+
+      {error ? (
+        <SectionCard className="border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          {error}
+        </SectionCard>
+      ) : null}
+
+      {notice ? (
+        <SectionCard className="border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          {notice}
+        </SectionCard>
+      ) : null}
+
+      <SectionCard className="p-4">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="text-xs uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-3 py-2">Name</th>
+                <th className="px-3 py-2">Code</th>
+                <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={4} className="px-3 py-6 text-center text-slate-400">
+                    Loading properties...
+                  </td>
+                </tr>
+              ) : properties.length ? (
+                properties.map((property) => {
+                  const isActive = (property.status || "active") === "active";
+                  const isSelected = currentPropertyId === property.id;
+                  return (
+                    <tr key={property.id} className="border-t border-white/10">
+                      <td className="px-3 py-3 text-slate-100">{property.name}</td>
+                      <td className="px-3 py-3 text-slate-300">{property.code || "—"}</td>
+                      <td className="px-3 py-3">
+                        <Badge variant={isActive ? "success" : "warning"}>
+                          {isActive ? "Active" : "Archived"}
+                        </Badge>
                       </td>
-                      <td className="py-2 text-slate-500">{tenant.due_day || "—"}</td>
-                      <td className="py-2">
-                        <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-200">
-                          Occupied
-                        </span>
+                      <td className="px-3 py-3 text-right">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSelect(property.id)}
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                              isSelected
+                                ? "bg-accent text-slate-900"
+                                : "border border-white/10 text-slate-200 hover:border-white/20"
+                            }`}
+                          >
+                            {isSelected ? "Selected" : "Select"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleArchive(property, isActive ? "archived" : "active")}
+                            className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-white/20"
+                          >
+                            {isActive ? "Archive" : "Unarchive"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(property)}
+                            className="rounded-full border border-rose-400/40 px-3 py-1 text-xs font-semibold text-rose-200 hover:border-rose-400/70"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
-                  ))}
-                  {vacant > 0 && (
-                    <tr className="border-t border-white/10">
-                      <td className="py-2 font-medium text-slate-900">—</td>
-                      <td className="py-2 text-slate-500">Vacant units</td>
-                      <td className="py-2 text-slate-500">—</td>
-                      <td className="py-2 text-slate-500">—</td>
-                      <td className="py-2">
-                        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200">
-                          {vacant} Vacant
-                        </span>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === "tenants" && (
-        <div className="space-y-3 px-5 py-6">
-          <button
-            onClick={() => setTenantsOpen((prev) => !prev)}
-            className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-panel-2/60 px-4 py-2 text-sm font-semibold text-slate-200"
-          >
-            <span>Tenant list</span>
-            <span>{tenantsOpen ? "–" : "+"}</span>
-          </button>
-          {tenantsOpen && (
-            <div className="space-y-3">
-              {tenants.map((tenant) => (
-                <div
-                  key={tenant.id}
-                  className="rounded-2xl border border-white/10 bg-panel-2/60 px-4 py-3"
-                >
-                  <p className="text-sm font-semibold text-slate-900">{tenant.name}</p>
-                  <p className="text-xs text-slate-500">
-                    Unit {tenant.unit} · Rent ${tenant.monthly_rent || "—"}
-                  </p>
-                </div>
-              ))}
-              {!tenants.length && (
-                <p className="text-sm text-slate-500">
-                  No tenants listed in CSV for this property.
-                </p>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={4} className="px-3 py-6 text-center text-slate-400">
+                    No properties yet. Add your first property.
+                  </td>
+                </tr>
               )}
-            </div>
-          )}
+            </tbody>
+          </table>
         </div>
-      )}
-    </div>
-  );
-}
 
-function SummaryCard({
-  label,
-  value,
-  children,
-}: {
-  label: string;
-  value: string | number;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-panel/70 p-4">
-      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-semibold text-slate-900">{value}</p>
-      {children && <div className="mt-1">{children}</div>}
+        {activeProperties.length ? (
+          <p className="mt-4 text-xs text-slate-400">
+            Active properties: {activeProperties.length}
+          </p>
+        ) : null}
+      </SectionCard>
+
+      {showModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-8 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-panel/95 p-6 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-100">Add Property</h2>
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
+                className="rounded-full border border-white/10 px-3 py-1 text-xs text-slate-200 hover:border-white/20"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <input
+                value={form.name}
+                onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+                placeholder="Name (required)"
+                className="w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100"
+              />
+              <input
+                value={form.code}
+                onChange={(event) => setForm((prev) => ({ ...prev, code: event.target.value }))}
+                placeholder="Code (optional)"
+                className="w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100"
+              />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <input
+                  value={form.city}
+                  onChange={(event) => setForm((prev) => ({ ...prev, city: event.target.value }))}
+                  placeholder="City"
+                  className="w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100"
+                />
+                <input
+                  value={form.country}
+                  onChange={(event) => setForm((prev) => ({ ...prev, country: event.target.value }))}
+                  placeholder="Country"
+                  className="w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-white/20"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreate}
+                  className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

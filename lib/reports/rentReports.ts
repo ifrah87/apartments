@@ -10,7 +10,7 @@ export type RentSummary = {
   atRiskBalance: number;
 };
 
-export async function calculateRentSummary(): Promise<RentSummary> {
+export async function calculateRentSummary(propertyFilter?: string): Promise<RentSummary> {
   const baseUrl = await getRequestBaseUrl();
   const [tenantsRes, paymentsRes] = await Promise.all([
     fetch(`${baseUrl}/api/tenants`, { cache: "no-store" }),
@@ -28,12 +28,23 @@ export async function calculateRentSummary(): Promise<RentSummary> {
       ? []
       : (paymentsPayload?.ok ? paymentsPayload.data : paymentsPayload) ?? [];
 
-  const referenceDate = deriveReferenceDate(payments);
+  const normalizedFilter = (propertyFilter || "").toLowerCase();
+  const matchesProperty = (value?: string | null) => {
+    if (!normalizedFilter) return true;
+    return (value || "").toLowerCase() === normalizedFilter;
+  };
+
+  const filteredTenants = tenants.filter(
+    (t: any) => matchesProperty(t.property_id) || matchesProperty(t.building),
+  );
+  const filteredPayments = payments.filter((p: any) => matchesProperty(p.property_id));
+
+  const referenceDate = deriveReferenceDate(filteredPayments.length ? filteredPayments : payments);
   const thisMonth = referenceDate.getMonth();
   const thisYear = referenceDate.getFullYear();
 
   // 1. Rent Collected (MTD)
-  const rentCollectedMTD = payments
+  const rentCollectedMTD = filteredPayments
     .filter((p: any) => {
       const d = safeDate(p.date);
       if (!d) return false;
@@ -42,7 +53,7 @@ export async function calculateRentSummary(): Promise<RentSummary> {
     .reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
 
   // 2. Overdue tenants
-  const overdue = tenants.filter(
+  const overdue = filteredTenants.filter(
     (t: any) => (t.status || "").toLowerCase() === "overdue"
   );
 
@@ -53,7 +64,7 @@ export async function calculateRentSummary(): Promise<RentSummary> {
   );
 
   // 3. Upcoming payments (due within 7 days of reference date)
-  const upcoming = tenants.filter((t: any) => {
+  const upcoming = filteredTenants.filter((t: any) => {
     const due = resolveDueDate(t, referenceDate);
     if (!due) return false;
     const diffDays = (due.getTime() - referenceDate.getTime()) / DAY_IN_MS;

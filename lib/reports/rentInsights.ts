@@ -22,8 +22,9 @@ type UnitRecord = {
 };
 
 export type PropertyInfo = {
-  property_id: string;
+  id: string;
   name?: string;
+  code?: string | null;
 };
 
 type NormalizedPayment = {
@@ -214,7 +215,12 @@ async function loadContext(): Promise<ReportingContext> {
 
 function getPropertyName(id: string | undefined, properties: PropertyInfo[]) {
   const key = (id || "").toLowerCase();
-  const match = properties.find((p) => (p.property_id || "").toLowerCase() === key);
+  const match = properties.find((p) => {
+    if (p.id && p.id.toLowerCase() === key) return true;
+    if (p.code && p.code.toLowerCase() === key) return true;
+    if (p.name && p.name.toLowerCase() === key) return true;
+    return false;
+  });
   return match?.name || id || "—";
 }
 
