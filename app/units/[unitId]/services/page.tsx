@@ -20,8 +20,10 @@ type TenantRecord = {
 };
 
 type PropertyRecord = {
-  property_id: string;
-  name?: string;
+  id: string;
+  name: string | null;
+  code: string | null;
+  status?: string | null;
 };
 
 type ServiceRecord = {
@@ -132,9 +134,7 @@ export default function UnitServicesPage() {
         const match = unitsList.find((entry) => entry.id === unitId);
         setUnit(match || null);
         const propertyId = match?.property_id || undefined;
-        const propertyMatch = propertyId
-          ? propertiesList.find((entry) => entry.property_id === propertyId) || null
-          : null;
+        const propertyMatch = propertyId ? propertiesList.find((entry) => entry.id === propertyId) || null : null;
         setProperty(propertyMatch);
         const tenantMatch = match
           ? tenantsList.find(
