@@ -1,4 +1,10 @@
-WITH floors AS (
+WITH p AS (
+  SELECT id
+  FROM public.properties
+  WHERE code = 'ORFANE_TOWER'
+  LIMIT 1
+),
+floors AS (
   SELECT generate_series(1,11) AS floor
 ),
 slots AS (
@@ -17,8 +23,9 @@ all_units AS (
   FROM floors f
   CROSS JOIN slots s
 )
-INSERT INTO public.units (unit_number, floor, unit_type, rent, status)
+INSERT INTO public.units (property_id, unit_number, floor, unit_type, rent, status)
 SELECT
+  p.id,
   unit_number,
   floor,
   unit_type,
@@ -29,4 +36,11 @@ SELECT
   END AS rent,
   'vacant'
 FROM all_units
-WHERE NOT EXISTS (SELECT 1 FROM public.units);
+CROSS JOIN p
+WHERE EXISTS (SELECT 1 FROM p)
+  AND NOT EXISTS (
+    SELECT 1
+    FROM public.units u
+    WHERE u.property_id = (SELECT id FROM p)
+  )
+ON CONFLICT (property_id, unit_number) DO NOTHING;
