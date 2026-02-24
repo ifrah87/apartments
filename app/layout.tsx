@@ -1,6 +1,7 @@
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
 import HeaderActions from "@/components/HeaderActions";
+import { Suspense } from "react";
 import { LanguageProvider } from "@/components/LanguageProvider";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -14,7 +15,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Sidebar />
               <div className="relative flex w-full flex-col pt-6">
                 <div className="flex items-center justify-end px-8">
-                  <HeaderActions />
+                  <Suspense fallback={<div className="h-9 w-40" />}>
+                    <HeaderActions />
+                  </Suspense>
                 </div>
                 <main className="flex-1 px-8 pb-8 pt-5">{children}</main>
               </div>
