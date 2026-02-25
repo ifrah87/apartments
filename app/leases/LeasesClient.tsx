@@ -62,6 +62,10 @@ const STATUS_VARIANTS: Record<LeaseAgreementStatus, "success" | "warning" | "dan
 const formatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const dateFormatter = new Intl.DateTimeFormat("en-GB");
 
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function slugify(value: string) {
   return value
     .toLowerCase()
@@ -357,6 +361,25 @@ export default function LeasesClient() {
   const hasPropertyValue = Boolean(selectedPropertyId);
   const hasSelectedProperty = Boolean(selectedPropertyId && properties.some((property) => property.id === selectedPropertyId));
 
+  const propertyCandidates = useMemo(() => {
+    const set = new Set<string>();
+    if (selectedPropertyId) set.add(selectedPropertyId.toLowerCase());
+    if (propertyLabel) set.add(propertyLabel.toLowerCase());
+    return set;
+  }, [selectedPropertyId, propertyLabel]);
+
+  const activeLeaseUnits = useMemo(() => {
+    if (!propertyCandidates.size) return new Set<string>();
+    const set = new Set<string>();
+    leases.forEach((lease) => {
+      if (String(lease.status).toLowerCase() !== "active") return;
+      const key = (lease.property || "").toLowerCase();
+      if (!key || !propertyCandidates.has(key)) return;
+      if (lease.unit) set.add(lease.unit);
+    });
+    return set;
+  }, [leases, propertyCandidates]);
+
   const unitOptions = useMemo(() => {
     if (lockUnitSelection && form.unit) {
       return [{ unit: form.unit, hasActiveLease: false }];
@@ -375,7 +398,7 @@ export default function LeasesClient() {
       if (!unit.unit) return;
       const key = unit.unit;
       const existing = map.get(key);
-      const hasActiveLease = Boolean(unit.has_active_lease);
+      const hasActiveLease = Boolean(unit.has_active_lease) || activeLeaseUnits.has(key);
       if (!existing) {
         map.set(key, { unit: key, hasActiveLease });
       } else if (hasActiveLease) {
@@ -386,7 +409,7 @@ export default function LeasesClient() {
       map.set(form.unit, { unit: form.unit, hasActiveLease: false });
     }
     return Array.from(map.values());
-  }, [lockUnitSelection, form.unit, selectedPropertyId, units]);
+  }, [lockUnitSelection, form.unit, selectedPropertyId, units, activeLeaseUnits]);
 
   const unitOptionValues = useMemo(() => unitOptions.map((option) => option.unit), [unitOptions]);
 
@@ -642,12 +665,21 @@ export default function LeasesClient() {
     if (!confirm(`Delete lease for Unit ${lease.unit}?`)) return;
     setNotice(null);
     try {
-      const res = await fetch(`/api/leases/${lease.id}`, { method: "DELETE" });
+      const res = await fetch("/api/lease-agreements", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: lease.id }),
+      });
       const data = await res.json().catch(() => null);
       if (!res.ok || data?.ok === false) {
         throw new Error(data?.error || "Failed to delete lease.");
       }
-      setLeases((prev) => prev.filter((item) => item.id !== lease.id));
+      const updated = (data?.ok ? data.data : data) as LeaseAgreement[];
+      if (Array.isArray(updated)) {
+        setLeases(updated);
+      } else {
+        setLeases((prev) => prev.filter((item) => item.id !== lease.id));
+      }
     } catch (err) {
       console.error(err);
       setNotice("API unavailable. Lease removed locally only.");
@@ -655,24 +687,41 @@ export default function LeasesClient() {
     }
   };
 
-  const handleEndLease = async (id: string) => {
-    const confirmed = confirm("End this lease?");
-    if (!confirmed) return;
+  const handleEndLease = async (lease: LeaseAgreement) => {
+    const endDateInput = prompt("End date (YYYY-MM-DD)", todayISO());
+    if (!endDateInput) return;
+    const endDate = endDateInput.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      alert("Please use YYYY-MM-DD format.");
+      return;
+    }
     try {
-      const res = await fetch(`/api/leases/${id}/end`, {
-        method: "PATCH",
+      const res = await fetch("/api/lease-agreements", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ endDate: new Date().toISOString().slice(0, 10) }),
+        body: JSON.stringify({
+          id: lease.id,
+          status: "Terminated",
+          endDate,
+        }),
       });
-      if (!res.ok) {
-        const msg = await res.text();
-        alert("Failed: " + msg);
-        return;
+      const data = await res.json().catch(() => null);
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || "Failed to end lease.");
       }
-      window.location.reload();
+      const updated = (data?.ok ? data.data : data) as LeaseAgreement[];
+      if (Array.isArray(updated)) {
+        setLeases(updated);
+      } else {
+        setLeases((prev) =>
+          prev.map((item) =>
+            item.id === lease.id ? { ...item, status: "Terminated", endDate } : item,
+          ),
+        );
+      }
     } catch (err) {
       console.error(err);
-      alert("Failed: Network/API unavailable.");
+      alert("Failed: " + (err instanceof Error ? err.message : "Network/API unavailable."));
     }
   };
 
@@ -823,7 +872,7 @@ export default function LeasesClient() {
                         <button
                           className="text-yellow-400 hover:text-yellow-300"
                           aria-label={`End lease for Unit ${lease.unit}`}
-                          onClick={() => handleEndLease(lease.id)}
+                          onClick={() => handleEndLease(lease)}
                         >
                           End
                         </button>
@@ -923,12 +972,16 @@ export default function LeasesClient() {
                         className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         <option value="">Select an apartment...</option>
-                        {unitOptions.map((option) => (
-                          <option key={option.unit} value={option.unit} disabled={option.hasActiveLease}>
-                            {option.unit}
-                            {option.hasActiveLease ? " — Occupied" : ""}
-                          </option>
-                        ))}
+                        {unitOptions.map((option) => {
+                          const isCurrent = option.unit === form.unit;
+                          const isDisabled = option.hasActiveLease && !isCurrent;
+                          return (
+                            <option key={option.unit} value={option.unit} disabled={isDisabled}>
+                              {option.unit}
+                              {option.hasActiveLease ? " — Occupied" : ""}
+                            </option>
+                          );
+                        })}
                       </select>
                     ) : null}
                     <input
