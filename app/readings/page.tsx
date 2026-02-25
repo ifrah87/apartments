@@ -34,6 +34,15 @@ type TenantOption = {
   building?: string | null;
 };
 
+type LeaseOption = {
+  id: string;
+  unit: string;
+  property?: string;
+  tenantName?: string;
+  status?: string;
+  startDate?: string;
+};
+
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -45,6 +54,7 @@ export default function ReadingsPage() {
   const [unitsLoading, setUnitsLoading] = useState(true);
   const [tenants, setTenants] = useState<TenantOption[]>([]);
   const [tenantsLoading, setTenantsLoading] = useState(true);
+  const [leases, setLeases] = useState<LeaseOption[]>([]);
   const [loadingRows, setLoadingRows] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +108,36 @@ export default function ReadingsPage() {
       .finally(() => setTenantsLoading(false));
   }, []);
 
+  useEffect(() => {
+    fetch(`/api/lease-agreements?ts=${Date.now()}`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((payload) => setLeases(payload?.ok === false ? [] : (payload?.ok ? payload.data : payload) || []))
+      .catch(() => setLeases([]));
+  }, []);
+
+  const leaseNameByKey = useMemo(() => {
+    const map = new Map<string, { name: string; start: number }>();
+    leases
+      .filter((lease) => String(lease.status || "").toLowerCase() === "active")
+      .forEach((lease) => {
+        if (!lease.unit || !lease.tenantName) return;
+        const unitKey = lease.unit.trim();
+        const propertyKey = (lease.property || "").trim();
+        const start = lease.startDate ? new Date(lease.startDate).getTime() : 0;
+        const keys = [
+          `${unitKey}||${propertyKey}`,
+          `${unitKey}||`,
+        ];
+        keys.forEach((key) => {
+          const existing = map.get(key);
+          if (!existing || start >= existing.start) {
+            map.set(key, { name: lease.tenantName as string, start });
+          }
+        });
+      });
+    return map;
+  }, [leases]);
+
   const unitOptions = useMemo<UnitOption[]>(() => {
     const map = new Map<string, UnitOption>();
     units.forEach((unit) => {
@@ -121,8 +161,17 @@ export default function ReadingsPage() {
         name: tenant.name ?? existing?.name ?? null,
       });
     });
-    return Array.from(map.values()).sort((a, b) => a.unit.localeCompare(b.unit));
-  }, [tenants, units]);
+    const enriched = Array.from(map.values()).map((entry) => {
+      const key = `${entry.unit}||${entry.property_id ?? ""}`;
+      const leaseName =
+        leaseNameByKey.get(key)?.name || leaseNameByKey.get(`${entry.unit}||`)?.name || null;
+      return {
+        ...entry,
+        name: leaseName ?? entry.name ?? null,
+      };
+    });
+    return enriched.sort((a, b) => a.unit.localeCompare(b.unit));
+  }, [tenants, units, leaseNameByKey]);
 
   const selectedTenantId = useMemo(() => {
     if (!unit.trim()) return null;
@@ -274,7 +323,7 @@ export default function ReadingsPage() {
                       {unitOptions.map((entry) => (
                         <option key={entry.id} value={`${entry.unit}||${entry.property_id ?? ""}`}>
                           {entry.unit}
-                          {entry.name ? ` · ${entry.name}` : entry.property_id ? ` · ${entry.property_id}` : ""}
+                          {entry.name ? ` · ${entry.name}` : " · Vacant"}
                         </option>
                       ))}
                     </select>
