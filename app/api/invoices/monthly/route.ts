@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { query } from "@/lib/db";
 import { datasetsRepo, tenantsRepo } from "@/lib/repos";
 import {
   ChargeEntry,
@@ -42,6 +43,17 @@ function toMoney(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
 }
 
+function formatUkDate(value: string | Date) {
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
 function monthRange(reference: Date) {
   const start = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), 1));
   const end = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 0));
@@ -82,23 +94,40 @@ function buildChargeIndex(rows: ChargeRow[]) {
   return map;
 }
 
+async function nextInvoiceNumber(reference: Date, tenant: TenantRecord) {
+  const year = reference.getUTCFullYear();
+  const period = toISO(reference).slice(0, 7);
+  const seqRes = await query(`SELECT nextval('public.invoice_number_seq') AS seq`);
+  const seqValue = Number(seqRes.rows[0]?.seq || 0);
+  const padded = String(seqValue).padStart(6, "0");
+  const invoiceNumber = `INV-${year}-${padded}`;
+  await query(
+    `INSERT INTO public.invoice_numbers (seq, invoice_number, tenant_id, unit, property_id, period)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      seqValue,
+      invoiceNumber,
+      tenant.id,
+      tenant.unit ? String(tenant.unit) : null,
+      tenant.property_id || null,
+      period,
+    ],
+  );
+  return invoiceNumber;
+}
+
 function buildInvoiceSection(
   tenant: TenantRecord,
   rows: StatementRow[],
   total: number,
   reference: Date,
   company: CompanyProfile,
+  invoiceNumber: string,
 ) {
   const lineItems = rows.filter((row) => row.entryType === "charge" && row.charge > 0);
   if (!lineItems.length) return "";
   const propertyLabel = tenant.building || tenant.property_id || "—";
   const unitLabel = tenant.unit ? `Unit ${tenant.unit}` : "Unit —";
-  const invoicePeriod = toISO(reference).slice(0, 7);
-  const unitRef = tenant.unit ? String(tenant.unit).trim() : "";
-  const tenantRef = tenant.reference ? String(tenant.reference).trim() : "";
-  const fallbackRef = normalizeId(tenant.id).slice(-6) || "tenant";
-  const invoiceRef = unitRef || tenantRef || fallbackRef;
-  const invoiceNumber = `INV-${invoicePeriod}-${invoiceRef}`;
   const dueDate = dueDateForMonth(reference, tenant.due_day);
   const fromLines = [company.address, company.phone, company.email].filter(Boolean);
 
@@ -106,7 +135,7 @@ function buildInvoiceSection(
     .map(
       (item) => `
         <tr>
-          <td>${item.date}</td>
+          <td>${formatUkDate(item.date)}</td>
           <td>${item.description}</td>
           <td class="amount">${toMoney(item.charge)}</td>
         </tr>`,
@@ -127,8 +156,8 @@ function buildInvoiceSection(
         </div>
         <div class="invoice-meta">
           <div><span>Invoice #</span>${invoiceNumber}</div>
-          <div><span>Issue date</span>${toISO(reference)}</div>
-          <div><span>Due date</span>${toISO(dueDate)}</div>
+          <div><span>Issue date</span>${formatUkDate(reference)}</div>
+          <div><span>Due date</span>${formatUkDate(dueDate)}</div>
         </div>
       </div>
       <div class="invoice-grid">
@@ -197,8 +226,9 @@ export async function GET(req: NextRequest) {
     const charges = await datasetsRepo.getDataset<ChargeRow[]>("tenant_charges", []);
     const chargeIndex = buildChargeIndex(charges);
 
-    const sections = scopedTenants
-      .map((tenant) => {
+    const sections = (
+      await Promise.all(
+        scopedTenants.map(async (tenant) => {
         const tenantId = normalizeId(tenant.id);
         const statementTenant = {
           id: tenant.id,
@@ -219,8 +249,11 @@ export async function GET(req: NextRequest) {
           additionalCharges,
         });
         if (!totals.charges) return "";
-        return buildInvoiceSection(statementTenant, rows, totals.charges, reference, company);
-      })
+        const invoiceNumber = await nextInvoiceNumber(reference, statementTenant);
+        return buildInvoiceSection(statementTenant, rows, totals.charges, reference, company, invoiceNumber);
+      }),
+      )
+    )
       .filter(Boolean)
       .join("");
 
