@@ -29,7 +29,7 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-10 z-40 flex h-[calc(100vh-2.5rem)] w-80 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 shadow-[0_10px_40px_rgba(2,6,23,0.45)]">
+    <aside className="sticky top-12 z-40 flex h-[calc(100vh-3rem)] w-80 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 shadow-[0_10px_40px_rgba(2,6,23,0.45)]">
       <div className="pt-2">
         <SidebarBrand />
         <div className="mx-5 mt-1 h-px bg-white/5" />
