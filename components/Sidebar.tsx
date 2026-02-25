@@ -34,7 +34,7 @@ export default function Sidebar() {
         <SidebarBrand />
         <div className="mx-5 mt-1 h-px bg-white/5" />
       </div>
-      <nav className="flex flex-1 flex-col justify-end gap-2 overflow-y-auto px-5 pb-6 pt-4" aria-label="Primary">
+      <nav className="flex flex-1 flex-col justify-start gap-2 overflow-y-auto px-5 pb-6 pt-8" aria-label="Primary">
         {NAV.map(({ href, label, icon: Icon, indent }) => {
           const active = pathname === href || (href !== "/" && pathname?.startsWith(href));
           const paddingClass = indent ? "pl-11" : "pl-9";
