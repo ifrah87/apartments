@@ -51,6 +51,15 @@ type TenantRecord = {
   unit?: string;
 };
 
+type LeaseRecord = {
+  id: string;
+  property?: string;
+  unit: string;
+  tenantName: string;
+  status?: string;
+  startDate?: string;
+};
+
 const STATUS_VARIANTS: Record<InvoiceRow["status"], "success" | "warning" | "danger"> = {
   Paid: "success",
   "Partially Paid": "warning",
@@ -101,12 +110,15 @@ export default function BillsPage() {
           fetch("/api/tenants", { cache: "no-store" }),
           fetch("/api/bills", { cache: "no-store" }),
         ]);
+        const leasesRes = await fetch("/api/lease-agreements", { cache: "no-store" });
         const unitsPayload = await unitsRes.json().catch(() => null);
         const tenantsPayload = await tenantsRes.json().catch(() => null);
         const invoicesPayload = await invoicesRes.json().catch(() => null);
+        const leasesPayload = await leasesRes.json().catch(() => null);
         const unitsData = unitsPayload?.ok ? unitsPayload.data : unitsPayload;
         const tenantsData = tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload;
         const invoicesData = invoicesPayload?.ok ? invoicesPayload.data : invoicesPayload;
+        const leasesData = leasesPayload?.ok ? leasesPayload.data : leasesPayload;
 
         const tenantIndex = new Map<string, TenantRecord>();
         if (Array.isArray(tenantsData)) {
@@ -118,16 +130,48 @@ export default function BillsPage() {
           });
         }
 
+        const leaseIndex = new Map<string, LeaseRecord>();
+        if (Array.isArray(leasesData)) {
+          leasesData
+            .filter((lease) => String(lease?.status || "").toLowerCase() === "active")
+            .forEach((lease) => {
+              const unit = String(lease?.unit || "").trim();
+              if (!unit) return;
+              const property = String(lease?.property || "").trim().toLowerCase();
+              const start = lease?.startDate ? new Date(lease.startDate).getTime() : 0;
+              const key = `${property}::${unit}`.toLowerCase();
+              const fallbackKey = `::${unit}`.toLowerCase();
+              const existing = leaseIndex.get(key);
+              if (!existing || start >= (existing.startDate ? new Date(existing.startDate).getTime() : 0)) {
+                leaseIndex.set(key, lease);
+              }
+              const existingFallback = leaseIndex.get(fallbackKey);
+              if (!existingFallback || start >= (existingFallback.startDate ? new Date(existingFallback.startDate).getTime() : 0)) {
+                leaseIndex.set(fallbackKey, lease);
+              }
+            });
+        }
+
         const nextUnits: UnitCard[] = Array.isArray(unitsData)
-          ? unitsData.map((unit: UnitRecord) => {
-              const propertyId = unit.property_id || "";
-              const tenant = tenantIndex.get(`${propertyId}::${unit.unit}`.toLowerCase());
-              return {
-                id: unit.id,
-                unit: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
-                tenant: tenant?.name || "No tenant",
-                hasTenant: Boolean(tenant),
-              };
+          ? unitsData.flatMap((unit: UnitRecord) => {
+              const propertyId = String(unit.property_id || "").toLowerCase();
+              const unitLabel = unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`;
+              const lease =
+                leaseIndex.get(`${propertyId}::${unit.unit}`.toLowerCase()) ||
+                leaseIndex.get(`::${unit.unit}`.toLowerCase());
+              if (!lease) return [];
+              const tenant =
+                lease.tenantName ||
+                tenantIndex.get(`${propertyId}::${unit.unit}`.toLowerCase())?.name ||
+                "No tenant";
+              return [
+                {
+                  id: unit.id,
+                  unit: unitLabel,
+                  tenant,
+                  hasTenant: true,
+                },
+              ];
             })
           : [];
 
@@ -510,7 +554,8 @@ export default function BillsPage() {
               </div>
             </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-4 max-h-[60vh] overflow-y-auto pr-2">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {generatorUnits.map((unit) => {
                 const selectable = unit.status === "ready";
                 const selected = selectedUnits.includes(unit.id);
@@ -555,6 +600,12 @@ export default function BillsPage() {
                   </button>
                 );
               })}
+              {!generatorUnits.length ? (
+                <div className="col-span-full rounded-xl border border-white/10 bg-panel/60 p-4 text-sm text-slate-400">
+                  No leased units available for billing.
+                </div>
+              ) : null}
+              </div>
             </div>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4 text-xs text-slate-400">
