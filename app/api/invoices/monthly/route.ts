@@ -104,23 +104,34 @@ function dueDateForMonth(reference: Date, dueDayRaw: string | number | undefined
 
 async function fetchMeterReadingDetails(ids: string[]) {
   if (!ids.length) return new Map<string, MeterReadingDetail>();
-  const { rows } = await query(
-    `WITH target AS (
-       SELECT id, unit, meter_type
-       FROM meter_readings
-       WHERE id = ANY($1)
-     ),
-     ranked AS (
-       SELECT r.*,
-              LAG(r.reading_date) OVER (PARTITION BY r.unit, r.meter_type ORDER BY r.reading_date, r.created_at) AS prev_date
-       FROM meter_readings r
-       JOIN target t ON t.unit = r.unit AND t.meter_type = r.meter_type
-     )
-     SELECT id, unit, meter_type, reading_date, reading_value, prev_value, usage, amount, prev_date
-     FROM ranked
-     WHERE id = ANY($1)`,
-    [ids],
-  );
+  let rows: any[] = [];
+  try {
+    const res = await query(
+      `WITH target AS (
+         SELECT id, unit, meter_type
+         FROM meter_readings
+         WHERE id = ANY($1)
+       ),
+       ranked AS (
+         SELECT r.*,
+                LAG(r.reading_date) OVER (PARTITION BY r.unit, r.meter_type ORDER BY r.reading_date, r.created_at) AS prev_date
+         FROM meter_readings r
+         JOIN target t ON t.unit = r.unit AND t.meter_type = r.meter_type
+       )
+       SELECT id, unit, meter_type, reading_date, reading_value, prev_value, usage, amount, prev_date
+       FROM ranked
+       WHERE id = ANY($1)`,
+      [ids],
+    );
+    rows = res.rows;
+  } catch (err: any) {
+    const code = err?.code;
+    const message = err instanceof Error ? err.message : String(err);
+    if (code === "42P01" || message.includes('relation "meter_readings" does not exist')) {
+      return new Map<string, MeterReadingDetail>();
+    }
+    throw err;
+  }
 
   const map = new Map<string, MeterReadingDetail>();
   rows.forEach((row: any) => {
@@ -177,6 +188,22 @@ function buildChargeIndex(rows: ChargeRow[], readingMap: Map<string, MeterReadin
 }
 
 async function nextInvoiceNumber(reference: Date, tenant: TenantRecord) {
+  await query(`CREATE SEQUENCE IF NOT EXISTS public.invoice_number_seq`);
+  await query(
+    `CREATE TABLE IF NOT EXISTS public.invoice_numbers (
+      seq bigint PRIMARY KEY,
+      invoice_number text NOT NULL UNIQUE,
+      tenant_id text,
+      unit text,
+      property_id uuid,
+      period text,
+      issued_at timestamptz NOT NULL DEFAULT now()
+    )`,
+  );
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_invoice_numbers_tenant_period
+     ON public.invoice_numbers (tenant_id, period)`,
+  );
   const year = reference.getUTCFullYear();
   const period = toISO(reference).slice(0, 7);
   const seqRes = await query(`SELECT nextval('public.invoice_number_seq') AS seq`);
