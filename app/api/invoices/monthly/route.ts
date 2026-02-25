@@ -425,7 +425,7 @@ export async function GET(req: NextRequest) {
         ? `tenant-invoice-${normalizedTenantId}-${toISO(reference).slice(0, 7)}.pdf`
         : `tenant-invoices-${toISO(reference).slice(0, 7)}.pdf`;
       const disposition = mode === "download" ? "attachment" : "inline";
-      return new NextResponse(pdf, {
+      return new NextResponse(new Uint8Array(pdf), {
         headers: {
           "Content-Type": "application/pdf",
           "Content-Disposition": `${disposition}; filename="${filename}"`,
