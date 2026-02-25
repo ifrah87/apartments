@@ -134,7 +134,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
 
   doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
 
-  const logoBuffer = await resolveLogoBuffer(company.logoPath);
+  const logoBuffer = await resolveLogoBuffer("/branding/Logo.png");
 
   const addInvoicePage = (payload: InvoicePayload, index: number) => {
     if (index > 0) doc.addPage();
@@ -299,9 +299,8 @@ function buildInvoiceSection(
     )
     .join("");
 
-  const logo = company.logoPath
-    ? `<img class="logo" src="${company.logoPath}" alt="${company.name} logo" />`
-    : "";
+  const logoPath = "/branding/Logo.png";
+  const logo = `<img class="logo" src="${logoPath}" alt="${company.name} logo" />`;
 
   return `
     <section class="invoice">
