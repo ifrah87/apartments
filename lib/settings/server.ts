@@ -62,9 +62,6 @@ function asBool(value: unknown, fallback: boolean) {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function isValidEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
 
 function normalizeGeneral(input: unknown, strict: boolean): NormalizeResult<GeneralSettings> {
   const errors: Record<string, string> = {};
@@ -72,7 +69,7 @@ function normalizeGeneral(input: unknown, strict: boolean): NormalizeResult<Gene
   const value: GeneralSettings = {
     orgName: asString(src.orgName, DEFAULT_GENERAL.orgName).trim(),
     displayName: asOptionalString(src.displayName).trim(),
-    email: asString(src.email, DEFAULT_GENERAL.email).trim(),
+    email: asOptionalString(src.email).trim(),
     phone: asOptionalString(src.phone).trim(),
     address: asOptionalString(src.address).trim(),
     defaultCurrency: asString(src.defaultCurrency, DEFAULT_GENERAL.defaultCurrency).trim() || "USD",
@@ -82,7 +79,6 @@ function normalizeGeneral(input: unknown, strict: boolean): NormalizeResult<Gene
 
   if (strict) {
     if (!value.orgName) errors.orgName = "Organization name is required.";
-    if (!value.email || !isValidEmail(value.email)) errors.email = "Valid primary email is required.";
   }
 
   return { value, errors };

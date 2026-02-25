@@ -37,7 +37,6 @@ export default function GeneralSettingsPage() {
   const validate = () => {
     const next: Record<string, string> = {};
     if (!form.orgName.trim()) next.orgName = "Organization name is required.";
-    if (!form.email.trim()) next.email = "Primary email is required.";
     return next;
   };
 
@@ -95,17 +94,6 @@ export default function GeneralSettingsPage() {
                 onChange={(event) => setForm((prev) => ({ ...prev, displayName: event.target.value }))}
                 className="mt-2 w-full rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-100"
               />
-            </label>
-
-            <label className="text-sm text-slate-300">
-              Primary email *
-              <input
-                type="email"
-                value={form.email}
-                onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
-                className="mt-2 w-full rounded-lg border border-white/10 bg-panel-2/60 px-3 py-2 text-sm text-slate-100"
-              />
-              {errors.email ? <p className="mt-1 text-xs text-rose-300">{errors.email}</p> : null}
             </label>
 
             <label className="text-sm text-slate-300">
@@ -179,8 +167,7 @@ export default function GeneralSettingsPage() {
             </div>
             <div>
               <p className="text-xs text-slate-500">Primary contact</p>
-              <p>{form.email || "—"}</p>
-              {form.phone ? <p className="text-xs text-slate-400">{form.phone}</p> : null}
+              <p>{form.phone || "—"}</p>
             </div>
             <div>
               <p className="text-xs text-slate-500">Defaults</p>

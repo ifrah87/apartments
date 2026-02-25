@@ -14,7 +14,6 @@ export type OrganizationSnapshot = {
 export type CompanyProfile = {
   name: string;
   address: string;
-  email: string;
   phone: string;
   logoPath: string;
 };
@@ -42,7 +41,6 @@ export function buildCompanyProfile(snapshot: OrganizationSnapshot): CompanyProf
   return {
     name: resolveCompanyName(general, branding),
     address: (general.address || "").trim(),
-    email: (general.email || "").trim(),
     phone: (general.phone || "").trim(),
     logoPath: (branding.logoPath || "").trim(),
   };

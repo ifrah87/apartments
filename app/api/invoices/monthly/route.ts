@@ -175,7 +175,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     doc.fillColor("#64748b").font("Helvetica").fontSize(9).text("FROM", fromX, sectionY);
     doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(12).text(company.name, fromX, sectionY + 14);
     doc.fillColor("#0f172a").font("Helvetica").fontSize(10);
-    const fromLines = [company.address, company.phone, company.email].filter(Boolean);
+    const fromLines = [company.address, company.phone].filter(Boolean);
     fromLines.forEach((line, idx) => {
       doc.text(line || "", fromX, sectionY + 30 + idx * 14);
     });
@@ -242,7 +242,7 @@ function buildInvoiceSection(
   const propertyLabel = tenant.building || tenant.property_id || "—";
   const unitLabel = tenant.unit ? `Unit ${tenant.unit}` : "Unit —";
   const dueDate = dueDateForMonth(reference, tenant.due_day);
-  const fromLines = [company.address, company.phone, company.email].filter(Boolean);
+  const fromLines = [company.address, company.phone].filter(Boolean);
 
   const lines = lineItems
     .map(
