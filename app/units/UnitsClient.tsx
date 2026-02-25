@@ -372,7 +372,7 @@ export default function UnitsClient() {
         unit: form.unit.trim(),
         type: form.type || undefined,
         property_id: propertyId || undefined,
-        status: "Vacant",
+        status: "vacant",
       };
       const res =
         mode === "edit"

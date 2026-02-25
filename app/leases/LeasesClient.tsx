@@ -635,7 +635,7 @@ export default function LeasesClient() {
             body: JSON.stringify({
               unit: payload.unit,
               property_id: resolvedPropertyId,
-              status: "Vacant",
+              status: "vacant",
             }),
           });
           const unitData = await unitRes.json().catch(() => null);

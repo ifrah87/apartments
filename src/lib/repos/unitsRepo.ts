@@ -42,6 +42,16 @@ function normalizeUnitType(value: unknown): UnitType {
   return "2bed";
 }
 
+function normalizeUnitStatus(value: unknown) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const raw = String(value).trim().toLowerCase();
+  if (!raw) return undefined;
+  if (raw.startsWith("vac")) return "vacant";
+  if (raw.startsWith("occ")) return "occupied";
+  if (raw.startsWith("maint")) return "maintenance";
+  throw badRequest("Invalid unit status.");
+}
+
 function inferUnitType(unitNumber: number) {
   const slot = unitNumber % 100;
   const floor = Math.trunc(unitNumber / 100);
@@ -105,7 +115,7 @@ function normalizeUnitInput(payload: UnitInput, requireUnit = true, requireType 
     floor,
     unit_type: unitType,
     rent: toNumber(payload.rent),
-    status: payload.status ?? null,
+    status: normalizeUnitStatus(payload.status),
   };
 }
 
@@ -159,7 +169,7 @@ export async function createUnit(payload: UnitInput): Promise<UnitRecord> {
       normalized.floor,
       normalized.unit_type,
       normalized.rent,
-      normalized.status,
+      normalized.status ?? "vacant",
     ],
   );
   return normalizeUnitRow(rows[0]);
