@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { datasetsRepo, RepoError } from "@/lib/repos";
+import { datasetsRepo, RepoError, tenantsRepo } from "@/lib/repos";
 import { DEFAULT_LEASES, LeaseAgreement, LeaseAgreementStatus, LeaseBillingCycle } from "@/lib/leases";
 
 const DATASET_KEY = "lease_agreements";
@@ -36,6 +36,30 @@ function normalizeCycle(cycle?: string): LeaseBillingCycle {
   if (normalized.includes("semi")) return "Semi-Annually";
   if (normalized.includes("annual")) return "Annually";
   return "Monthly";
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+async function syncTenantFromLease(lease: LeaseAgreement) {
+  if (!lease?.tenantName || !lease?.unit) return;
+  const propertyKey = lease.property ? String(lease.property) : "";
+  const tenantId = `tenant-${slugify(propertyKey || "property")}-${slugify(lease.unit)}`;
+  try {
+    await tenantsRepo.createTenant({
+      id: tenantId,
+      name: lease.tenantName,
+      unit: lease.unit,
+      property_id: propertyKey || null,
+    });
+  } catch (err) {
+    console.warn("⚠️ failed to sync tenant from lease", err);
+  }
 }
 
 export async function GET() {
@@ -78,6 +102,8 @@ export async function POST(req: NextRequest) {
       (current) => [...normalizeList(current), entry],
       [],
     );
+
+    await syncTenantFromLease(entry);
 
     return NextResponse.json({ ok: true, data: updated });
   } catch (err) {
@@ -124,6 +150,11 @@ export async function PUT(req: NextRequest) {
       },
       [],
     );
+
+    const updatedLease = updated.find((item) => item.id === payload.id);
+    if (updatedLease) {
+      await syncTenantFromLease(updatedLease);
+    }
 
     return NextResponse.json({ ok: true, data: updated });
   } catch (err) {

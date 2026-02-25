@@ -23,6 +23,7 @@ type UnitOption = {
   id: string;
   unit: string;
   property_id?: string | null;
+  name?: string | null;
 };
 
 type TenantOption = {
@@ -98,17 +99,26 @@ export default function ReadingsPage() {
   }, []);
 
   const unitOptions = useMemo<UnitOption[]>(() => {
-    if (units.length) return units;
     const map = new Map<string, UnitOption>();
+    units.forEach((unit) => {
+      if (!unit.unit) return;
+      const key = `${unit.unit}||${unit.property_id ?? ""}`;
+      map.set(key, {
+        id: unit.id,
+        unit: unit.unit,
+        property_id: unit.property_id ?? null,
+      });
+    });
     tenants.forEach((tenant) => {
       if (!tenant.unit) return;
       const propertyId = tenant.property_id ?? tenant.building ?? null;
       const key = `${tenant.unit}||${propertyId ?? ""}`;
-      if (map.has(key)) return;
+      const existing = map.get(key);
       map.set(key, {
-        id: `tenant-${tenant.id}`,
+        id: existing?.id ?? `tenant-${tenant.id}`,
         unit: tenant.unit,
         property_id: propertyId,
+        name: tenant.name ?? existing?.name ?? null,
       });
     });
     return Array.from(map.values()).sort((a, b) => a.unit.localeCompare(b.unit));
@@ -264,7 +274,7 @@ export default function ReadingsPage() {
                       {unitOptions.map((entry) => (
                         <option key={entry.id} value={`${entry.unit}||${entry.property_id ?? ""}`}>
                           {entry.unit}
-                          {entry.property_id ? ` · ${entry.property_id}` : ""}
+                          {entry.name ? ` · ${entry.name}` : entry.property_id ? ` · ${entry.property_id}` : ""}
                         </option>
                       ))}
                     </select>
