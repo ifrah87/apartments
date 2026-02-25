@@ -303,7 +303,7 @@ export default function BillsPage() {
       }
 
       const params = new URLSearchParams({
-        mode: "view",
+        mode: "pdf",
         month: generatorMonth,
         year: generatorYear,
       });
@@ -331,7 +331,7 @@ export default function BillsPage() {
     return { month, year };
   };
 
-  const buildInvoiceUrl = (invoice: InvoiceRow, mode: "view" | "download") => {
+  const buildInvoiceUrl = (invoice: InvoiceRow, mode: "pdf" | "download") => {
     const { month, year } = parsePeriod(invoice.period);
     const params = new URLSearchParams({ mode });
     if (invoice.tenantId) params.set("tenantId", invoice.tenantId);
@@ -341,7 +341,7 @@ export default function BillsPage() {
   };
 
   const handleViewInvoice = (invoice: InvoiceRow) => {
-    window.open(buildInvoiceUrl(invoice, "view"), "_blank", "noopener,noreferrer");
+    window.open(buildInvoiceUrl(invoice, "pdf"), "_blank", "noopener,noreferrer");
   };
 
   const handleExportInvoice = (invoice: InvoiceRow) => {
@@ -349,7 +349,7 @@ export default function BillsPage() {
   };
 
   const handleWhatsAppInvoice = (invoice: InvoiceRow) => {
-    const invoiceUrl = new URL(buildInvoiceUrl(invoice, "view"), window.location.origin).toString();
+    const invoiceUrl = new URL(buildInvoiceUrl(invoice, "pdf"), window.location.origin).toString();
     const message = `Invoice for ${invoice.tenantName} (${invoice.period}) - ${formatCurrency(invoice.total)}. ${invoiceUrl}`;
     const href = `https://wa.me/?text=${encodeURIComponent(message)}`;
     window.open(href, "_blank", "noopener,noreferrer");

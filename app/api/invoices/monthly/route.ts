@@ -1,3 +1,4 @@
+import PDFDocument from "pdfkit";
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { datasetsRepo, tenantsRepo } from "@/lib/repos";
@@ -116,6 +117,118 @@ async function nextInvoiceNumber(reference: Date, tenant: TenantRecord) {
   return invoiceNumber;
 }
 
+type InvoicePayload = {
+  tenant: TenantRecord;
+  rows: StatementRow[];
+  total: number;
+  invoiceNumber: string;
+  issueDate: Date;
+  dueDate: Date;
+};
+
+async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, company: CompanyProfile) {
+  const doc = new PDFDocument({ size: "A4", margin: 48 });
+  const chunks: Buffer[] = [];
+
+  doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+
+  const addInvoicePage = (payload: InvoicePayload, index: number) => {
+    if (index > 0) doc.addPage();
+
+    const left = doc.page.margins.left;
+    const right = doc.page.width - doc.page.margins.right;
+    let y = doc.page.margins.top;
+
+    doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(20).text("INVOICE", left, y);
+    y += 22;
+    doc.fillColor("#64748b").font("Helvetica").fontSize(10).text(`Billing period: ${monthLabel(reference)}`, left, y);
+
+    const metaX = right - 220;
+    const metaTop = doc.page.margins.top;
+    doc.fillColor("#475569").font("Helvetica").fontSize(9).text("Invoice #", metaX, metaTop, { width: 220, align: "right" });
+    doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(10).text(payload.invoiceNumber, metaX, metaTop + 12, {
+      width: 220,
+      align: "right",
+    });
+    doc.fillColor("#475569").font("Helvetica").fontSize(9).text("Issue date", metaX, metaTop + 30, { width: 220, align: "right" });
+    doc.fillColor("#0f172a").font("Helvetica").fontSize(10).text(formatUkDate(payload.issueDate), metaX, metaTop + 42, {
+      width: 220,
+      align: "right",
+    });
+    doc.fillColor("#475569").font("Helvetica").fontSize(9).text("Due date", metaX, metaTop + 60, { width: 220, align: "right" });
+    doc.fillColor("#0f172a").font("Helvetica").fontSize(10).text(formatUkDate(payload.dueDate), metaX, metaTop + 72, {
+      width: 220,
+      align: "right",
+    });
+
+    y += 36;
+
+    const billToX = left;
+    const fromX = doc.page.width / 2 + 12;
+    const sectionY = y + 12;
+    doc.fillColor("#64748b").font("Helvetica").fontSize(9).text("BILL TO", billToX, sectionY);
+    doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(12).text(payload.tenant.name, billToX, sectionY + 14);
+    doc.fillColor("#0f172a").font("Helvetica").fontSize(10);
+    doc.text(payload.tenant.building || payload.tenant.property_id || "—", billToX, sectionY + 30);
+    doc.text(payload.tenant.unit ? `Unit ${payload.tenant.unit}` : "Unit —", billToX, sectionY + 44);
+
+    doc.fillColor("#64748b").font("Helvetica").fontSize(9).text("FROM", fromX, sectionY);
+    doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(12).text(company.name, fromX, sectionY + 14);
+    doc.fillColor("#0f172a").font("Helvetica").fontSize(10);
+    const fromLines = [company.address, company.phone, company.email].filter(Boolean);
+    fromLines.forEach((line, idx) => {
+      doc.text(line || "", fromX, sectionY + 30 + idx * 14);
+    });
+
+    y = sectionY + 80;
+
+    const tableTop = y;
+    const colDate = left;
+    const colDesc = left + 120;
+    const colAmount = right - 120;
+    doc.fillColor("#64748b").font("Helvetica-Bold").fontSize(9);
+    doc.text("DATE", colDate, tableTop);
+    doc.text("DESCRIPTION", colDesc, tableTop);
+    doc.text("AMOUNT", colAmount, tableTop, { width: 120, align: "right" });
+
+    y = tableTop + 16;
+    doc.moveTo(left, y).lineTo(right, y).strokeColor("#e2e8f0").stroke();
+    y += 8;
+
+    doc.font("Helvetica").fontSize(10).fillColor("#0f172a");
+    payload.rows
+      .filter((row) => row.entryType === "charge" && row.charge > 0)
+      .forEach((row) => {
+        if (y > doc.page.height - doc.page.margins.bottom - 60) {
+          doc.addPage();
+          y = doc.page.margins.top;
+        }
+        doc.text(formatUkDate(row.date), colDate, y);
+        doc.text(row.description, colDesc, y, { width: colAmount - colDesc - 12 });
+        doc.text(toMoney(row.charge), colAmount, y, { width: 120, align: "right" });
+        y += 18;
+      });
+
+    y += 4;
+    doc.moveTo(left, y).lineTo(right, y).strokeColor("#e2e8f0").stroke();
+    y += 10;
+    doc.font("Helvetica-Bold").text("Total due", colDesc, y, { width: colAmount - colDesc - 12, align: "right" });
+    doc.text(toMoney(payload.total), colAmount, y, { width: 120, align: "right" });
+  };
+
+  if (!invoices.length) {
+    doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(18).text("No charges found", doc.page.margins.left, doc.page.margins.top);
+  } else {
+    invoices.forEach(addInvoicePage);
+  }
+
+  doc.end();
+
+  return await new Promise<Buffer>((resolve) => {
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+  });
+}
+
 function buildInvoiceSection(
   tenant: TenantRecord,
   rows: StatementRow[],
@@ -203,6 +316,7 @@ export async function GET(req: NextRequest) {
     const requestedTenantId = searchParams.get("tenantId") || searchParams.get("tenant") || "";
     const mode = searchParams.get("mode") || "download";
     const isView = mode === "view";
+    const wantsPdf = mode === "download" || mode === "pdf";
     const requestedMonth = searchParams.get("month") || "";
     const requestedYear = searchParams.get("year") || "";
     let reference = new Date();
@@ -226,34 +340,60 @@ export async function GET(req: NextRequest) {
     const charges = await datasetsRepo.getDataset<ChargeRow[]>("tenant_charges", []);
     const chargeIndex = buildChargeIndex(charges);
 
-    const sections = (
+    const invoicePayloads = (
       await Promise.all(
         scopedTenants.map(async (tenant) => {
-        const tenantId = normalizeId(tenant.id);
-        const statementTenant = {
-          id: tenant.id,
-          name: tenant.name,
-          property_id: tenant.property_id ?? undefined,
-          building: tenant.building ?? undefined,
-          unit: tenant.unit ?? undefined,
-          reference: tenant.reference ?? undefined,
-          monthly_rent: tenant.monthly_rent ?? undefined,
-          due_day: tenant.due_day ?? undefined,
-        };
-        const additionalCharges = chargeIndex.get(tenantId) || [];
-        const { rows, totals } = createStatement({
-          tenant: statementTenant,
-          start,
-          end,
-          payments: [],
-          additionalCharges,
-        });
-        if (!totals.charges) return "";
-        const invoiceNumber = await nextInvoiceNumber(reference, statementTenant);
-        return buildInvoiceSection(statementTenant, rows, totals.charges, reference, company, invoiceNumber);
-      }),
+          const tenantId = normalizeId(tenant.id);
+          const statementTenant: TenantRecord = {
+            id: tenant.id,
+            name: tenant.name,
+            property_id: tenant.property_id ?? undefined,
+            building: tenant.building ?? undefined,
+            unit: tenant.unit ?? undefined,
+            reference: tenant.reference ?? undefined,
+            monthly_rent: tenant.monthly_rent ?? undefined,
+            due_day: tenant.due_day ?? undefined,
+          };
+          const additionalCharges = chargeIndex.get(tenantId) || [];
+          const { rows, totals } = createStatement({
+            tenant: statementTenant,
+            start,
+            end,
+            payments: [],
+            additionalCharges,
+          });
+          if (!totals.charges) return null;
+          const invoiceNumber = await nextInvoiceNumber(reference, statementTenant);
+          return {
+            tenant: statementTenant,
+            rows,
+            total: totals.charges,
+            invoiceNumber,
+            issueDate: reference,
+            dueDate: dueDateForMonth(reference, statementTenant.due_day),
+          } satisfies InvoicePayload;
+        }),
       )
-    )
+    ).filter(Boolean) as InvoicePayload[];
+
+    if (wantsPdf) {
+      const pdf = await renderInvoicesPdf(invoicePayloads, reference, company);
+      const filename = normalizedTenantId
+        ? `tenant-invoice-${normalizedTenantId}-${toISO(reference).slice(0, 7)}.pdf`
+        : `tenant-invoices-${toISO(reference).slice(0, 7)}.pdf`;
+      const disposition = mode === "download" ? "attachment" : "inline";
+      return new NextResponse(pdf, {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `${disposition}; filename="${filename}"`,
+        },
+      });
+    }
+
+    const sections = invoicePayloads
+      .map((payload) =>
+        buildInvoiceSection(payload.tenant, payload.rows, payload.total, reference, company, payload.invoiceNumber),
+      )
       .filter(Boolean)
       .join("");
 
@@ -317,7 +457,7 @@ export async function GET(req: NextRequest) {
     const filename = normalizedTenantId
       ? `tenant-invoice-${normalizedTenantId}-${toISO(reference).slice(0, 7)}.html`
       : `tenant-invoices-${toISO(reference).slice(0, 7)}.html`;
-    const disposition = mode === "view" ? "inline" : "attachment";
+    const disposition = "inline";
     return new NextResponse(html, {
       headers: {
         "Content-Type": "text/html",
