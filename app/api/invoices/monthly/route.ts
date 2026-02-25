@@ -240,25 +240,37 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
 
 async function resolveLogoBuffer(logoPath: string) {
   const normalized = (logoPath || "").trim();
-  if (!normalized) return null;
-  try {
-    if (normalized.startsWith("data:")) {
-      const base64 = normalized.split(",")[1] || "";
-      if (!base64) return null;
-      return Buffer.from(base64, "base64");
+  const fallback = "/logos/orfane-logo-crop.png";
+  const candidates = [normalized, fallback].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      if (!candidate) continue;
+      if (candidate.endsWith(".svg")) {
+        // PDFKit doesn't support SVG; skip to fallback PNG.
+        continue;
+      }
+      if (candidate.startsWith("data:")) {
+        if (candidate.startsWith("data:image/svg")) continue;
+        const base64 = candidate.split(",")[1] || "";
+        if (!base64) continue;
+        return Buffer.from(base64, "base64");
+      }
+      if (candidate.startsWith("http://") || candidate.startsWith("https://")) {
+        const response = await fetch(candidate);
+        if (!response.ok) continue;
+        const arrayBuffer = await response.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+      }
+      const relative = candidate.startsWith("/") ? candidate.slice(1) : candidate;
+      const filePath = path.join(process.cwd(), "public", relative);
+      return await fs.readFile(filePath);
+    } catch {
+      continue;
     }
-    if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
-      const response = await fetch(normalized);
-      if (!response.ok) return null;
-      const arrayBuffer = await response.arrayBuffer();
-      return Buffer.from(arrayBuffer);
-    }
-    const relative = normalized.startsWith("/") ? normalized.slice(1) : normalized;
-    const filePath = path.join(process.cwd(), "public", relative);
-    return await fs.readFile(filePath);
-  } catch {
-    return null;
   }
+
+  return null;
 }
 
 function buildInvoiceSection(
