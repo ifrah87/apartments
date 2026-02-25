@@ -240,7 +240,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
 
 async function resolveLogoBuffer(logoPath: string) {
   const normalized = (logoPath || "").trim();
-  const fallback = "/logos/orfane-logo-crop.png";
+  const fallback = "/branding/Logo.png";
   const candidates = [normalized, fallback].filter(Boolean);
 
   for (const candidate of candidates) {
