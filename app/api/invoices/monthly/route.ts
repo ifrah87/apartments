@@ -394,7 +394,7 @@ function buildInvoiceLineItems(rows: StatementRow[], reference: Date): InvoiceLi
   return rows
     .filter((row) => row.entryType === "charge" && row.charge > 0)
     .map((row) => {
-      const meta = row.meta as any;
+      const meta = row.meta as Record<string, unknown> | undefined;
       if (meta?.kind === "utility") {
         const label = meta.meterType === "water" ? "Water" : "Electricity";
         const details: string[] = [];
