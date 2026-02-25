@@ -194,7 +194,13 @@ export async function createReading(payload: MeterReadingInput): Promise<MeterRe
   return normalizeReadingRow(created);
 }
 
+export async function deleteReading(id: string): Promise<void> {
+  if (!id) throw badRequest("Reading id is required.");
+  await query(`DELETE FROM meter_readings WHERE id = $1`, [id]);
+}
+
 export const meterReadingsRepo = {
   listReadings,
   createReading,
+  deleteReading,
 };

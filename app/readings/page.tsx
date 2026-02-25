@@ -196,8 +196,22 @@ export default function ReadingsPage() {
     return match?.reading_value ?? null;
   }, [rows, unit, meterType]);
 
-  const handleDelete = (id: string) => {
-    setRows((prev) => prev.filter((row) => row.id !== id));
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this reading?")) return;
+    try {
+      const res = await fetch("/api/meter-readings", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Failed to delete reading.");
+      }
+      setRows((prev) => prev.filter((row) => row.id !== id));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete reading.");
+    }
   };
 
   const handleSave = async () => {

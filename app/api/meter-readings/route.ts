@@ -31,3 +31,18 @@ export async function POST(req: NextRequest) {
     return handleError(err);
   }
 }
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const payload = await req.json().catch(() => ({}));
+    const id = String(payload?.id || "").trim();
+    if (!id) {
+      return NextResponse.json({ ok: false, error: "Reading id is required." }, { status: 400 });
+    }
+    await meterReadingsRepo.deleteReading(id);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("❌ /api/meter-readings DELETE failed:", err);
+    return handleError(err);
+  }
+}
