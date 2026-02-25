@@ -1,5 +1,11 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = {
+  experimental: {
+    outputFileTracingIncludes: {
+      "*": ["node_modules/pdfkit/js/data/**"],
+    },
+  },
+};
 
 export default nextConfig;
