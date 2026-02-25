@@ -91,6 +91,12 @@ export default function ReportsPage() {
   const normalizedQuery = query.trim().toLowerCase();
 
   const [pinned, setPinned] = useState<string[]>([]);
+  const [brainStats, setBrainStats] = useState({
+    units: 0,
+    occupiedUnits: 0,
+    vacantUnits: 0,
+    tenants: 0,
+  });
 
   useEffect(() => {
     fetch("/api/reports/pinned", { cache: "no-store" })
@@ -101,6 +107,58 @@ export default function ReportsPage() {
         }
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const [unitsRes, leasesRes, tenantsRes] = await Promise.all([
+          fetch(`/api/units?ts=${Date.now()}`, { cache: "no-store" }),
+          fetch(`/api/lease-agreements?ts=${Date.now()}`, { cache: "no-store" }),
+          fetch(`/api/tenants?ts=${Date.now()}`, { cache: "no-store" }),
+        ]);
+        const unitsPayload = await unitsRes.json().catch(() => null);
+        const leasesPayload = await leasesRes.json().catch(() => null);
+        const tenantsPayload = await tenantsRes.json().catch(() => null);
+
+        const units = Array.isArray(unitsPayload?.ok ? unitsPayload.data : unitsPayload)
+          ? (unitsPayload.ok ? unitsPayload.data : unitsPayload)
+          : [];
+        const leases = Array.isArray(leasesPayload?.ok ? leasesPayload.data : leasesPayload)
+          ? (leasesPayload.ok ? leasesPayload.data : leasesPayload)
+          : [];
+        const tenants = Array.isArray(tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload)
+          ? (tenantsPayload.ok ? tenantsPayload.data : tenantsPayload)
+          : [];
+
+        const activeLeases = leases.filter(
+          (lease: any) => String(lease?.status || "").toLowerCase() === "active",
+        );
+        const occupiedUnits = new Set(
+          activeLeases.map((lease: any) => String(lease?.unit || "").trim()).filter(Boolean),
+        ).size;
+        const totalUnits = Array.isArray(units) ? units.length : 0;
+        const vacantUnits = Math.max(totalUnits - occupiedUnits, 0);
+
+        if (active) {
+          setBrainStats({
+            units: totalUnits,
+            occupiedUnits,
+            vacantUnits,
+            tenants: Array.isArray(tenants) ? tenants.length : 0,
+          });
+        }
+      } catch {
+        if (active) {
+          setBrainStats((prev) => prev);
+        }
+      }
+    };
+    load();
+    return () => {
+      active = false;
+    };
   }, []);
 
   const filteredGroups = useMemo(() => {
@@ -129,8 +187,27 @@ export default function ReportsPage() {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold text-slate-100">Reports & Analytics</h1>
-        <p className="text-sm text-slate-400">Access standard reports or create a custom view.</p>
+        <h1 className="text-2xl font-semibold text-slate-100">Reports Brain</h1>
+        <p className="text-sm text-slate-400">A quick intelligence layer for your portfolio.</p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <SectionCard className="p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Total Units</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-100">{brainStats.units}</p>
+        </SectionCard>
+        <SectionCard className="p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Occupied</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-100">{brainStats.occupiedUnits}</p>
+        </SectionCard>
+        <SectionCard className="p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Vacant</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-100">{brainStats.vacantUnits}</p>
+        </SectionCard>
+        <SectionCard className="p-4">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Tenants</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-100">{brainStats.tenants}</p>
+        </SectionCard>
       </div>
 
       <div className="space-y-3">
