@@ -672,7 +672,9 @@ export default function LeasesClient() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || data?.ok === false) {
-        throw new Error(data?.error || "Failed to delete lease.");
+        const message = data?.error || `Failed to delete lease (HTTP ${res.status}).`;
+        setNotice(message);
+        return;
       }
       const updated = (data?.ok ? data.data : data) as LeaseAgreement[];
       if (Array.isArray(updated)) {
@@ -682,8 +684,7 @@ export default function LeasesClient() {
       }
     } catch (err) {
       console.error(err);
-      setNotice("API unavailable. Lease removed locally only.");
-      setLeases((prev) => prev.filter((item) => item.id !== lease.id));
+      setNotice("Network/API unavailable. Lease not deleted.");
     }
   };
 
