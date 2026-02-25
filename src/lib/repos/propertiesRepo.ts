@@ -1,4 +1,6 @@
 import { query } from "@/lib/db";
+import { datasetsRepo } from "@/lib/repos/datasetsRepo";
+import type { LeaseAgreement } from "@/lib/leases";
 import { badRequest, notFound } from "./errors";
 
 export type PropertyRecord = {
@@ -71,8 +73,7 @@ export async function listPropertySummaries(): Promise<PropertySummary[]> {
        p.status,
        COALESCE(u.total_units, 0)::int as total_units,
        COALESCE(u.occupied_units, 0)::int as occupied_units,
-       COALESCE(u.vacant_units, 0)::int as vacant_units,
-       COALESCE(l.monthly_rent, 0)::numeric as monthly_rent
+       COALESCE(u.vacant_units, 0)::int as vacant_units
      FROM properties p
      LEFT JOIN (
        SELECT
@@ -83,28 +84,48 @@ export async function listPropertySummaries(): Promise<PropertySummary[]> {
        FROM units
        GROUP BY property_id
      ) u ON u.property_id = p.id
-     LEFT JOIN (
-       SELECT
-         u.property_id,
-         SUM(l.rent) as monthly_rent
-       FROM leases l
-       JOIN units u ON u.id = l.unit_id
-       WHERE lower(l.status) = 'active'
-       GROUP BY u.property_id
-     ) l ON l.property_id = p.id
      ORDER BY p.created_at DESC`,
   );
 
-  return rows.map((row: any) => ({
-    id: String(row.id),
-    name: String(row.name),
-    code: row.code ?? null,
-    status: row.status === "archived" ? "archived" : "active",
-    totalUnits: Number(row.total_units || 0),
-    occupiedUnits: Number(row.occupied_units || 0),
-    vacantUnits: Number(row.vacant_units || 0),
-    monthlyRent: Number(row.monthly_rent || 0),
-  }));
+  const leases = await datasetsRepo.getDataset<LeaseAgreement[]>("lease_agreements", []);
+  const leaseList = Array.isArray(leases) ? leases : [];
+
+  const propertyKeyMap = new Map<string, string>();
+  rows.forEach((row: any) => {
+    const id = String(row.id).toLowerCase();
+    const name = String(row.name || "").toLowerCase();
+    const code = String(row.code || "").toLowerCase();
+    if (id) propertyKeyMap.set(id, String(row.id));
+    if (name) propertyKeyMap.set(name, String(row.id));
+    if (code) propertyKeyMap.set(code, String(row.id));
+  });
+
+  const rentByProperty = new Map<string, number>();
+  leaseList.forEach((lease) => {
+    if (!lease || typeof lease !== "object") return;
+    if ((lease.status || "").toLowerCase() !== "active") return;
+    const key = String(lease.property || "").toLowerCase();
+    if (!key) return;
+    const propertyId = propertyKeyMap.get(key);
+    if (!propertyId) return;
+    const rent = Number(lease.rent || 0);
+    if (!Number.isFinite(rent) || rent <= 0) return;
+    rentByProperty.set(propertyId, (rentByProperty.get(propertyId) || 0) + rent);
+  });
+
+  return rows.map((row: any) => {
+    const id = String(row.id);
+    return {
+      id,
+      name: String(row.name),
+      code: row.code ?? null,
+      status: row.status === "archived" ? "archived" : "active",
+      totalUnits: Number(row.total_units || 0),
+      occupiedUnits: Number(row.occupied_units || 0),
+      vacantUnits: Number(row.vacant_units || 0),
+      monthlyRent: Number(rentByProperty.get(id) || 0),
+    };
+  });
 }
 
 export async function getProperty(id: string): Promise<PropertyRecord | null> {
