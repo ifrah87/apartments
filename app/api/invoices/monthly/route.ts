@@ -398,7 +398,10 @@ function buildInvoiceLineItems(rows: StatementRow[], reference: Date): InvoiceLi
       if (meta?.kind === "utility") {
         const label = meta.meterType === "water" ? "Water" : "Electricity";
         const details: string[] = [];
-        const prevDateLabel = meta.prevDate ? ` (${formatUkDate(meta.prevDate)})` : "";
+        const prevDateLabel =
+          meta.prevDate && (typeof meta.prevDate === "string" || meta.prevDate instanceof Date)
+            ? ` (${formatUkDate(meta.prevDate)})`
+            : "";
         if (meta.prevValue !== undefined) {
           details.push(`Previous Reading${prevDateLabel} ${formatQuantity(Number(meta.prevValue))} units`);
         }
