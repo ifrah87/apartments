@@ -29,7 +29,7 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-10 z-40 flex h-[calc(100vh-2.5rem)] w-72 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 shadow-[0_10px_40px_rgba(2,6,23,0.45)]">
+    <aside className="sticky top-10 z-40 flex h-[calc(100vh-2.5rem)] w-80 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 shadow-[0_10px_40px_rgba(2,6,23,0.45)]">
       <div className="pt-2">
         <SidebarBrand />
         <div className="mx-5 mt-1 h-px bg-white/5" />
@@ -42,7 +42,7 @@ export default function Sidebar() {
             <Link
               key={href}
               href={href}
-              className={`group relative flex items-center gap-3 rounded-full px-3 py-2.5 ${paddingClass} text-base font-medium transition ${
+              className={`group relative flex items-center gap-3 rounded-full px-3 py-3 ${paddingClass} text-lg font-semibold transition ${
                 active
                   ? "bg-accent/15 text-white shadow-card-glow"
                   : "text-slate-300 hover:bg-white/5 hover:text-white"
@@ -54,11 +54,11 @@ export default function Sidebar() {
                 }`}
               />
               <span
-                className={`grid h-10 w-10 place-items-center rounded-full ${
+                className={`grid h-11 w-11 place-items-center rounded-full ${
                   active ? "bg-accent/15 text-accent" : "bg-white/5 text-slate-300 group-hover:text-slate-100"
                 }`}
               >
-                <Icon className="h-5 w-5" />
+                <Icon className="h-6 w-6" />
               </span>
               <span className="truncate">{label}</span>
             </Link>
