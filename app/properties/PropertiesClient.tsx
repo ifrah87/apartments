@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -18,6 +19,7 @@ function formatMoney(value: number) {
 }
 
 export default function PropertiesClient({ summaries }: Props) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<PropertySummary[]>(summaries);
   const [showModal, setShowModal] = useState(false);
@@ -88,15 +90,12 @@ export default function PropertiesClient({ summaries }: Props) {
   };
 
   const handleDelete = async (summary: PropertySummary) => {
-    const isForce = summary.totalUnits > 0;
-    const message = isForce
-      ? `Delete ${summary.name}? This will remove ${summary.totalUnits} units and all related leases.`
-      : `Delete ${summary.name}? This cannot be undone.`;
+    const message = `Delete ${summary.name}? This will remove all units and related leases/payments.`;
     if (!confirm(message)) return;
     setError(null);
     setNotice(null);
     try {
-      const res = await fetch(`/api/properties/${summary.id}${isForce ? "?force=1" : ""}`, {
+      const res = await fetch(`/api/properties/${summary.id}?force=1`, {
         method: "DELETE",
       });
       const payload = await res.json().catch(() => null);
@@ -109,6 +108,7 @@ export default function PropertiesClient({ summaries }: Props) {
       }
       setItems((prev) => prev.filter((item) => item.id !== summary.id));
       setNotice("Property deleted.");
+      router.refresh();
     } catch (err: any) {
       setError(err?.message || "Failed to delete property.");
     }
@@ -191,7 +191,7 @@ export default function PropertiesClient({ summaries }: Props) {
                   onClick={() => handleDelete(summary)}
                   className="rounded-full border border-rose-400/40 px-3 py-1 text-xs font-semibold text-rose-200 hover:border-rose-400/70"
                 >
-                  {summary.totalUnits > 0 ? "Delete (force)" : "Delete"}
+                  Delete
                 </button>
               </div>
             </div>
