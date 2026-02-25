@@ -93,7 +93,12 @@ function buildInvoiceSection(
   if (!lineItems.length) return "";
   const propertyLabel = tenant.building || tenant.property_id || "—";
   const unitLabel = tenant.unit ? `Unit ${tenant.unit}` : "Unit —";
-  const invoiceNumber = `INV-${toISO(reference).slice(0, 7)}-${normalizeId(tenant.id)}`;
+  const invoicePeriod = toISO(reference).slice(0, 7);
+  const unitRef = tenant.unit ? String(tenant.unit).trim() : "";
+  const tenantRef = tenant.reference ? String(tenant.reference).trim() : "";
+  const fallbackRef = normalizeId(tenant.id).slice(-6) || "tenant";
+  const invoiceRef = unitRef || tenantRef || fallbackRef;
+  const invoiceNumber = `INV-${invoicePeriod}-${invoiceRef}`;
   const dueDate = dueDateForMonth(reference, tenant.due_day);
   const fromLines = [company.address, company.phone, company.email].filter(Boolean);
 
@@ -168,6 +173,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const requestedTenantId = searchParams.get("tenantId") || searchParams.get("tenant") || "";
     const mode = searchParams.get("mode") || "download";
+    const isView = mode === "view";
     const requestedMonth = searchParams.get("month") || "";
     const requestedYear = searchParams.get("year") || "";
     let reference = new Date();
@@ -221,6 +227,18 @@ export async function GET(req: NextRequest) {
     const body =
       sections ||
       `<section class="empty">No charges found for ${monthLabel(reference)}${normalizedTenantId ? " for this tenant" : ""}.</section>`;
+
+    const themeOverride = isView
+      ? `
+      body { background: #0b1220; color: #e2e8f0; }
+      .invoice { background: #0f172a; box-shadow: 0 16px 32px rgba(2, 6, 23, 0.6); }
+      h2, .muted, .invoice-meta span, th, .note { color: #94a3b8; }
+      .invoice-meta { color: #cbd5f5; }
+      th, td { border-bottom: 1px solid #1f2937; }
+      .empty { background: #0f172a; color: #94a3b8; }
+      `
+      : "";
+
     const html = `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -251,6 +269,7 @@ export async function GET(req: NextRequest) {
       .total { font-size: 18px; font-weight: 700; }
       .note { margin-top: 16px; font-size: 12px; color: #64748b; }
       .empty { margin: 48px auto; padding: 32px; max-width: 720px; border-radius: 16px; background: #fff; text-align: center; color: #64748b; }
+      ${themeOverride}
       @media print {
         body { background: #fff; }
         .invoice { box-shadow: none; margin: 0; border-radius: 0; }
