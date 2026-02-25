@@ -61,6 +61,7 @@ const STATUS_VARIANTS: Record<LeaseAgreementStatus, "success" | "warning" | "dan
 
 const formatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const dateFormatter = new Intl.DateTimeFormat("en-GB");
+const unitSorter = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -340,7 +341,7 @@ export default function LeasesClient() {
     const query = search.trim().toLowerCase();
     const monthIndex = MONTHS.indexOf(monthFilter);
     const targetMonth = monthIndex > 0 ? monthIndex - 1 : null;
-    return propertyFilteredLeases.filter((lease) => {
+    const filtered = propertyFilteredLeases.filter((lease) => {
       const matchesQuery =
         !query ||
         lease.unit.toLowerCase().includes(query) ||
@@ -356,6 +357,16 @@ export default function LeasesClient() {
       const matchesYear =
         yearFilter === "All Years" || !hasValidDate ? true : date.getFullYear().toString() === yearFilter;
       return matchesMonth && matchesYear;
+    });
+    return filtered.sort((a, b) => {
+      const unitA = a.unit || "";
+      const unitB = b.unit || "";
+      const unitCompare = unitSorter.compare(unitA, unitB);
+      if (unitCompare !== 0) return unitCompare;
+      const dateA = new Date(a.startDate).getTime();
+      const dateB = new Date(b.startDate).getTime();
+      if (Number.isNaN(dateA) || Number.isNaN(dateB)) return 0;
+      return dateA - dateB;
     });
   }, [propertyFilteredLeases, search, monthFilter, yearFilter]);
 
