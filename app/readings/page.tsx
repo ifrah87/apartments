@@ -170,7 +170,8 @@ export default function ReadingsPage() {
         name: leaseName ?? entry.name ?? null,
       };
     });
-    return enriched.sort((a, b) => a.unit.localeCompare(b.unit));
+    const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+    return enriched.sort((a, b) => collator.compare(a.unit, b.unit));
   }, [tenants, units, leaseNameByKey]);
 
   const selectedTenantId = useMemo(() => {
