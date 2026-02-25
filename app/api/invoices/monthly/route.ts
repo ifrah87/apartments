@@ -21,7 +21,22 @@ type ChargeRow = {
   amount: string | number;
   description?: string;
   category?: string;
+  meter_reading_id?: string;
 };
+
+type MeterReadingDetail = {
+  id: string;
+  unit: string;
+  meter_type: string;
+  reading_date: string;
+  reading_value: number;
+  prev_value: number;
+  usage: number;
+  amount: number;
+  prev_date?: string | null;
+};
+
+const METER_RATE = 0.41;
 
 const MONTHS = [
   "January",
@@ -67,6 +82,15 @@ function monthLabel(reference: Date) {
   return reference.toLocaleString("en-US", { month: "long", year: "numeric" });
 }
 
+function monthShortLabel(reference: Date) {
+  return reference.toLocaleString("en-GB", { month: "short", year: "numeric" });
+}
+
+function formatQuantity(value: number) {
+  if (!Number.isFinite(value)) return "0";
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
 function toMonthIndex(value: string) {
   const idx = MONTHS.findIndex((month) => month.toLowerCase() === value.toLowerCase());
   return idx >= 0 ? idx : null;
@@ -78,16 +102,71 @@ function dueDateForMonth(reference: Date, dueDayRaw: string | number | undefined
   return new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), Math.min(dueDay, dim)));
 }
 
-function buildChargeIndex(rows: ChargeRow[]) {
+async function fetchMeterReadingDetails(ids: string[]) {
+  if (!ids.length) return new Map<string, MeterReadingDetail>();
+  const { rows } = await query(
+    `WITH target AS (
+       SELECT id, unit, meter_type
+       FROM meter_readings
+       WHERE id = ANY($1)
+     ),
+     ranked AS (
+       SELECT r.*,
+              LAG(r.reading_date) OVER (PARTITION BY r.unit, r.meter_type ORDER BY r.reading_date, r.created_at) AS prev_date
+       FROM meter_readings r
+       JOIN target t ON t.unit = r.unit AND t.meter_type = r.meter_type
+     )
+     SELECT id, unit, meter_type, reading_date, reading_value, prev_value, usage, amount, prev_date
+     FROM ranked
+     WHERE id = ANY($1)`,
+    [ids],
+  );
+
+  const map = new Map<string, MeterReadingDetail>();
+  rows.forEach((row: any) => {
+    map.set(String(row.id), {
+      id: String(row.id),
+      unit: String(row.unit),
+      meter_type: String(row.meter_type),
+      reading_date: String(row.reading_date),
+      reading_value: Number(row.reading_value || 0),
+      prev_value: Number(row.prev_value || 0),
+      usage: Number(row.usage || 0),
+      amount: Number(row.amount || 0),
+      prev_date: row.prev_date ? String(row.prev_date) : null,
+    });
+  });
+  return map;
+}
+
+function buildChargeIndex(rows: ChargeRow[], readingMap: Map<string, MeterReadingDetail>) {
   const map = new Map<string, ChargeEntry[]>();
   rows.forEach((row) => {
     const tenantId = normalizeId(row.tenant_id);
     if (!tenantId) return;
+    const meterId = row.meter_reading_id ? String(row.meter_reading_id) : "";
+    const meter = meterId ? readingMap.get(meterId) : undefined;
+    const isUtility = Boolean(meter) || row.category === "utilities";
+    const meterType = meter?.meter_type || "";
+    const unitLabel = meterType === "water" ? "m3" : "kWh";
     const entry: ChargeEntry = {
       date: row.date,
       amount: Number(row.amount || 0),
-      description: row.description || "Charge",
+      description: meterType === "water" ? "Water" : meterType === "electricity" ? "Electricity" : row.description || "Charge",
       category: row.category,
+      meta: isUtility && meter
+        ? {
+            kind: "utility",
+            meterType: meterType || row.category || "utility",
+            prevDate: meter.prev_date,
+            prevValue: meter.prev_value,
+            currentDate: meter.reading_date,
+            currentValue: meter.reading_value,
+            usage: meter.usage,
+            rate: METER_RATE,
+            unitLabel,
+          }
+        : undefined,
     };
     if (!map.has(tenantId)) {
       map.set(tenantId, []);
@@ -192,12 +271,12 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     y = sectionY + 80;
 
     const tableTop = y;
-    const colDate = left;
-    const colDesc = left + 120;
+    const colDesc = left;
+    const colDetails = left + 240;
     const colAmount = right - 120;
     doc.fillColor("#64748b").font("Helvetica-Bold").fontSize(9);
-    doc.text("DATE", colDate, tableTop);
     doc.text("DESCRIPTION", colDesc, tableTop);
+    doc.text("DETAILS", colDetails, tableTop);
     doc.text("AMOUNT", colAmount, tableTop, { width: 120, align: "right" });
 
     y = tableTop + 16;
@@ -205,18 +284,23 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     y += 8;
 
     doc.font("Helvetica").fontSize(10).fillColor("#0f172a");
-    payload.rows
-      .filter((row) => row.entryType === "charge" && row.charge > 0)
-      .forEach((row) => {
-        if (y > doc.page.height - doc.page.margins.bottom - 60) {
-          doc.addPage();
-          y = doc.page.margins.top;
-        }
-        doc.text(formatUkDate(row.date), colDate, y);
-        doc.text(row.description, colDesc, y, { width: colAmount - colDesc - 12 });
-        doc.text(toMoney(row.charge), colAmount, y, { width: 120, align: "right" });
-        y += 18;
-      });
+    const lineItems = buildInvoiceLineItems(payload.rows, reference);
+    lineItems.forEach((item) => {
+      const detailsText = item.details.length ? item.details.join("\n") : "—";
+      const descWidth = colDetails - colDesc - 12;
+      const detailsWidth = colAmount - colDetails - 12;
+      const descHeight = doc.heightOfString(item.description, { width: descWidth });
+      const detailsHeight = doc.heightOfString(detailsText, { width: detailsWidth });
+      const rowHeight = Math.max(descHeight, detailsHeight, 18);
+      if (y + rowHeight > doc.page.height - doc.page.margins.bottom - 40) {
+        doc.addPage();
+        y = doc.page.margins.top;
+      }
+      doc.text(item.description, colDesc, y, { width: descWidth });
+      doc.text(detailsText, colDetails, y, { width: detailsWidth });
+      doc.text(toMoney(item.amount), colAmount, y, { width: 120, align: "right" });
+      y += rowHeight + 6;
+    });
 
     y += 4;
     doc.moveTo(left, y).lineTo(right, y).strokeColor("#e2e8f0").stroke();
@@ -273,6 +357,50 @@ async function resolveLogoBuffer(logoPath: string) {
   return null;
 }
 
+type InvoiceLineItem = {
+  description: string;
+  details: string[];
+  amount: number;
+};
+
+function buildInvoiceLineItems(rows: StatementRow[], reference: Date): InvoiceLineItem[] {
+  return rows
+    .filter((row) => row.entryType === "charge" && row.charge > 0)
+    .map((row) => {
+      const meta = row.meta as any;
+      if (meta?.kind === "utility") {
+        const label = meta.meterType === "water" ? "Water" : "Electricity";
+        const details: string[] = [];
+        const prevDateLabel = meta.prevDate ? ` (${formatUkDate(meta.prevDate)})` : "";
+        if (meta.prevValue !== undefined) {
+          details.push(`Previous Reading${prevDateLabel} ${formatQuantity(Number(meta.prevValue))} units`);
+        }
+        if (meta.currentDate && meta.currentValue !== undefined) {
+          details.push(
+            `Current Reading (${formatUkDate(meta.currentDate)}) ${formatQuantity(Number(meta.currentValue))} units`,
+          );
+        }
+        const unitLabel = meta.unitLabel || "kWh";
+        const rateLabel = toMoney(Number(meta.rate ?? METER_RATE));
+        details.push(`Usage ${formatQuantity(Number(meta.usage || 0))} ${unitLabel} @ ${rateLabel}`);
+        return {
+          description: label,
+          details,
+          amount: row.charge,
+        };
+      }
+
+      const rentDescription = row.description?.toLowerCase().startsWith("rent for")
+        ? `Monthly Rent (${monthShortLabel(reference)})`
+        : row.description;
+      return {
+        description: rentDescription || "Charge",
+        details: [],
+        amount: row.charge,
+      };
+    });
+}
+
 function buildInvoiceSection(
   tenant: TenantRecord,
   rows: StatementRow[],
@@ -281,7 +409,7 @@ function buildInvoiceSection(
   company: CompanyProfile,
   invoiceNumber: string,
 ) {
-  const lineItems = rows.filter((row) => row.entryType === "charge" && row.charge > 0);
+  const lineItems = buildInvoiceLineItems(rows, reference);
   if (!lineItems.length) return "";
   const propertyLabel = tenant.building || tenant.property_id || "—";
   const unitLabel = tenant.unit ? `Unit ${tenant.unit}` : "Unit —";
@@ -289,14 +417,17 @@ function buildInvoiceSection(
   const fromLines = [company.address, company.phone].filter(Boolean);
 
   const lines = lineItems
-    .map(
-      (item) => `
+    .map((item) => {
+      const details = item.details.length
+        ? item.details.map((line) => `<div>${line}</div>`).join("")
+        : "<div>—</div>";
+      return `
         <tr>
-          <td>${formatUkDate(item.date)}</td>
           <td>${item.description}</td>
-          <td class="amount">${toMoney(item.charge)}</td>
-        </tr>`,
-    )
+          <td>${details}</td>
+          <td class="amount">${toMoney(item.amount)}</td>
+        </tr>`;
+    })
     .join("");
 
   const logoPath = "/branding/Logo.png";
@@ -332,8 +463,8 @@ function buildInvoiceSection(
       <table>
         <thead>
           <tr>
-            <th>Date</th>
             <th>Description</th>
+            <th>Details</th>
             <th class="amount">Amount</th>
           </tr>
         </thead>
@@ -381,7 +512,9 @@ export async function GET(req: NextRequest) {
         })
       : tenants;
     const charges = await datasetsRepo.getDataset<ChargeRow[]>("tenant_charges", []);
-    const chargeIndex = buildChargeIndex(charges);
+    const meterIds = charges.map((row) => row.meter_reading_id).filter(Boolean) as string[];
+    const readingMap = await fetchMeterReadingDetails(meterIds);
+    const chargeIndex = buildChargeIndex(charges, readingMap);
 
     const invoicePayloads = (
       await Promise.all(

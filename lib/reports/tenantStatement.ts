@@ -17,6 +17,7 @@ export type StatementRow = {
   balance: number;
   entryType: "charge" | "payment";
   source?: string;
+  meta?: Record<string, any>;
 };
 
 export type ChargeEntry = {
@@ -24,6 +25,7 @@ export type ChargeEntry = {
   amount: number;
   description: string;
   category?: string;
+  meta?: Record<string, any>;
 };
 
 export type StatementTotals = {
@@ -115,6 +117,7 @@ export function createStatement({ tenant, start, end, payments, additionalCharge
         amount: toNumber(charge.amount),
         description: charge.description || "Charge",
         source: charge.category,
+        meta: charge.meta,
       };
     })
     .filter((charge) => {
@@ -165,6 +168,7 @@ export function createStatement({ tenant, start, end, payments, additionalCharge
         balance: Number(balance.toFixed(2)),
         entryType: "charge",
         source: row.source,
+        meta: row.meta,
       };
     }
     balance -= row.amount;
