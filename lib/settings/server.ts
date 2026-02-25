@@ -69,7 +69,6 @@ function normalizeGeneral(input: unknown, strict: boolean): NormalizeResult<Gene
   const value: GeneralSettings = {
     orgName: asString(src.orgName, DEFAULT_GENERAL.orgName).trim(),
     displayName: asOptionalString(src.displayName).trim(),
-    email: asOptionalString(src.email).trim(),
     phone: asOptionalString(src.phone).trim(),
     address: asOptionalString(src.address).trim(),
     defaultCurrency: asString(src.defaultCurrency, DEFAULT_GENERAL.defaultCurrency).trim() || "USD",

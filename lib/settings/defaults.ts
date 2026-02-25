@@ -12,7 +12,6 @@ import type {
 export const DEFAULT_GENERAL: GeneralSettings = {
   orgName: "Orfane Tower",
   displayName: "Orfane Tower",
-  email: "",
   phone: "",
   address: "",
   defaultCurrency: "USD",

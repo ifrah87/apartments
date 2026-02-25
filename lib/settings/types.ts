@@ -1,7 +1,6 @@
 export type GeneralSettings = {
   orgName: string;
   displayName?: string;
-  email?: string;
   phone?: string;
   address?: string;
   defaultCurrency: string;
