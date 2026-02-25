@@ -131,6 +131,8 @@ export default function LeasesClient() {
   const [search, setSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("All Months");
   const [yearFilter, setYearFilter] = useState("2026");
+  const [sortBy, setSortBy] = useState<"unit">("unit");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [showModal, setShowModal] = useState(false);
   const [showEndModal, setShowEndModal] = useState(false);
   const [endLeaseTarget, setEndLeaseTarget] = useState<LeaseAgreement | null>(null);
@@ -359,16 +361,18 @@ export default function LeasesClient() {
       return matchesMonth && matchesYear;
     });
     return filtered.sort((a, b) => {
-      const unitA = a.unit || "";
-      const unitB = b.unit || "";
-      const unitCompare = unitSorter.compare(unitA, unitB);
-      if (unitCompare !== 0) return unitCompare;
+      if (sortBy === "unit") {
+        const unitA = a.unit || "";
+        const unitB = b.unit || "";
+        const unitCompare = unitSorter.compare(unitA, unitB);
+        if (unitCompare !== 0) return sortDir === "asc" ? unitCompare : -unitCompare;
+      }
       const dateA = new Date(a.startDate).getTime();
       const dateB = new Date(b.startDate).getTime();
       if (Number.isNaN(dateA) || Number.isNaN(dateB)) return 0;
       return dateA - dateB;
     });
-  }, [propertyFilteredLeases, search, monthFilter, yearFilter]);
+  }, [propertyFilteredLeases, search, monthFilter, yearFilter, sortBy, sortDir]);
 
   const selectedPropertyId = form.property;
   const propertyLabel = properties.find((property) => property.id === selectedPropertyId)?.label || selectedPropertyId || "";
@@ -850,7 +854,23 @@ export default function LeasesClient() {
             <thead>
               <tr>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Unit</th>
+                <th className="px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (sortBy !== "unit") {
+                        setSortBy("unit");
+                        setSortDir("asc");
+                        return;
+                      }
+                      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+                    }}
+                    className="inline-flex items-center gap-1 text-left text-slate-200 hover:text-white"
+                  >
+                    Unit
+                    <span className="text-xs text-slate-400">{sortDir === "asc" ? "▲" : "▼"}</span>
+                  </button>
+                </th>
                 <th className="px-4 py-3">Tenant</th>
                 <th className="px-4 py-3">Period</th>
                 <th className="px-4 py-3">Cycle</th>
