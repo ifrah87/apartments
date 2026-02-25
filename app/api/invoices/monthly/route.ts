@@ -1,3 +1,5 @@
+import fs from "fs/promises";
+import path from "path";
 import PDFDocument from "pdfkit";
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
@@ -132,12 +134,19 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
 
   doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
 
+  const logoBuffer = await resolveLogoBuffer(company.logoPath);
+
   const addInvoicePage = (payload: InvoicePayload, index: number) => {
     if (index > 0) doc.addPage();
 
     const left = doc.page.margins.left;
     const right = doc.page.width - doc.page.margins.right;
     let y = doc.page.margins.top;
+
+    if (logoBuffer) {
+      doc.image(logoBuffer, left, y, { width: 120 });
+      y += 56;
+    }
 
     doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(20).text("INVOICE", left, y);
     y += 22;
@@ -227,6 +236,29 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
   return await new Promise<Buffer>((resolve) => {
     doc.on("end", () => resolve(Buffer.concat(chunks)));
   });
+}
+
+async function resolveLogoBuffer(logoPath: string) {
+  const normalized = (logoPath || "").trim();
+  if (!normalized) return null;
+  try {
+    if (normalized.startsWith("data:")) {
+      const base64 = normalized.split(",")[1] || "";
+      if (!base64) return null;
+      return Buffer.from(base64, "base64");
+    }
+    if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
+      const response = await fetch(normalized);
+      if (!response.ok) return null;
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    }
+    const relative = normalized.startsWith("/") ? normalized.slice(1) : normalized;
+    const filePath = path.join(process.cwd(), "public", relative);
+    return await fs.readFile(filePath);
+  } catch {
+    return null;
+  }
 }
 
 function buildInvoiceSection(
