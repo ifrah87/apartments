@@ -131,6 +131,9 @@ export default function LeasesClient() {
   const [monthFilter, setMonthFilter] = useState("All Months");
   const [yearFilter, setYearFilter] = useState("2026");
   const [showModal, setShowModal] = useState(false);
+  const [showEndModal, setShowEndModal] = useState(false);
+  const [endLeaseTarget, setEndLeaseTarget] = useState<LeaseAgreement | null>(null);
+  const [endLeaseDate, setEndLeaseDate] = useState(() => todayISO());
   const [viewingLease, setViewingLease] = useState<LeaseAgreement | null>(null);
   const [leaseTemplate, setLeaseTemplate] = useState<LeaseTemplateSettings>(DEFAULT_LEASE_TEMPLATE);
   const [templateLoaded, setTemplateLoaded] = useState(false);
@@ -688,10 +691,20 @@ export default function LeasesClient() {
     }
   };
 
-  const handleEndLease = async (lease: LeaseAgreement) => {
-    const endDateInput = prompt("End date (YYYY-MM-DD)", todayISO());
-    if (!endDateInput) return;
-    const endDate = endDateInput.trim();
+  const openEndLease = (lease: LeaseAgreement) => {
+    setEndLeaseTarget(lease);
+    setEndLeaseDate(todayISO());
+    setShowEndModal(true);
+  };
+
+  const closeEndLease = () => {
+    setShowEndModal(false);
+    setEndLeaseTarget(null);
+  };
+
+  const handleEndLease = async () => {
+    if (!endLeaseTarget) return;
+    const endDate = endLeaseDate.trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
       alert("Please use YYYY-MM-DD format.");
       return;
@@ -701,7 +714,7 @@ export default function LeasesClient() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: lease.id,
+          id: endLeaseTarget.id,
           status: "Terminated",
           endDate,
         }),
@@ -716,10 +729,11 @@ export default function LeasesClient() {
       } else {
         setLeases((prev) =>
           prev.map((item) =>
-            item.id === lease.id ? { ...item, status: "Terminated", endDate } : item,
+            item.id === endLeaseTarget.id ? { ...item, status: "Terminated", endDate } : item,
           ),
         );
       }
+      closeEndLease();
     } catch (err) {
       console.error(err);
       alert("Failed: " + (err instanceof Error ? err.message : "Network/API unavailable."));
@@ -873,7 +887,7 @@ export default function LeasesClient() {
                         <button
                           className="text-yellow-400 hover:text-yellow-300"
                           aria-label={`End lease for Unit ${lease.unit}`}
-                          onClick={() => handleEndLease(lease)}
+                          onClick={() => openEndLease(lease)}
                         >
                           End
                         </button>
@@ -1147,6 +1161,53 @@ export default function LeasesClient() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {showEndModal && endLeaseTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-8 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-panel/95 p-6 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-100">End Lease</h2>
+              <button
+                onClick={closeEndLease}
+                className="rounded-full border border-white/10 p-2 text-slate-200 hover:border-white/20"
+                aria-label="Close end lease modal"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              <p className="text-sm text-slate-400">
+                Ending lease for Unit {endLeaseTarget.unit} ({endLeaseTarget.tenantName})
+              </p>
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">End Date</label>
+                <input
+                  type="date"
+                  value={endLeaseDate}
+                  onChange={(event) => setEndLeaseDate(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={closeEndLease}
+                  className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-white/20"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEndLease}
+                  className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900"
+                >
+                  End Lease
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}
