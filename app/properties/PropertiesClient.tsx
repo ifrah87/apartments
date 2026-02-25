@@ -88,12 +88,17 @@ export default function PropertiesClient({ summaries }: Props) {
   };
 
   const handleDelete = async (summary: PropertySummary) => {
-    if (summary.totalUnits > 0) return;
-    if (!confirm(`Delete ${summary.name}? This cannot be undone.`)) return;
+    const isForce = summary.totalUnits > 0;
+    const message = isForce
+      ? `Delete ${summary.name}? This will remove ${summary.totalUnits} units and all related leases.`
+      : `Delete ${summary.name}? This cannot be undone.`;
+    if (!confirm(message)) return;
     setError(null);
     setNotice(null);
     try {
-      const res = await fetch(`/api/properties/${summary.id}`, { method: "DELETE" });
+      const res = await fetch(`/api/properties/${summary.id}${isForce ? "?force=1" : ""}`, {
+        method: "DELETE",
+      });
       const payload = await res.json().catch(() => null);
       if (res.status === 409) {
         setNotice("Cannot delete. Property has units. Archive instead.");
@@ -184,10 +189,9 @@ export default function PropertiesClient({ summaries }: Props) {
                 <button
                   type="button"
                   onClick={() => handleDelete(summary)}
-                  disabled={summary.totalUnits > 0}
-                  className="rounded-full border border-rose-400/40 px-3 py-1 text-xs font-semibold text-rose-200 hover:border-rose-400/70 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-full border border-rose-400/40 px-3 py-1 text-xs font-semibold text-rose-200 hover:border-rose-400/70"
                 >
-                  Delete
+                  {summary.totalUnits > 0 ? "Delete (force)" : "Delete"}
                 </button>
               </div>
             </div>
