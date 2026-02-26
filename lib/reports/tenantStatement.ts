@@ -28,6 +28,24 @@ export type ChargeEntry = {
   meta?: Record<string, any>;
 };
 
+type StatementRowBase = {
+  date: string;
+  amount: number;
+  description?: string;
+  source?: string;
+  meta?: Record<string, unknown>;
+};
+
+type ChargeRow = StatementRowBase & {
+  type: "charge";
+};
+
+type PaymentRow = StatementRowBase & {
+  type: "payment";
+};
+
+type CombinedRow = ChargeRow | PaymentRow;
+
 export type StatementTotals = {
   charges: number;
   payments: number;
@@ -108,7 +126,7 @@ export function createStatement({ tenant, start, end, payments, additionalCharge
     throw new Error("Start date must be before end date");
   }
 
-  const normalizedCharges = additionalCharges
+  const normalizedCharges: ChargeRow[] = additionalCharges
     .map((charge) => {
       const date = normalizeDay(new Date(charge.date));
       return {
@@ -126,16 +144,16 @@ export function createStatement({ tenant, start, end, payments, additionalCharge
       return date >= normalizedStart && date <= normalizedEnd;
     });
 
-  const rentCharges = includeRentCharges
+  const rentCharges: ChargeRow[] = includeRentCharges
     ? buildCharges(tenant, normalizedStart, normalizedEnd).map((charge) => ({
         type: "charge" as const,
         ...charge,
       }))
     : [];
 
-  const charges = [...rentCharges, ...normalizedCharges];
+  const charges: ChargeRow[] = [...rentCharges, ...normalizedCharges];
 
-  const cleanedPayments = payments
+  const cleanedPayments: PaymentRow[] = payments
     .map((payment) => ({
       type: "payment" as const,
       date: toISO(normalizeDay(new Date(payment.date))),
@@ -148,7 +166,7 @@ export function createStatement({ tenant, start, end, payments, additionalCharge
       return paymentDate >= normalizedStart && paymentDate <= normalizedEnd;
     });
 
-  const combined = [...charges, ...cleanedPayments].sort((a, b) => {
+  const combined: CombinedRow[] = [...charges, ...cleanedPayments].sort((a, b) => {
     if (a.date === b.date) {
       if (a.type === b.type) return 0;
       return a.type === "charge" ? -1 : 1;
