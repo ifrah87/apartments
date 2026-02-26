@@ -289,7 +289,8 @@ export default function UnitsClient() {
     return scopedUnits.reduce((sum, unit) => {
       if (hasLeaseData) {
         const lease = findActiveLease(unit);
-        const rent = lease?.rent ?? unit.rent ?? 0;
+        const leaseRent = Number(lease?.rent ?? 0);
+        const rent = leaseRent > 0 ? leaseRent : Number(unit.rent ?? 0);
         return sum + Number(rent || 0);
       }
       const propertyKey = (unit.property_id || "").toLowerCase();
@@ -300,7 +301,8 @@ export default function UnitsClient() {
         tenantIndex.get(key) ||
         (labelKey ? tenantIndex.get(labelKey) : undefined) ||
         tenantIndex.get(`::${unit.unit}`.toLowerCase());
-      const rent = tenant?.monthly_rent ?? unit.rent ?? 0;
+      const tenantRent = Number(tenant?.monthly_rent ?? 0);
+      const rent = tenantRent > 0 ? tenantRent : Number(unit.rent ?? 0);
       return sum + Number(rent || 0);
     }, 0);
   }, [scopedUnits, tenantIndex, hasLeaseData, activeLeaseIndex, propertyLabels]);
