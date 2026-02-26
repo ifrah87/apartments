@@ -19,7 +19,7 @@ export function SidebarBrand() {
   const altText = general.orgName || branding.appName || DEFAULT_GENERAL.orgName;
 
   return (
-    <div className="flex items-center justify-center px-1 pb-0 pt-0 -mt-4">
+    <div className="flex items-center justify-center px-6 pb-4 pt-3">
       <div className="relative h-48 w-48">
         <Image
           src={logoPath}

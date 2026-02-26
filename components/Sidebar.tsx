@@ -29,12 +29,12 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-12 z-40 flex h-[calc(100vh-3rem)] w-96 shrink-0 flex-col border-r border-white/10 bg-app-surface pt-8 text-slate-200 shadow-[0_10px_40px_rgba(2,6,23,0.45)]">
-      <div className="pt-2">
+    <aside className="sticky top-12 z-40 flex h-[calc(100vh-3rem)] w-96 shrink-0 flex-col border-r border-white/10 bg-app-surface pt-2 text-slate-200 shadow-[0_10px_40px_rgba(2,6,23,0.45)]">
+      <div className="pt-0">
         <SidebarBrand />
         <div className="mx-5 mt-1 h-px bg-white/5" />
       </div>
-      <nav className="mt-10 flex flex-1 flex-col justify-start gap-2 overflow-y-auto px-5 pb-6 pt-8" aria-label="Primary">
+      <nav className="mt-6 flex flex-1 flex-col justify-start gap-2 overflow-y-auto px-5 pb-6 pt-4" aria-label="Primary">
         {NAV.map(({ href, label, icon: Icon, indent }) => {
           const active = pathname === href || (href !== "/" && pathname?.startsWith(href));
           const paddingClass = indent ? "pl-11" : "pl-9";
