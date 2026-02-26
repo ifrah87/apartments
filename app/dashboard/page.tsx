@@ -24,8 +24,13 @@ async function fetchProperties() {
   return Array.isArray(data) ? data : [];
 }
 
-export default async function DashboardPage({ searchParams }: { searchParams?: SearchParams }) {
-  const propertyId = searchParams?.propertyId || "";
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<SearchParams> | SearchParams;
+}) {
+  const sp = searchParams ? await searchParams : undefined;
+  const propertyId = sp?.propertyId ?? "";
   const properties = await fetchProperties();
   const selectedProperty = propertyId ? properties.find((p) => p.id === propertyId) : null;
   const propertyFilter = selectedProperty?.id || (propertyId || undefined);
