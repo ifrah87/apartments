@@ -36,6 +36,18 @@ type MeterReadingDetail = {
   prev_date?: string | null;
 };
 
+type MeterMeta = {
+  kind?: "utility";
+  meterType: "water" | "electricity";
+  prevDate?: string | Date | null;
+  currentDate?: string | Date | null;
+  prevValue?: number | string;
+  currentValue?: number | string;
+  usage?: number | string;
+  rate?: number | string;
+  unitLabel?: string;
+};
+
 const METER_RATE = 0.41;
 
 const MONTHS = [
@@ -158,7 +170,7 @@ function buildChargeIndex(rows: ChargeRow[], readingMap: Map<string, MeterReadin
     const meterId = row.meter_reading_id ? String(row.meter_reading_id) : "";
     const meter = meterId ? readingMap.get(meterId) : undefined;
     const isUtility = Boolean(meter) || row.category === "utilities";
-    const meterType = meter?.meter_type || "";
+    const meterType: MeterMeta["meterType"] = meter?.meter_type === "water" ? "water" : "electricity";
     const unitLabel = meterType === "water" ? "m3" : "kWh";
     const entry: ChargeEntry = {
       date: row.date,
@@ -168,7 +180,7 @@ function buildChargeIndex(rows: ChargeRow[], readingMap: Map<string, MeterReadin
       meta: isUtility && meter
         ? {
             kind: "utility",
-            meterType: meterType || row.category || "utility",
+            meterType,
             prevDate: meter.prev_date,
             prevValue: meter.prev_value,
             currentDate: meter.reading_date,
@@ -394,7 +406,7 @@ function buildInvoiceLineItems(rows: StatementRow[], reference: Date): InvoiceLi
   return rows
     .filter((row) => row.entryType === "charge" && row.charge > 0)
     .map((row) => {
-      const meta = row.meta as Record<string, unknown> | undefined;
+      const meta: MeterMeta | undefined = row.meta as MeterMeta | undefined;
       if (meta?.kind === "utility") {
         const label = meta.meterType === "water" ? "Water" : "Electricity";
         const details: string[] = [];
