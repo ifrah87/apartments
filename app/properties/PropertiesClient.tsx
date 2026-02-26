@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import type { PropertySummary } from "@/lib/repos/propertiesRepo";
+import { adminDeleteProperty } from "./actions";
 
 type Props = {
   summaries: PropertySummary[];
@@ -27,6 +28,7 @@ export default function PropertiesClient({ summaries }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [isDeleting, startDelete] = useTransition();
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -94,24 +96,16 @@ export default function PropertiesClient({ summaries }: Props) {
     if (!confirm(message)) return;
     setError(null);
     setNotice(null);
-    try {
-      const res = await fetch(`/api/properties/${summary.id}?force=1`, {
-        method: "DELETE",
-      });
-      const payload = await res.json().catch(() => null);
-      if (res.status === 409) {
-        setNotice("Cannot delete. Property has units. Archive instead.");
-        return;
+    startDelete(async () => {
+      try {
+        await adminDeleteProperty(summary.id);
+        setItems((prev) => prev.filter((item) => item.id !== summary.id));
+        setNotice("Property deleted.");
+        router.refresh();
+      } catch (err: any) {
+        setError(err?.message || "Failed to delete property.");
       }
-      if (!res.ok || payload?.ok === false) {
-        throw new Error(payload?.error || "Failed to delete property.");
-      }
-      setItems((prev) => prev.filter((item) => item.id !== summary.id));
-      setNotice("Property deleted.");
-      router.refresh();
-    } catch (err: any) {
-      setError(err?.message || "Failed to delete property.");
-    }
+    });
   };
 
   return (
