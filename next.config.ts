@@ -5,6 +5,11 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "*": ["node_modules/pdfkit/js/data/**", "public/fonts/**/*"],
   },
+  experimental: {
+    outputFileTracingIncludes: {
+      "**/*": ["public/fonts/**/*"],
+    },
+  },
 };
 
 export default nextConfig;

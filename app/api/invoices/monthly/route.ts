@@ -253,6 +253,10 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
   const chunks: Buffer[] = [];
 
   doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+  // Use embedded fonts (avoid PDFKit built-in Helvetica.afm which can be missing in production)
+  doc.registerFont("Inter", fontRegular);
+  doc.registerFont("Inter-Bold", fontBold);
+  doc.font("Inter");
 
   const logoBuffer = await resolveLogoBuffer("/branding/Logo.png");
 
@@ -268,24 +272,24 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
       y += 56;
     }
 
-    doc.fillColor("#0f172a").font(fontBold).fontSize(20).text("INVOICE", left, y);
+    doc.fillColor("#0f172a").font("Inter-Bold").fontSize(20).text("INVOICE", left, y);
     y += 22;
-    doc.fillColor("#64748b").font(fontRegular).fontSize(10).text(`Billing period: ${monthLabel(reference)}`, left, y);
+    doc.fillColor("#64748b").font("Inter").fontSize(10).text(`Billing period: ${monthLabel(reference)}`, left, y);
 
     const metaX = right - 220;
     const metaTop = doc.page.margins.top;
-    doc.fillColor("#475569").font(fontRegular).fontSize(9).text("Invoice #", metaX, metaTop, { width: 220, align: "right" });
-    doc.fillColor("#0f172a").font(fontBold).fontSize(10).text(payload.invoiceNumber, metaX, metaTop + 12, {
+    doc.fillColor("#475569").font("Inter").fontSize(9).text("Invoice #", metaX, metaTop, { width: 220, align: "right" });
+    doc.fillColor("#0f172a").font("Inter-Bold").fontSize(10).text(payload.invoiceNumber, metaX, metaTop + 12, {
       width: 220,
       align: "right",
     });
-    doc.fillColor("#475569").font(fontRegular).fontSize(9).text("Issue date", metaX, metaTop + 30, { width: 220, align: "right" });
-    doc.fillColor("#0f172a").font(fontRegular).fontSize(10).text(formatUkDate(payload.issueDate), metaX, metaTop + 42, {
+    doc.fillColor("#475569").font("Inter").fontSize(9).text("Issue date", metaX, metaTop + 30, { width: 220, align: "right" });
+    doc.fillColor("#0f172a").font("Inter").fontSize(10).text(formatUkDate(payload.issueDate), metaX, metaTop + 42, {
       width: 220,
       align: "right",
     });
-    doc.fillColor("#475569").font(fontRegular).fontSize(9).text("Due date", metaX, metaTop + 60, { width: 220, align: "right" });
-    doc.fillColor("#0f172a").font(fontRegular).fontSize(10).text(formatUkDate(payload.dueDate), metaX, metaTop + 72, {
+    doc.fillColor("#475569").font("Inter").fontSize(9).text("Due date", metaX, metaTop + 60, { width: 220, align: "right" });
+    doc.fillColor("#0f172a").font("Inter").fontSize(10).text(formatUkDate(payload.dueDate), metaX, metaTop + 72, {
       width: 220,
       align: "right",
     });
@@ -295,15 +299,15 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     const billToX = left;
     const fromX = doc.page.width / 2 + 12;
     const sectionY = y + 12;
-    doc.fillColor("#64748b").font(fontRegular).fontSize(9).text("BILL TO", billToX, sectionY);
-    doc.fillColor("#0f172a").font(fontBold).fontSize(12).text(payload.tenant.name, billToX, sectionY + 14);
-    doc.fillColor("#0f172a").font(fontRegular).fontSize(10);
+    doc.fillColor("#64748b").font("Inter").fontSize(9).text("BILL TO", billToX, sectionY);
+    doc.fillColor("#0f172a").font("Inter-Bold").fontSize(12).text(payload.tenant.name, billToX, sectionY + 14);
+    doc.fillColor("#0f172a").font("Inter").fontSize(10);
     doc.text(payload.tenant.building || payload.tenant.property_id || "—", billToX, sectionY + 30);
     doc.text(payload.tenant.unit ? `Unit ${payload.tenant.unit}` : "Unit —", billToX, sectionY + 44);
 
-    doc.fillColor("#64748b").font(fontRegular).fontSize(9).text("FROM", fromX, sectionY);
-    doc.fillColor("#0f172a").font(fontBold).fontSize(12).text(company.name, fromX, sectionY + 14);
-    doc.fillColor("#0f172a").font(fontRegular).fontSize(10);
+    doc.fillColor("#64748b").font("Inter").fontSize(9).text("FROM", fromX, sectionY);
+    doc.fillColor("#0f172a").font("Inter-Bold").fontSize(12).text(company.name, fromX, sectionY + 14);
+    doc.fillColor("#0f172a").font("Inter").fontSize(10);
     const fromLines = [company.address, company.phone].filter(Boolean);
     fromLines.forEach((line, idx) => {
       doc.text(line || "", fromX, sectionY + 30 + idx * 14);
@@ -315,7 +319,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     const colDesc = left;
     const colDetails = left + 240;
     const colAmount = right - 120;
-    doc.fillColor("#64748b").font(fontBold).fontSize(9);
+    doc.fillColor("#64748b").font("Inter-Bold").fontSize(9);
     doc.text("DESCRIPTION", colDesc, tableTop);
     doc.text("DETAILS", colDetails, tableTop);
     doc.text("AMOUNT", colAmount, tableTop, { width: 120, align: "right" });
@@ -324,7 +328,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     doc.moveTo(left, y).lineTo(right, y).strokeColor("#e2e8f0").stroke();
     y += 8;
 
-    doc.font(fontRegular).fontSize(10).fillColor("#0f172a");
+    doc.font("Inter").fontSize(10).fillColor("#0f172a");
     const lineItems = buildInvoiceLineItems(payload.rows, reference);
     lineItems.forEach((item) => {
       const detailsText = item.details.length ? item.details.join("\n") : "—";
@@ -346,12 +350,12 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     y += 4;
     doc.moveTo(left, y).lineTo(right, y).strokeColor("#e2e8f0").stroke();
     y += 10;
-    doc.font(fontBold).text("Total due", colDesc, y, { width: colAmount - colDesc - 12, align: "right" });
+    doc.font("Inter-Bold").text("Total due", colDesc, y, { width: colAmount - colDesc - 12, align: "right" });
     doc.text(toMoney(payload.total), colAmount, y, { width: 120, align: "right" });
   };
 
   if (!invoices.length) {
-    doc.fillColor("#0f172a").font(fontBold).fontSize(18).text("No charges found", doc.page.margins.left, doc.page.margins.top);
+    doc.fillColor("#0f172a").font("Inter-Bold").fontSize(18).text("No charges found", doc.page.margins.left, doc.page.margins.top);
   } else {
     invoices.forEach(addInvoicePage);
   }
@@ -685,7 +689,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("Failed to generate invoices", err);
+    console.error("Failed to generate invoices:", err);
     return NextResponse.json({ ok: false, error: "Failed to generate invoices" }, { status: 500 });
   }
 }
