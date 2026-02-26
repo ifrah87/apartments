@@ -24,6 +24,12 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const payload = await req.json();
+    const allowedStatuses = new Set(["vacant", "occupied", "maintenance"]);
+    const normalizedStatus = String(payload?.status ?? "vacant").trim().toLowerCase();
+    if (!allowedStatuses.has(normalizedStatus)) {
+      return NextResponse.json({ ok: false, error: "Invalid unit status." }, { status: 400 });
+    }
+    payload.status = normalizedStatus;
     const data = await unitsRepo.createUnit(payload);
     return NextResponse.json({ ok: true, data }, { status: 201 });
   } catch (err) {
