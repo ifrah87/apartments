@@ -15,30 +15,6 @@ type ServiceRecord = {
   meta?: unknown;
 };
 
-const DEFAULT_SERVICES: ServiceRecord[] = [
-  { id: "water", name: "Water Billing", type: "metered", unit: "m3", rate: 1.5, accent: "cyan", icon: "water" },
-  {
-    id: "electricity",
-    name: "Electricity Billing",
-    type: "metered",
-    unit: "kWh",
-    rate: 0.41,
-    accent: "blue",
-    icon: "electricity",
-  },
-  { id: "waste", name: "Waste Management", type: "flat", unit: "Month", rate: 7, accent: "teal", icon: "money" },
-  {
-    id: "cleaning",
-    name: "Elevators + Cleaning",
-    type: "flat",
-    unit: "Month",
-    rate: 13,
-    accent: "teal",
-    icon: "money",
-  },
-  { id: "security", name: "Security", type: "flat", unit: "Month", rate: 5, accent: "teal", icon: "money" },
-];
-
 function handleError(err: unknown) {
   const status = err instanceof RepoError ? err.status : 500;
   const message = err instanceof Error ? err.message : "Unexpected error.";
@@ -80,12 +56,8 @@ function normalizeServiceList(value: unknown): ServiceRecord[] {
 
 export async function GET() {
   try {
-    const data = await datasetsRepo.getDataset<ServiceRecord[]>(DATASET_KEY, DEFAULT_SERVICES);
+    const data = await datasetsRepo.getDataset<ServiceRecord[]>(DATASET_KEY, []);
     const current = normalizeServiceList(data);
-    if (!current.length) {
-      const updated = await datasetsRepo.setDataset<ServiceRecord[]>(DATASET_KEY, DEFAULT_SERVICES);
-      return NextResponse.json({ ok: true, data: updated });
-    }
     return NextResponse.json({ ok: true, data: current });
   } catch (err) {
     console.error("❌ failed to load services", err);
@@ -119,7 +91,7 @@ export async function POST(req: NextRequest) {
     const updated = await datasetsRepo.updateDataset<ServiceRecord[]>(
       DATASET_KEY,
       (current) => [...normalizeServiceList(current), entry],
-      DEFAULT_SERVICES,
+      [],
     );
 
     return NextResponse.json({ ok: true, data: updated });
@@ -154,7 +126,8 @@ export async function PUT(req: NextRequest) {
             type: payload.type === "flat" ? "flat" : payload.type === "metered" ? "metered" : item.type,
             unit: payload.unit ?? item.unit,
             rate: payload.rate !== undefined ? toNumber(payload.rate) : item.rate,
-            accent: payload.accent ?? (payload.type === "flat" ? "teal" : payload.type === "metered" ? "cyan" : item.accent),
+            accent:
+              payload.accent ?? (payload.type === "flat" ? "teal" : payload.type === "metered" ? "cyan" : item.accent),
             icon: payload.icon ?? (payload.type === "flat" ? "money" : item.icon),
             style: payload.style ?? item.style,
             meta: payload.meta ?? item.meta,
@@ -163,7 +136,7 @@ export async function PUT(req: NextRequest) {
         if (!found) throw new Error("Service not found.");
         return next;
       },
-      DEFAULT_SERVICES,
+      [],
     );
 
     return NextResponse.json({ ok: true, data: updated });
@@ -175,15 +148,21 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const payload = (await req.json()) as { id?: string };
-    if (!payload?.id) {
+    const payload = (await req.json()) as { id?: string; name?: string };
+    if (!payload?.id && !payload?.name) {
       return NextResponse.json({ ok: false, error: "Service id is required." }, { status: 400 });
     }
+    const nameKey = payload.name ? payload.name.trim().toLowerCase() : "";
 
     const updated = await datasetsRepo.updateDataset<ServiceRecord[]>(
       DATASET_KEY,
-      (current) => normalizeServiceList(current).filter((item) => item.id !== payload.id),
-      DEFAULT_SERVICES,
+      (current) =>
+        normalizeServiceList(current).filter((item) => {
+          if (payload.id && item.id === payload.id) return false;
+          if (nameKey && item.name.trim().toLowerCase() === nameKey) return false;
+          return true;
+        }),
+      [],
     );
 
     return NextResponse.json({ ok: true, data: updated });

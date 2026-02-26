@@ -37,29 +37,7 @@ type ServiceFormState = {
   accent: "cyan" | "blue" | "emerald" | "violet" | "teal" | "amber";
 };
 
-const DEFAULT_SERVICES: Service[] = [
-  { id: "water", name: "Water Billing", type: "metered", unit: "m3", rate: 1.5, accent: "cyan", icon: "water" },
-  {
-    id: "electricity",
-    name: "Electricity Billing",
-    type: "metered",
-    unit: "kWh",
-    rate: 0.41,
-    accent: "blue",
-    icon: "electricity",
-  },
-  { id: "waste", name: "Waste Management", type: "flat", unit: "Month", rate: 7, accent: "teal", icon: "money" },
-  {
-    id: "cleaning",
-    name: "Elevators + Cleaning",
-    type: "flat",
-    unit: "Month",
-    rate: 13,
-    accent: "teal",
-    icon: "money",
-  },
-  { id: "security", name: "Security", type: "flat", unit: "Month", rate: 5, accent: "teal", icon: "money" },
-];
+const DEFAULT_SERVICES: Service[] = [];
 
 const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
   water: Droplet,
@@ -220,13 +198,13 @@ export default function ServicesPage() {
     }
   };
 
-  const deleteService = async (serviceId: string) => {
+  const deleteService = async (serviceId: string, serviceName: string) => {
     if (!confirm("Delete this service?")) return;
     try {
       const res = await fetch("/api/services", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: serviceId }),
+        body: JSON.stringify({ id: serviceId, name: serviceName }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || data?.ok === false) {
@@ -294,7 +272,7 @@ export default function ServicesPage() {
                         <PencilLine className="h-4 w-4" />
                       </button>
                       <button
-                        onClick={() => deleteService(service.id)}
+                        onClick={() => deleteService(service.id, service.name)}
                         className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/5 text-rose-300 hover:border-rose-400/40 hover:text-rose-200"
                       >
                         <Trash2 className="h-4 w-4" />
