@@ -38,21 +38,11 @@ function normalizeCycle(cycle?: string): LeaseBillingCycle {
   return "Monthly";
 }
 
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 async function syncTenantFromLease(lease: LeaseAgreement) {
   if (!lease?.tenantName || !lease?.unit) return;
   const propertyKey = lease.property ? String(lease.property) : "";
-  const tenantId = `tenant-${slugify(propertyKey || "property")}-${slugify(lease.unit)}`;
   try {
     await tenantsRepo.createTenant({
-      id: tenantId,
       name: lease.tenantName,
       unit: lease.unit,
       property_id: propertyKey || null,

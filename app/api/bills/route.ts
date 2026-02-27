@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { datasetsRepo, tenantsRepo, unitsRepo, type RepoError } from "@/lib/repos";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { opt } from "@/src/lib/utils/normalize";
+import { extractUuid } from "@/src/lib/utils/ids";
 import { query } from "@/lib/db";
 import { createStatement } from "@/lib/reports/tenantStatement";
 import { normalizeId } from "@/lib/normalizeId";
@@ -167,14 +168,22 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const url = new URL(req.url);
-    const dryRun = url.searchParams.get("dryRun") === "1";
-    const payload = (await req.json().catch(() => ({}))) as {
+    type BillsPayload = {
+      tenant_id?: string;
       unitIds?: string[];
       month?: string;
       year?: string;
-      lineItems?: Array<{ description?: string; qty?: number; unit_cents?: number; total_cents?: number }>;
+      lineItems?: {
+        description?: string;
+        qty?: number;
+        unit_cents?: number;
+        total_cents?: number;
+      }[];
     };
+
+    const url = new URL(req.url);
+    const dryRun = url.searchParams.get("dryRun") === "1";
+    const payload = (await req.json().catch(() => ({}))) as BillsPayload;
     const unitIds = Array.isArray(payload?.unitIds) ? payload.unitIds.filter(Boolean) : [];
     if (!unitIds.length) {
       return NextResponse.json({ ok: false, error: "Select at least one unit." }, { status: 400 });
@@ -253,7 +262,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Tenant not found for this unit." }, { status: 404 });
     }
 
-    const tenantId = normalizeId(tenant.id);
+    const rawTenantId = typeof payload?.tenant_id === "string" ? payload.tenant_id : "";
+    const normalizedTenantId = rawTenantId ? normalizeId(rawTenantId) : "";
+    const tenantUuid = normalizedTenantId && isUuid(normalizedTenantId) ? normalizedTenantId : extractUuid(rawTenantId);
+    if (rawTenantId && !tenantUuid) {
+      return NextResponse.json(
+        { ok: false, error: `Invalid tenant_id: ${rawTenantId}` },
+        { status: 400 },
+      );
+    }
+
+    const tenantId = tenantUuid || normalizeId(tenant.id);
     if (!isUuid(tenantId)) {
       return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenant.id}` }, { status: 400 });
     }
@@ -297,7 +316,7 @@ export async function POST(req: NextRequest) {
     const dueDay = tenant.due_day ?? 5;
     const dueDate = dueDateForMonth(reference, dueDay);
     const draft = {
-      tenantId: tenant.id,
+      tenantId,
       tenantName: tenant.name,
       unitId: unit.id,
       unitLabel: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,

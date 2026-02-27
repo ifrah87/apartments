@@ -15,9 +15,9 @@ export async function GET(req: NextRequest) {
     const start = searchParams.get("start") ?? undefined;
     const end = searchParams.get("end") ?? undefined;
     const propertyId = searchParams.get("propertyId") ?? undefined;
-    const tenantIdRaw = searchParams.get("tenantId") ?? undefined;
+    const tenantIdRaw = searchParams.get("tenantId");
     const tenantId = tenantIdRaw ? normalizeId(tenantIdRaw) : undefined;
-    if (tenantIdRaw && !isUuid(tenantId)) {
+    if (tenantIdRaw && (!tenantId || !isUuid(tenantId))) {
       return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenantIdRaw}` }, { status: 400 });
     }
 

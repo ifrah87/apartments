@@ -67,14 +67,6 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 function formatCurrency(value: number) {
   return formatter.format(value || 0);
 }
@@ -567,12 +559,10 @@ export default function LeasesClient() {
     setSaving(true);
     try {
       const resolvedPropertyId = propertyId.trim();
-      const tenantId = `tenant-${slugify(resolvedPropertyId)}-${slugify(payload.unit)}`;
       const tenantRes = await fetch("/api/tenants", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: tenantId,
           name: payload.tenantName,
           unit: payload.unit,
           property_id: resolvedPropertyId,
