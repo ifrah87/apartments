@@ -4,6 +4,8 @@ import PDFDocument from "pdfkit";
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { datasetsRepo, tenantsRepo } from "@/lib/repos";
+import { buildInvoiceLineItems } from "@/lib/invoices/lineItems";
+import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
 import {
   ChargeEntry,
   createStatement,
@@ -92,10 +94,6 @@ function monthRange(reference: Date) {
 
 function monthLabel(reference: Date) {
   return reference.toLocaleString("en-US", { month: "long", year: "numeric" });
-}
-
-function monthShortLabel(reference: Date) {
-  return reference.toLocaleString("en-GB", { month: "short", year: "numeric" });
 }
 
 function formatQuantity(value: number) {
@@ -241,6 +239,9 @@ type InvoicePayload = {
   tenant: TenantRecord;
   rows: StatementRow[];
   total: number;
+  line_items: InvoiceLineItem[];
+  meter_snapshot: MeterSnapshot | null;
+  total_amount: number;
   invoiceNumber: string;
   issueDate: Date;
   dueDate: Date;
@@ -317,41 +318,63 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
 
     const tableTop = y;
     const colDesc = left;
-    const colDetails = left + 240;
-    const colAmount = right - 120;
+    const colQty = left + 260;
+    const colRate = left + 340;
+    const colAmount = right - 100;
     doc.fillColor("#64748b").font("Inter-Bold").fontSize(9);
     doc.text("DESCRIPTION", colDesc, tableTop);
-    doc.text("DETAILS", colDetails, tableTop);
-    doc.text("AMOUNT", colAmount, tableTop, { width: 120, align: "right" });
+    doc.text("QTY", colQty, tableTop, { width: 60, align: "right" });
+    doc.text("RATE", colRate, tableTop, { width: 80, align: "right" });
+    doc.text("AMOUNT", colAmount, tableTop, { width: 100, align: "right" });
 
     y = tableTop + 16;
     doc.moveTo(left, y).lineTo(right, y).strokeColor("#e2e8f0").stroke();
     y += 8;
 
     doc.font("Inter").fontSize(10).fillColor("#0f172a");
-    const lineItems = buildInvoiceLineItems(payload.rows, reference);
+    const lineItems = payload.line_items || [];
     lineItems.forEach((item) => {
-      const detailsText = item.details.length ? item.details.join("\n") : "—";
-      const descWidth = colDetails - colDesc - 12;
-      const detailsWidth = colAmount - colDetails - 12;
+      const descWidth = colQty - colDesc - 12;
       const descHeight = doc.heightOfString(item.description, { width: descWidth });
-      const detailsHeight = doc.heightOfString(detailsText, { width: detailsWidth });
-      const rowHeight = Math.max(descHeight, detailsHeight, 18);
-      if (y + rowHeight > doc.page.height - doc.page.margins.bottom - 40) {
+      const rowHeight = Math.max(descHeight, 18);
+      if (y + rowHeight > doc.page.height - doc.page.margins.bottom - 80) {
         doc.addPage();
         y = doc.page.margins.top;
       }
       doc.text(item.description, colDesc, y, { width: descWidth });
-      doc.text(detailsText, colDetails, y, { width: detailsWidth });
-      doc.text(toMoney(item.amount), colAmount, y, { width: 120, align: "right" });
+      doc.text(formatQuantity(item.qty), colQty, y, { width: 60, align: "right" });
+      doc.text(toMoney(item.rate), colRate, y, { width: 80, align: "right" });
+      doc.text(toMoney(item.amount), colAmount, y, { width: 100, align: "right" });
       y += rowHeight + 6;
     });
 
     y += 4;
     doc.moveTo(left, y).lineTo(right, y).strokeColor("#e2e8f0").stroke();
     y += 10;
+    const totalDue = payload.total_amount ?? payload.total;
     doc.font("Inter-Bold").text("Total due", colDesc, y, { width: colAmount - colDesc - 12, align: "right" });
-    doc.text(toMoney(payload.total), colAmount, y, { width: 120, align: "right" });
+    doc.text(toMoney(totalDue), colAmount, y, { width: 120, align: "right" });
+
+    if (payload.meter_snapshot) {
+      const snap = payload.meter_snapshot;
+      y += 24;
+      doc.font("Inter-Bold").fontSize(10).fillColor("#0f172a").text("Electricity Reading", colDesc, y);
+      y += 14;
+      doc.font("Inter").fontSize(9).fillColor("#475569");
+      if (snap.prevDate) {
+        doc.text(`Previous Reading (${formatUkDate(snap.prevDate)}) ${formatQuantity(snap.prevReading)} ${snap.unitLabel || "kWh"}`, colDesc, y);
+        y += 12;
+      }
+      if (snap.currDate) {
+        doc.text(`Current Reading (${formatUkDate(snap.currDate)}) ${formatQuantity(snap.currReading)} ${snap.unitLabel || "kWh"}`, colDesc, y);
+        y += 12;
+      }
+      doc.text(
+        `Usage ${formatQuantity(snap.usage)} ${snap.unitLabel || "kWh"} @ ${toMoney(snap.rate)} = ${toMoney(snap.amount)}`,
+        colDesc,
+        y,
+      );
+    }
   };
 
   if (!invoices.length) {
@@ -402,62 +425,15 @@ async function resolveLogoBuffer(logoPath: string) {
   return null;
 }
 
-type InvoiceLineItem = {
-  description: string;
-  details: string[];
-  amount: number;
-};
-
-function buildInvoiceLineItems(rows: StatementRow[], reference: Date): InvoiceLineItem[] {
-  return rows
-    .filter((row) => row.entryType === "charge" && row.charge > 0)
-    .map((row) => {
-      const meta: MeterMeta | undefined = row.meta as MeterMeta | undefined;
-      if (meta?.kind === "utility") {
-        const label = meta.meterType === "water" ? "Water" : "Electricity";
-        const details: string[] = [];
-        const prevDateLabel =
-          meta.prevDate && (typeof meta.prevDate === "string" || meta.prevDate instanceof Date)
-            ? ` (${formatUkDate(meta.prevDate)})`
-            : "";
-        if (meta.prevValue !== undefined) {
-          details.push(`Previous Reading${prevDateLabel} ${formatQuantity(Number(meta.prevValue))} units`);
-        }
-        if (meta.currentDate && meta.currentValue !== undefined) {
-          details.push(
-            `Current Reading (${formatUkDate(meta.currentDate)}) ${formatQuantity(Number(meta.currentValue))} units`,
-          );
-        }
-        const unitLabel = meta.unitLabel || "kWh";
-        const rateLabel = toMoney(Number(meta.rate ?? METER_RATE));
-        details.push(`Usage ${formatQuantity(Number(meta.usage || 0))} ${unitLabel} @ ${rateLabel}`);
-        return {
-          description: label,
-          details,
-          amount: row.charge,
-        };
-      }
-
-      const rentDescription = row.description?.toLowerCase().startsWith("rent for")
-        ? `Monthly Rent (${monthShortLabel(reference)})`
-        : row.description;
-      return {
-        description: rentDescription || "Charge",
-        details: [],
-        amount: row.charge,
-      };
-    });
-}
-
 function buildInvoiceSection(
   tenant: TenantRecord,
-  rows: StatementRow[],
-  total: number,
+  lineItems: InvoiceLineItem[],
+  meterSnapshot: MeterSnapshot | null,
+  totalAmount: number,
   reference: Date,
   company: CompanyProfile,
   invoiceNumber: string,
 ) {
-  const lineItems = buildInvoiceLineItems(rows, reference);
   if (!lineItems.length) return "";
   const propertyLabel = tenant.building || tenant.property_id || "—";
   const unitLabel = tenant.unit ? `Unit ${tenant.unit}` : "Unit —";
@@ -465,21 +441,29 @@ function buildInvoiceSection(
   const fromLines = [company.address, company.phone].filter(Boolean);
 
   const lines = lineItems
-    .map((item) => {
-      const details = item.details.length
-        ? item.details.map((line) => `<div>${line}</div>`).join("")
-        : "<div>—</div>";
-      return `
+    .map(
+      (item) => `
         <tr>
           <td>${item.description}</td>
-          <td>${details}</td>
+          <td class="qty">${formatQuantity(item.qty)}</td>
+          <td class="amount">${toMoney(item.rate)}</td>
           <td class="amount">${toMoney(item.amount)}</td>
-        </tr>`;
-    })
+        </tr>`,
+    )
     .join("");
 
   const logoPath = "/branding/Logo.png";
   const logo = `<img class="logo" src="${logoPath}" alt="${company.name} logo" />`;
+  const prevLine = meterSnapshot?.prevDate
+    ? `<p>Previous Reading (${formatUkDate(meterSnapshot.prevDate)}) ${formatQuantity(meterSnapshot.prevReading)} ${
+        meterSnapshot.unitLabel || "kWh"
+      }</p>`
+    : "";
+  const currLine = meterSnapshot?.currDate
+    ? `<p>Current Reading (${formatUkDate(meterSnapshot.currDate)}) ${formatQuantity(meterSnapshot.currReading)} ${
+        meterSnapshot.unitLabel || "kWh"
+      }</p>`
+    : "";
 
   return `
     <section class="invoice">
@@ -512,7 +496,8 @@ function buildInvoiceSection(
         <thead>
           <tr>
             <th>Description</th>
-            <th>Details</th>
+            <th class="qty">Qty</th>
+            <th class="amount">Rate</th>
             <th class="amount">Amount</th>
           </tr>
         </thead>
@@ -521,11 +506,23 @@ function buildInvoiceSection(
         </tbody>
         <tfoot>
           <tr>
-            <td colspan="2" class="total-label">Total due</td>
-            <td class="amount total">${toMoney(total)}</td>
+            <td colspan="3" class="total-label">Total due</td>
+            <td class="amount total">${toMoney(totalAmount)}</td>
           </tr>
         </tfoot>
       </table>
+      ${
+        meterSnapshot
+          ? `<div class="meter-block">
+          <h3>Electricity Reading</h3>
+          ${prevLine}
+          ${currLine}
+          <p>Usage ${formatQuantity(meterSnapshot.usage)} ${meterSnapshot.unitLabel || "kWh"} @ ${toMoney(
+              meterSnapshot.rate,
+            )} = ${toMoney(meterSnapshot.amount)}</p>
+        </div>`
+          : ""
+      }
     </section>
   `;
 }
@@ -587,11 +584,15 @@ export async function GET(req: NextRequest) {
             additionalCharges,
           });
           if (!totals.charges) return null;
+          const { lineItems, meterSnapshot, totalAmount } = buildInvoiceLineItems(rows, reference);
           const invoiceNumber = await nextInvoiceNumber(reference, statementTenant);
           return {
             tenant: statementTenant,
             rows,
             total: totals.charges,
+            line_items: lineItems,
+            meter_snapshot: meterSnapshot,
+            total_amount: totalAmount,
             invoiceNumber,
             issueDate: reference,
             dueDate: dueDateForMonth(reference, statementTenant.due_day),
@@ -616,7 +617,15 @@ export async function GET(req: NextRequest) {
 
     const sections = invoicePayloads
       .map((payload) =>
-        buildInvoiceSection(payload.tenant, payload.rows, payload.total, reference, company, payload.invoiceNumber),
+        buildInvoiceSection(
+          payload.tenant,
+          payload.line_items,
+          payload.meter_snapshot,
+          payload.total_amount ?? payload.total,
+          reference,
+          company,
+          payload.invoiceNumber,
+        ),
       )
       .filter(Boolean)
       .join("");
@@ -632,6 +641,8 @@ export async function GET(req: NextRequest) {
       h2, .muted, .invoice-meta span, th, .note { color: #94a3b8; }
       .invoice-meta { color: #cbd5f5; }
       th, td { border-bottom: 1px solid #1f2937; }
+      .meter-block { background: #0b1220; border-color: #1f2937; }
+      .meter-block p { color: #94a3b8; }
       .empty { background: #0f172a; color: #94a3b8; }
       `
       : "";
@@ -660,10 +671,14 @@ export async function GET(req: NextRequest) {
       table { width: 100%; border-collapse: collapse; font-size: 14px; }
       th { text-align: left; font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #e2e8f0; padding: 12px 0; }
       td { padding: 12px 0; border-bottom: 1px solid #e2e8f0; }
+      .qty { text-align: right; width: 70px; }
       .amount { text-align: right; }
       tfoot td { border-bottom: none; }
       .total-label { text-align: right; font-weight: 600; }
       .total { font-size: 18px; font-weight: 700; }
+      .meter-block { margin-top: 20px; padding: 16px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; }
+      .meter-block h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: #64748b; }
+      .meter-block p { margin: 4px 0; font-size: 12px; color: #475569; }
       .note { margin-top: 16px; font-size: 12px; color: #64748b; }
       .empty { margin: 48px auto; padding: 32px; max-width: 720px; border-radius: 16px; background: #fff; text-align: center; color: #64748b; }
       ${themeOverride}

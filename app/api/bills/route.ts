@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { datasetsRepo, tenantsRepo, unitsRepo, type RepoError, type TenantRecord as RepoTenantRecord } from "@/lib/repos";
+import { query } from "@/lib/db";
 import { createStatement, normalizeId } from "@/lib/reports/tenantStatement";
+import { buildInvoiceLineItems } from "@/lib/invoices/lineItems";
 
 export const runtime = "nodejs";
 
@@ -11,7 +13,68 @@ type ChargeRow = {
   amount: string | number;
   description?: string;
   category?: string;
+  meter_reading_id?: string;
 };
+
+type MeterReadingDetail = {
+  id: string;
+  unit: string;
+  meter_type: string;
+  reading_date: string;
+  reading_value: number;
+  prev_value: number;
+  usage: number;
+  amount: number;
+  prev_date?: string | null;
+};
+
+async function fetchMeterReadingDetails(ids: string[]) {
+  if (!ids.length) return new Map<string, MeterReadingDetail>();
+  let rows: any[] = [];
+  try {
+    const res = await query(
+      `WITH target AS (
+         SELECT id, unit, meter_type
+         FROM meter_readings
+         WHERE id = ANY($1)
+       ),
+       ranked AS (
+         SELECT r.*,
+                LAG(r.reading_date) OVER (PARTITION BY r.unit, r.meter_type ORDER BY r.reading_date, r.created_at) AS prev_date
+         FROM meter_readings r
+         JOIN target t ON t.unit = r.unit AND t.meter_type = r.meter_type
+       )
+       SELECT id, unit, meter_type, reading_date, reading_value, prev_value, usage, amount, prev_date
+       FROM ranked
+       WHERE id = ANY($1)`,
+      [ids],
+    );
+    rows = res.rows;
+  } catch (err: any) {
+    const code = err?.code;
+    const message = err instanceof Error ? err.message : String(err);
+    if (code === "42P01" || message.includes('relation "meter_readings" does not exist')) {
+      return new Map<string, MeterReadingDetail>();
+    }
+    throw err;
+  }
+
+  const map = new Map<string, MeterReadingDetail>();
+  rows.forEach((row: any) => {
+    map.set(String(row.id), {
+      id: String(row.id),
+      unit: String(row.unit),
+      meter_type: String(row.meter_type),
+      reading_date: String(row.reading_date),
+      reading_value: Number(row.reading_value || 0),
+      prev_value: Number(row.prev_value || 0),
+      usage: Number(row.usage || 0),
+      amount: Number(row.amount || 0),
+      prev_date: row.prev_date ? String(row.prev_date) : null,
+    });
+  });
+  return map;
+}
 
 type StoredInvoice = {
   id: string;
@@ -28,6 +91,7 @@ type StoredInvoice = {
 };
 
 const INVOICES_KEY = "billing_invoices";
+const METER_RATE = 0.41;
 const MONTHS = [
   "January",
   "February",
@@ -113,32 +177,61 @@ export async function POST(req: NextRequest) {
     ]);
 
     const tenantIndex = buildTenantIndex(tenants);
-    const chargeIndex = new Map<string, ChargeRow[]>();
+    const meterIds = charges.map((row) => row.meter_reading_id).filter(Boolean) as string[];
+    const readingMap = await fetchMeterReadingDetails(meterIds);
+    const chargeIndex = new Map<
+      string,
+      Array<{ date: string; amount: number; description?: string; category?: string; meta?: Record<string, unknown> }>
+    >();
     charges.forEach((row) => {
       const tenantId = normalizeId(row.tenant_id);
       if (!tenantId) return;
+      const meterId = row.meter_reading_id ? String(row.meter_reading_id) : "";
+      const meter = meterId ? readingMap.get(meterId) : undefined;
+      const isUtility = Boolean(meter) || row.category === "utilities";
+      const meterType = meter?.meter_type || "";
+      const unitLabel = meterType === "water" ? "m3" : "kWh";
+      const entry = {
+        date: row.date,
+        amount: Number(row.amount || 0),
+        description: meterType === "water" ? "Water" : meterType === "electricity" ? "Electricity" : row.description,
+        category: row.category,
+        meta: isUtility && meter
+          ? {
+              kind: "utility",
+              meterType: meterType || row.category || "utility",
+              prevDate: meter.prev_date,
+              prevValue: meter.prev_value,
+              currentDate: meter.reading_date,
+              currentValue: meter.reading_value,
+              usage: meter.usage,
+              rate: METER_RATE,
+              unitLabel,
+            }
+          : undefined,
+      };
       if (!chargeIndex.has(tenantId)) {
         chargeIndex.set(tenantId, []);
       }
-      chargeIndex.get(tenantId)!.push(row);
+      chargeIndex.get(tenantId)!.push(entry);
     });
 
     const now = new Date().toISOString();
     const created: StoredInvoice[] = [];
     const skipped: string[] = [];
 
-    unitIds.forEach((unitId) => {
+    for (const unitId of unitIds) {
       const unit = units.find((row) => row.id === unitId);
       if (!unit) {
         skipped.push(unitId);
-        return;
+        continue;
       }
       const propertyKey = (unit.property_id || "").toLowerCase();
       const unitKey = `${propertyKey}::${unit.unit}`.toLowerCase();
       const tenant = tenantIndex.get(unitKey) || tenantIndex.get(`::${unit.unit}`.toLowerCase());
       if (!tenant) {
         skipped.push(unit.unit);
-        return;
+        continue;
       }
       const tenantId = normalizeId(tenant.id);
       const { rows, totals } = createStatement({
@@ -155,19 +248,15 @@ export async function POST(req: NextRequest) {
         start,
         end,
         payments: [],
-        additionalCharges: (chargeIndex.get(tenantId) || []).map((row) => ({
-          date: row.date,
-          amount: Number(row.amount || 0),
-          description: row.description || "Charge",
-          category: row.category,
-        })),
+        additionalCharges: chargeIndex.get(tenantId) || [],
       });
 
       if (!totals.charges) {
         skipped.push(unit.unit);
-        return;
+        continue;
       }
 
+      const { lineItems, meterSnapshot, totalAmount } = buildInvoiceLineItems(rows, reference);
       const id = `inv-${tenantId}-${periodKey}`;
       created.push({
         id,
@@ -176,13 +265,24 @@ export async function POST(req: NextRequest) {
         unitId: unit.id,
         unitLabel: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
         period,
-        total: Number(totals.charges.toFixed(2)),
-        outstanding: Number(totals.charges.toFixed(2)),
+        total: Number(totalAmount.toFixed(2)),
+        outstanding: Number(totalAmount.toFixed(2)),
         status: "Unpaid",
         createdAt: now,
         updatedAt: now,
       });
-    });
+
+      await query(
+        `INSERT INTO public.invoices (id, tenant_id, unit_id, period, line_items, meter_snapshot, total_amount)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (id) DO UPDATE SET
+           line_items = EXCLUDED.line_items,
+           meter_snapshot = EXCLUDED.meter_snapshot,
+           total_amount = EXCLUDED.total_amount,
+           updated_at = now()`,
+        [id, tenant.id, unit.id, periodKey, lineItems, meterSnapshot, totalAmount],
+      );
+    }
 
     if (!created.length) {
       return NextResponse.json(

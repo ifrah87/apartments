@@ -12,7 +12,10 @@ import {
   Trash2,
   CheckSquare2,
   X,
+  PencilLine,
+  Plus,
 } from "lucide-react";
+import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
 
 type UnitCard = {
   id: string;
@@ -101,6 +104,11 @@ export default function BillsPage() {
   const [generating, setGenerating] = useState(false);
   const [generatorMonth, setGeneratorMonth] = useState("February");
   const [generatorYear, setGeneratorYear] = useState("2026");
+  const [editingInvoice, setEditingInvoice] = useState<InvoiceRow | null>(null);
+  const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
+  const [meterSnapshot, setMeterSnapshot] = useState<MeterSnapshot | null>(null);
+  const [editingLoading, setEditingLoading] = useState(false);
+  const [editingSaving, setEditingSaving] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -186,6 +194,147 @@ export default function BillsPage() {
 
     loadData();
   }, []);
+
+  const computeTotal = (items: InvoiceLineItem[]) =>
+    Number(items.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
+
+  const createLineItem = (overrides?: Partial<InvoiceLineItem>): InvoiceLineItem => ({
+    id: overrides?.id || (globalThis.crypto?.randomUUID?.() ?? `line-${Math.random().toString(36).slice(2)}`),
+    description: overrides?.description ?? "",
+    qty: overrides?.qty ?? 1,
+    rate: overrides?.rate ?? 0,
+    amount: overrides?.amount ?? 0,
+  });
+
+  const normalizeSnapshot = (snapshot?: MeterSnapshot | null): MeterSnapshot => {
+    if (snapshot) return snapshot;
+    return {
+      prevDate: "",
+      prevReading: 0,
+      currDate: "",
+      currReading: 0,
+      usage: 0,
+      rate: 0.41,
+      amount: 0,
+      unitLabel: "kWh",
+    };
+  };
+
+  const syncElectricityLine = (items: InvoiceLineItem[], snapshot: MeterSnapshot | null) => {
+    if (!snapshot) return items;
+    const next = [...items];
+    const idx = next.findIndex((item) => item.description.toLowerCase().includes("electric"));
+    const electricity = createLineItem({
+      id: idx >= 0 ? next[idx].id : undefined,
+      description: "Electricity",
+      qty: snapshot.usage,
+      rate: snapshot.rate,
+      amount: snapshot.amount,
+    });
+    if (idx >= 0) next[idx] = electricity;
+    else next.push(electricity);
+    return next;
+  };
+
+  const openEditor = async (invoice: InvoiceRow) => {
+    setEditingInvoice(invoice);
+    setEditingLoading(true);
+    try {
+      const res = await fetch(`/api/invoices/${invoice.id}`, { cache: "no-store" });
+      if (res.ok) {
+        const payload = await res.json().catch(() => null);
+        const data = payload?.ok ? payload.data : payload;
+        const initialItems = Array.isArray(data?.line_items)
+          ? data.line_items
+          : [createLineItem({ description: "Monthly Rent", qty: 1, rate: invoice.total, amount: invoice.total })];
+        const snapshot = normalizeSnapshot(data?.meter_snapshot ?? null);
+        setMeterSnapshot(snapshot);
+        setLineItems(syncElectricityLine(initialItems, snapshot));
+        setEditingLoading(false);
+        return;
+      }
+    } catch (err) {
+      console.error("Failed to load invoice detail", err);
+    }
+
+    const fallbackItems = [createLineItem({ description: "Monthly Rent", qty: 1, rate: invoice.total, amount: invoice.total })];
+    const snapshot = normalizeSnapshot(null);
+    setMeterSnapshot(snapshot);
+    setLineItems(syncElectricityLine(fallbackItems, snapshot));
+    setEditingLoading(false);
+  };
+
+  const closeEditor = () => {
+    setEditingInvoice(null);
+    setLineItems([]);
+    setMeterSnapshot(null);
+    setEditingLoading(false);
+    setEditingSaving(false);
+  };
+
+  const updateLineItem = (id: string, field: keyof InvoiceLineItem, value: string | number) => {
+    setLineItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        const next = { ...item, [field]: field === "description" ? String(value) : Number(value) };
+        const qty = Number(next.qty || 0);
+        const rate = Number(next.rate || 0);
+        return { ...next, amount: Number((qty * rate).toFixed(2)) };
+      }),
+    );
+  };
+
+  const removeLineItem = (id: string) => {
+    setLineItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const addLineItem = () => {
+    setLineItems((prev) => [...prev, createLineItem({ description: "", qty: 1, rate: 0, amount: 0 })]);
+  };
+
+  const updateSnapshot = (field: keyof MeterSnapshot, value: string | number) => {
+    setMeterSnapshot((prev) => {
+      const current = normalizeSnapshot(prev ?? null);
+      const next = { ...current, [field]: field.includes("Date") ? String(value) : Number(value) };
+      const usage = Math.max(Number(next.currReading || 0) - Number(next.prevReading || 0), 0);
+      const rate = Number(next.rate || 0);
+      const amount = Number((usage * rate).toFixed(2));
+      next.usage = Number(usage.toFixed(2));
+      next.amount = amount;
+      setLineItems((items) => syncElectricityLine(items, next));
+      return next;
+    });
+  };
+
+  const saveInvoice = async () => {
+    if (!editingInvoice) return;
+    setEditingSaving(true);
+    try {
+      const res = await fetch(`/api/invoices/${editingInvoice.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lineItems, meterSnapshot }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Failed to save invoice.");
+      }
+      const totalAmount = payload?.data?.total_amount ?? computeTotal(lineItems);
+      setInvoices((prev) =>
+        prev.map((row) =>
+          row.id === editingInvoice.id
+            ? { ...row, total: Number(totalAmount), outstanding: Number(totalAmount) }
+            : row,
+        ),
+      );
+      closeEditor();
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : "Failed to save invoice.");
+    } finally {
+      setEditingSaving(false);
+    }
+  };
 
   const billingPeriod = useMemo(
     () => `${generatorMonth} ${generatorYear}`,
@@ -447,6 +596,13 @@ export default function BillsPage() {
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <button
+                        onClick={() => openEditor(invoice)}
+                        className="rounded-lg border border-white/10 p-2 text-slate-200 hover:border-white/20"
+                        title="Edit line items"
+                      >
+                        <PencilLine className="h-4 w-4" />
+                      </button>
+                      <button
                         onClick={() => handleViewInvoice(invoice)}
                         className="rounded-lg border border-white/10 p-2 text-slate-200 hover:border-white/20"
                       >
@@ -631,6 +787,208 @@ export default function BillsPage() {
                   : `Generate ${selectedUnits.length} Invoice${selectedUnits.length === 1 ? "" : "s"}`}
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {editingInvoice ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-8 backdrop-blur-sm">
+          <div className="w-full max-w-4xl rounded-2xl border border-white/10 bg-panel/95 p-6 shadow-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="grid h-9 w-9 place-items-center rounded-lg bg-white/5 text-accent">
+                  <PencilLine className="h-4 w-4" />
+                </span>
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-100">Edit Invoice</h2>
+                  <p className="text-xs text-slate-400">
+                    {editingInvoice.unitLabel} • {editingInvoice.tenantName} • {editingInvoice.period}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeEditor}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-panel/60 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-white/20"
+              >
+                <X className="h-3 w-3" />
+                Close
+              </button>
+            </div>
+
+            {editingLoading ? (
+              <div className="mt-6 rounded-xl border border-white/10 bg-panel/70 p-6 text-sm text-slate-400">
+                Loading invoice details...
+              </div>
+            ) : (
+              <div className="mt-6 space-y-6">
+                <div className="rounded-xl border border-white/10 bg-panel/70 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-100">Line Items</h3>
+                      <p className="text-xs text-slate-400">Edit description, quantity, and rate.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addLineItem}
+                      className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-panel/60 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-white/20"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Add Line
+                    </button>
+                  </div>
+
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead>
+                        <tr className="text-xs uppercase tracking-wide text-slate-500">
+                          <th className="px-3 py-2">Description</th>
+                          <th className="px-3 py-2">Qty</th>
+                          <th className="px-3 py-2">Rate</th>
+                          <th className="px-3 py-2 text-right">Amount</th>
+                          <th className="px-3 py-2 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-slate-300">
+                        {lineItems.map((item) => (
+                          <tr key={item.id} className="border-t border-white/10">
+                            <td className="px-3 py-2">
+                              <input
+                                value={item.description}
+                                onChange={(event) => updateLineItem(item.id, "description", event.target.value)}
+                                className="w-full rounded-lg border border-white/10 bg-transparent px-2 py-1 text-sm text-slate-100"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="number"
+                                value={item.qty}
+                                onChange={(event) => updateLineItem(item.id, "qty", event.target.value)}
+                                className="w-24 rounded-lg border border-white/10 bg-transparent px-2 py-1 text-sm text-slate-100"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                type="number"
+                                value={item.rate}
+                                onChange={(event) => updateLineItem(item.id, "rate", event.target.value)}
+                                className="w-28 rounded-lg border border-white/10 bg-transparent px-2 py-1 text-sm text-slate-100"
+                              />
+                            </td>
+                            <td className="px-3 py-2 text-right text-slate-100">
+                              {formatCurrency(Number(item.amount || 0))}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => removeLineItem(item.id)}
+                                className="rounded-full bg-rose-500/15 px-3 py-1 text-xs font-semibold text-rose-200"
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {!lineItems.length ? (
+                          <tr>
+                            <td colSpan={5} className="px-3 py-4 text-center text-xs text-slate-500">
+                              No line items yet.
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-white/10 bg-panel/70 p-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-100">Electricity Meter Snapshot</h3>
+                    <p className="text-xs text-slate-400">Update readings and rate (usage auto-calculates).</p>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <label className="text-xs text-slate-400">
+                      Previous Reading Date
+                      <input
+                        type="date"
+                        value={meterSnapshot?.prevDate ?? ""}
+                        onChange={(event) => updateSnapshot("prevDate", event.target.value)}
+                        className="mt-2 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-slate-100"
+                      />
+                    </label>
+                    <label className="text-xs text-slate-400">
+                      Previous Reading
+                      <input
+                        type="number"
+                        value={meterSnapshot?.prevReading ?? 0}
+                        onChange={(event) => updateSnapshot("prevReading", event.target.value)}
+                        className="mt-2 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-slate-100"
+                      />
+                    </label>
+                    <label className="text-xs text-slate-400">
+                      Current Reading Date
+                      <input
+                        type="date"
+                        value={meterSnapshot?.currDate ?? ""}
+                        onChange={(event) => updateSnapshot("currDate", event.target.value)}
+                        className="mt-2 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-slate-100"
+                      />
+                    </label>
+                    <label className="text-xs text-slate-400">
+                      Current Reading
+                      <input
+                        type="number"
+                        value={meterSnapshot?.currReading ?? 0}
+                        onChange={(event) => updateSnapshot("currReading", event.target.value)}
+                        className="mt-2 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-slate-100"
+                      />
+                    </label>
+                    <label className="text-xs text-slate-400">
+                      Usage ({meterSnapshot?.unitLabel || "kWh"})
+                      <input
+                        type="number"
+                        value={meterSnapshot?.usage ?? 0}
+                        readOnly
+                        className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200"
+                      />
+                    </label>
+                    <label className="text-xs text-slate-400">
+                      Rate
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={meterSnapshot?.rate ?? 0}
+                        onChange={(event) => updateSnapshot("rate", event.target.value)}
+                        className="mt-2 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-slate-100"
+                      />
+                    </label>
+                    <label className="text-xs text-slate-400">
+                      Electricity Amount
+                      <input
+                        type="number"
+                        value={meterSnapshot?.amount ?? 0}
+                        readOnly
+                        className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-sm text-slate-300">
+                    Total Due: <span className="font-semibold text-slate-100">{formatCurrency(computeTotal(lineItems))}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={saveInvoice}
+                    disabled={editingSaving}
+                    className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2 text-xs font-semibold text-slate-900 shadow-[0_10px_20px_rgba(56,189,248,0.25)] hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {editingSaving ? "Saving..." : "Save Invoice"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       ) : null}
