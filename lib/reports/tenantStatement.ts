@@ -1,13 +1,6 @@
-export type TenantRecord = {
-  id: string;
-  name: string;
-  property_id?: string | null;
-  building?: string | null;
-  unit?: string | null;
-  reference?: string | null;
-  monthly_rent?: string | number | null;
-  due_day?: string | number;
-};
+import type { TenantRecord } from "@/lib/repos/tenantsRepo";
+
+export type { TenantRecord };
 
 export type StatementRow = {
   date: string;
