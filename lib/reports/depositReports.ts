@@ -115,9 +115,9 @@ export async function buildDepositReport(filters: DepositFilters, properties: Pr
       return {
         tenantId,
         tenantName: tenant.name,
-        propertyId: tenant.property_id || tenant.building,
+        propertyId: ((tenant.property_id ?? tenant.building) ?? undefined),
         propertyName: propertyName((tenant.property_id ?? tenant.building) ?? undefined, properties),
-        unit: tenant.unit,
+        unit: (tenant.unit ?? undefined),
         charged,
         received,
         released: Math.abs(released),
