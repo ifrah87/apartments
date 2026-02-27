@@ -253,7 +253,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Tenant not found for this unit." }, { status: 404 });
     }
 
-    const tenantId = normalizeId(tenant.id);
+    const payloadTenantId = payload?.tenant_id ? normalizeId(payload.tenant_id) : "";
+    if (payloadTenantId && !isUuid(payloadTenantId)) {
+      return NextResponse.json(
+        { ok: false, error: `Invalid tenant_id: ${payload.tenant_id}` },
+        { status: 400 },
+      );
+    }
+    const tenantId = payloadTenantId || normalizeId(tenant.id);
     if (!isUuid(tenantId)) {
       return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenant.id}` }, { status: 400 });
     }
