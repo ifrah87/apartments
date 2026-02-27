@@ -116,7 +116,7 @@ export async function buildDepositReport(filters: DepositFilters, properties: Pr
         tenantId,
         tenantName: tenant.name,
         propertyId: tenant.property_id || tenant.building,
-        propertyName: propertyName(tenant.property_id || tenant.building, properties),
+        propertyName: propertyName((tenant.property_id ?? tenant.building) ?? undefined, properties),
         unit: tenant.unit,
         charged,
         received,
