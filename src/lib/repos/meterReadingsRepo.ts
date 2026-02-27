@@ -9,6 +9,90 @@ import { tenantsRepo } from "./tenantsRepo";
 
 const METER_RATE = 0.41;
 
+function toPeriodKey(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function periodBounds(period: string) {
+  const [yearStr, monthStr] = period.split("-");
+  const year = Number(yearStr);
+  const monthIndex = Number(monthStr) - 1;
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return null;
+  const start = new Date(Date.UTC(year, monthIndex, 1));
+  const end = new Date(Date.UTC(year, monthIndex + 1, 0));
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  };
+}
+
+async function resolveUnitId(unit: string, tenantId?: string | null) {
+  if (tenantId) {
+    const tenant = await tenantsRepo.getTenant(tenantId).catch(() => null);
+    const propertyId = tenant?.property_id ?? tenant?.building ?? null;
+    if (propertyId) {
+      const { rows } = await query(`SELECT id FROM units WHERE property_id = $1 AND unit_number::text = $2 LIMIT 1`, [
+        propertyId,
+        unit,
+      ]);
+      if (rows[0]?.id) return String(rows[0].id);
+    }
+  }
+  const { rows } = await query(`SELECT id FROM units WHERE unit_number::text = $1 ORDER BY created_at ASC LIMIT 1`, [
+    unit,
+  ]);
+  return rows[0]?.id ? String(rows[0].id) : null;
+}
+
+async function upsertMeterBilling({
+  unit,
+  tenantId,
+  meterType,
+  readingDate,
+}: {
+  unit: string;
+  tenantId?: string | null;
+  meterType: string;
+  readingDate: string;
+}) {
+  const period = toPeriodKey(readingDate);
+  if (!period) return;
+  const bounds = periodBounds(period);
+  if (!bounds) return;
+
+  const { rows: readingRows } = await query<{ reading_date: string; reading_value: number }>(
+    `SELECT reading_date, reading_value
+     FROM meter_readings
+     WHERE unit = $1 AND meter_type = $2 AND reading_date >= $3 AND reading_date <= $4
+     ORDER BY reading_date ASC, created_at ASC`,
+    [unit, meterType, bounds.start, bounds.end],
+  );
+  if (readingRows.length < 2) return;
+
+  const prev = Number(readingRows[0].reading_value || 0);
+  const cur = Number(readingRows[readingRows.length - 1].reading_value || 0);
+  const usage = Math.max(0, Number((cur - prev).toFixed(2)));
+  const amount = Number((usage * METER_RATE).toFixed(2));
+  const unitId = await resolveUnitId(unit, tenantId);
+  if (!unitId) return;
+
+  await query(
+    `INSERT INTO meter_billing (unit_id, meter_type, period, prev_reading, cur_reading, usage, rate, amount, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+     ON CONFLICT (unit_id, meter_type, period)
+     DO UPDATE SET
+       prev_reading = EXCLUDED.prev_reading,
+       cur_reading = EXCLUDED.cur_reading,
+       usage = EXCLUDED.usage,
+       rate = EXCLUDED.rate,
+       amount = EXCLUDED.amount,
+       updated_at = now()`,
+    [unitId, meterType, period, prev, cur, usage, METER_RATE, amount],
+  );
+}
+
 type TenantChargeRow = {
   tenant_id: string;
   date: string;
@@ -166,6 +250,15 @@ export async function createReading(payload: MeterReadingInput): Promise<MeterRe
   );
 
   const created = rows[0];
+
+  try {
+    await upsertMeterBilling({ unit, tenantId, meterType, readingDate });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes('relation "meter_billing" does not exist')) {
+      console.warn("⚠️ failed to upsert meter billing", err);
+    }
+  }
 
   if (tenantId && amount > 0) {
     const tenant = await tenantsRepo.getTenant(tenantId);

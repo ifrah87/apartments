@@ -21,64 +21,39 @@ type ChargeRow = {
   meter_reading_id?: string;
 };
 
-type MeterReadingDetail = {
-  id: string;
-  unit: string;
+type MeterBillingRow = {
   meter_type: string;
-  reading_date: string;
-  reading_value: number;
-  prev_value: number;
   usage: number;
+  rate: number;
   amount: number;
-  prev_date?: string | null;
+  prev_reading: number;
+  cur_reading: number;
 };
 
-async function fetchMeterReadingDetails(ids: string[]) {
-  if (!ids.length) return new Map<string, MeterReadingDetail>();
-  let rows: any[] = [];
+async function fetchMeterBilling(unitId: string, period: string): Promise<MeterBillingRow[]> {
   try {
     const res = await query(
-      `WITH target AS (
-         SELECT id, unit, meter_type
-         FROM meter_readings
-         WHERE id = ANY($1)
-       ),
-       ranked AS (
-         SELECT r.*,
-                LAG(r.reading_date) OVER (PARTITION BY r.unit, r.meter_type ORDER BY r.reading_date, r.created_at) AS prev_date
-         FROM meter_readings r
-         JOIN target t ON t.unit = r.unit AND t.meter_type = r.meter_type
-       )
-       SELECT id, unit, meter_type, reading_date, reading_value, prev_value, usage, amount, prev_date
-       FROM ranked
-       WHERE id = ANY($1)`,
-      [ids],
+      `SELECT meter_type, usage, rate, amount, prev_reading, cur_reading
+       FROM public.meter_billing
+       WHERE unit_id = $1 AND period = $2`,
+      [unitId, period],
     );
-    rows = res.rows;
+    return res.rows.map((row: any) => ({
+      meter_type: String(row.meter_type || ""),
+      usage: Number(row.usage || 0),
+      rate: Number(row.rate || 0),
+      amount: Number(row.amount || 0),
+      prev_reading: Number(row.prev_reading || 0),
+      cur_reading: Number(row.cur_reading || 0),
+    }));
   } catch (err: any) {
     const code = err?.code;
     const message = err instanceof Error ? err.message : String(err);
-    if (code === "42P01" || message.includes('relation "meter_readings" does not exist')) {
-      return new Map<string, MeterReadingDetail>();
+    if (code === "42P01" || message.includes('relation "meter_billing" does not exist')) {
+      return [];
     }
     throw err;
   }
-
-  const map = new Map<string, MeterReadingDetail>();
-  rows.forEach((row: any) => {
-    map.set(String(row.id), {
-      id: String(row.id),
-      unit: String(row.unit),
-      meter_type: String(row.meter_type),
-      reading_date: String(row.reading_date),
-      reading_value: Number(row.reading_value || 0),
-      prev_value: Number(row.prev_value || 0),
-      usage: Number(row.usage || 0),
-      amount: Number(row.amount || 0),
-      prev_date: row.prev_date ? String(row.prev_date) : null,
-    });
-  });
-  return map;
 }
 
 type StoredInvoice = {
@@ -96,7 +71,6 @@ type StoredInvoice = {
 };
 
 const INVOICES_KEY = "billing_invoices";
-const METER_RATE = 0.41;
 const MONTHS = [
   "January",
   "February",
@@ -211,8 +185,6 @@ export async function POST(req: NextRequest) {
     ]);
 
     const tenantIndex = buildTenantIndex(tenants);
-    const meterIds = charges.map((row) => row.meter_reading_id).filter(Boolean) as string[];
-    const readingMap = await fetchMeterReadingDetails(meterIds);
     const chargeIndex = new Map<
       string,
       Array<{ date: string; amount: number; description?: string; category?: string; meta?: Record<string, unknown> }>
@@ -220,29 +192,13 @@ export async function POST(req: NextRequest) {
     charges.forEach((row) => {
       const tenantId = normalizeId(row.tenant_id);
       if (!tenantId) return;
-      const meterId = row.meter_reading_id ? String(row.meter_reading_id) : "";
-      const meter = meterId ? readingMap.get(meterId) : undefined;
-      const isUtility = Boolean(meter) || row.category === "utilities";
-      const meterType = meter?.meter_type || "";
-      const unitLabel = meterType === "water" ? "m3" : "kWh";
+      if (row.category === "utilities" || row.meter_reading_id) return;
       const entry = {
         date: row.date,
         amount: Number(row.amount || 0),
-        description: meterType === "water" ? "Water" : meterType === "electricity" ? "Electricity" : row.description,
+        description: row.description,
         category: row.category,
-        meta: isUtility && meter
-          ? {
-              kind: "utility",
-              meterType: meterType || row.category || "utility",
-              prevDate: meter.prev_date,
-              prevValue: meter.prev_value,
-              currentDate: meter.reading_date,
-              currentValue: meter.reading_value,
-              usage: meter.usage,
-              rate: METER_RATE,
-              unitLabel,
-            }
-          : undefined,
+        meta: undefined,
       };
       if (!chargeIndex.has(tenantId)) {
         chargeIndex.set(tenantId, []);
@@ -331,6 +287,31 @@ export async function POST(req: NextRequest) {
         total_cents: Math.round(qty * unitCents),
       };
     });
+    const meterBilling = await fetchMeterBilling(unit.id, periodKey);
+    const meterLineItems = meterBilling.map((billing) => {
+      const unitCents = toCents(Number(billing.rate || 0));
+      const qty = Number(billing.usage || 0);
+      return {
+        description: billing.meter_type === "water" ? "Water" : "Electricity",
+        qty,
+        unit_cents: unitCents,
+        total_cents: toCents(Number(billing.amount || 0)),
+      };
+    });
+    const mergedLineItems = [...defaultLineItems, ...meterLineItems];
+    const electricityBilling = meterBilling.find((row) => row.meter_type === "electricity");
+    const meterSnapshot = electricityBilling
+      ? {
+          prevDate: "",
+          prevReading: Number(electricityBilling.prev_reading || 0),
+          currDate: "",
+          currReading: Number(electricityBilling.cur_reading || 0),
+          usage: Number(electricityBilling.usage || 0),
+          rate: Number(electricityBilling.rate || 0),
+          amount: Number(electricityBilling.amount || 0),
+          unitLabel: "kWh",
+        }
+      : null;
 
     const invoiceDate = reference;
     const dueDay = tenant.due_day ?? 5;
@@ -343,7 +324,7 @@ export async function POST(req: NextRequest) {
       period: periodKey,
       invoiceDate: invoiceDate.toISOString().slice(0, 10),
       dueDate: dueDate.toISOString().slice(0, 10),
-      lineItems: defaultLineItems,
+      lineItems: mergedLineItems,
     };
 
     if (dryRun) {
@@ -399,7 +380,7 @@ export async function POST(req: NextRequest) {
           0,
           totalCents,
           null,
-          null,
+          meterSnapshot ? { meterSnapshot } : null,
           periodKey,
         ],
       );
