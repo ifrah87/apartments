@@ -66,6 +66,66 @@ function normalizeBuildingServices(value: unknown): BuildingServiceRecord[] {
   return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as BuildingServiceRecord[];
 }
 
+async function buildElectricityLineItem(opts: { unitId: string; periodStart: string; periodEnd: string }) {
+  const { unitId, periodStart, periodEnd } = opts;
+
+  const unitRes = await query(
+    `SELECT unit_number, property_id
+     FROM units
+     WHERE id = $1
+     LIMIT 1`,
+    [unitId],
+  );
+  const unitRow = unitRes.rows[0];
+  const unitNumber = unitRow?.unit_number !== undefined && unitRow?.unit_number !== null ? String(unitRow.unit_number) : "";
+  const propertyId = unitRow?.property_id ? String(unitRow.property_id) : null;
+  if (!unitNumber) return null;
+
+  const unitRate = await fetchElectricityRate(unitId, propertyId);
+  if (unitRate == null) return null;
+  const rateCents = Math.round(unitRate * 100);
+
+  const prevRes = await query(
+    `SELECT reading_value
+     FROM meter_readings
+     WHERE unit = $1
+       AND lower(meter_type) = 'electricity'
+       AND reading_date < $2
+     ORDER BY reading_date DESC
+     LIMIT 1`,
+    [unitNumber, periodStart],
+  );
+
+  const curRes = await query(
+    `SELECT reading_value
+     FROM meter_readings
+     WHERE unit = $1
+       AND lower(meter_type) = 'electricity'
+       AND reading_date >= $2
+       AND reading_date < $3
+     ORDER BY reading_date DESC
+     LIMIT 1`,
+    [unitNumber, periodStart, periodEnd],
+  );
+
+  const prev = prevRes.rows[0]?.reading_value;
+  const cur = curRes.rows[0]?.reading_value;
+  if (prev == null || cur == null) return null;
+
+  const prevNum = Number(prev);
+  const curNum = Number(cur);
+  const usage = curNum - prevNum;
+  if (!Number.isFinite(usage) || usage <= 0) return null;
+
+  const totalCents = Math.round(usage * rateCents);
+  return {
+    description: `Electricity (Prev: ${prevNum}, Cur: ${curNum})`,
+    qty: usage,
+    unit_cents: rateCents,
+    total_cents: totalCents,
+  };
+}
+
 async function fetchElectricityRate(unitId: string, propertyId?: string | null): Promise<number | null> {
   const [rawServices, rawUnitServices, rawBuildingServices] = await Promise.all([
     datasetsRepo.getDataset<ServiceRecord[]>("services", []),
@@ -389,15 +449,21 @@ export async function POST(req: NextRequest) {
         total_cents: Math.round(qty * unitCents),
       };
     });
-    const electricityRate = await fetchElectricityRate(unit.id, unit.property_id ?? null);
-    const electricitySnapshot =
-      electricityRate !== null ? await fetchElectricitySnapshot(unit.unit, monthStartKey, monthEndKey) : null;
-    const meterLineItems: Array<{
-      description: string;
-      qty: number;
-      unit_cents: number;
-      total_cents: number;
-    }> = [];
+
+    // --- ELECTRICITY AUTO CALCULATION ---
+    const periodStart = monthStartKey;
+    const periodEnd = monthEndKey;
+    const lineItemsForInvoice = [...defaultLineItems];
+
+    const electricity = await buildElectricityLineItem({
+      unitId: unit.id,
+      periodStart,
+      periodEnd,
+    });
+    if (electricity) {
+      lineItemsForInvoice.push(electricity);
+    }
+
     let meterSnapshot: {
       prevDate: string;
       prevReading: number;
@@ -409,29 +475,22 @@ export async function POST(req: NextRequest) {
       unitLabel: string;
     } | null = null;
 
-    if (electricityRate !== null && electricitySnapshot) {
-      const unitCents = toCents(electricityRate);
-      const qty = Number(electricitySnapshot.usage || 0);
-      const totalCents = Math.round(qty * unitCents);
-      meterLineItems.push({
-        description: `Electricity (Prev: ${electricitySnapshot.prevReading}, Cur: ${electricitySnapshot.currReading})`,
-        qty,
-        unit_cents: unitCents,
-        total_cents: totalCents,
-      });
-      meterSnapshot = {
-        prevDate: electricitySnapshot.prevDate,
-        prevReading: electricitySnapshot.prevReading,
-        currDate: electricitySnapshot.currDate,
-        currReading: electricitySnapshot.currReading,
-        usage: electricitySnapshot.usage,
-        rate: electricityRate,
-        amount: Number((electricitySnapshot.usage * electricityRate).toFixed(2)),
-        unitLabel: "kWh",
-      };
+    if (electricity) {
+      const electricitySnapshot = await fetchElectricitySnapshot(unit.unit, periodStart, periodEnd);
+      if (electricitySnapshot) {
+        const rate = electricity.unit_cents / 100;
+        meterSnapshot = {
+          prevDate: electricitySnapshot.prevDate,
+          prevReading: electricitySnapshot.prevReading,
+          currDate: electricitySnapshot.currDate,
+          currReading: electricitySnapshot.currReading,
+          usage: electricitySnapshot.usage,
+          rate,
+          amount: Number((electricitySnapshot.usage * rate).toFixed(2)),
+          unitLabel: "kWh",
+        };
+      }
     }
-
-    const mergedLineItems = [...defaultLineItems, ...meterLineItems];
 
     const invoiceDate = reference;
     const dueDay = tenant.due_day ?? 5;
@@ -444,7 +503,7 @@ export async function POST(req: NextRequest) {
       period: periodKey,
       invoiceDate: invoiceDate.toISOString().slice(0, 10),
       dueDate: dueDate.toISOString().slice(0, 10),
-      lineItems: mergedLineItems,
+      lineItems: lineItemsForInvoice,
     };
 
     if (dryRun) {
