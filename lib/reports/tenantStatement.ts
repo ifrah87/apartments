@@ -3,8 +3,8 @@ export type TenantRecord = {
   name: string;
   property_id?: string | null;
   building?: string | null;
-  unit?: string;
-  reference?: string;
+  unit?: string | null;
+  reference?: string | null;
   monthly_rent?: string | number;
   due_day?: string | number;
 };
