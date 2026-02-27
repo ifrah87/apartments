@@ -44,13 +44,11 @@ type InvoiceHeaderRow = {
 type InvoiceLineRow = {
   id: string;
   invoice_id: string;
-  line_index: number;
+  sort_order: number;
   description: string;
-  quantity: number;
-  unit_price_cents: number;
-  tax_cents: number;
+  qty: number;
+  unit_cents: number;
   total_cents: number;
-  meta: Record<string, any> | null;
   created_at?: string;
 };
 
@@ -97,7 +95,7 @@ function toMonthIndex(value: string) {
   return idx >= 0 ? idx : null;
 }
 
-function dueDateForMonth(reference: Date, dueDayRaw: string | number | undefined) {
+function dueDateForMonth(reference: Date, dueDayRaw: string | number | null | undefined) {
   const dueDay = Math.max(1, Number(dueDayRaw || 1));
   const dim = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 0)).getUTCDate();
   return new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), Math.min(dueDay, dim)));
@@ -107,33 +105,13 @@ function mapLineItems(rows: InvoiceLineRow[]): InvoiceLineItem[] {
   return rows.map((row) => ({
     id: String(row.id),
     description: String(row.description || ""),
-    qty: Number(row.quantity || 0),
-    rate: fromCents(row.unit_price_cents),
+    qty: Number(row.qty || 0),
+    rate: fromCents(row.unit_cents),
     amount: fromCents(row.total_cents),
-    meta: row.meta ?? undefined,
   }));
 }
 
 function extractMeterSnapshot(rows: InvoiceLineRow[]): MeterSnapshot | null {
-  for (const row of rows) {
-    const meta = row.meta;
-    if (!meta || typeof meta !== "object") continue;
-    if (String(meta.kind || "").toLowerCase() !== "utility") continue;
-    if (String(meta.meterType || "").toLowerCase() !== "electricity") continue;
-    const usage = Number(meta.usage ?? row.quantity ?? 0);
-    const rate = Number(meta.rate ?? fromCents(row.unit_price_cents));
-    const amount = Number(meta.amount ?? usage * rate);
-    return {
-      prevDate: String(meta.prevDate ?? ""),
-      prevReading: Number(meta.prevValue ?? 0),
-      currDate: String(meta.currentDate ?? ""),
-      currReading: Number(meta.currentValue ?? 0),
-      usage,
-      rate,
-      amount,
-      unitLabel: meta.unitLabel ? String(meta.unitLabel) : "kWh",
-    };
-  }
   return null;
 }
 
@@ -490,10 +468,10 @@ export async function GET(req: NextRequest) {
     let lineRows: InvoiceLineRow[] = [];
     if (invoiceIds.length) {
       const lineRes = await query(
-        `SELECT id, invoice_id, line_index, description, quantity, unit_price_cents, tax_cents, total_cents, meta, created_at
+        `SELECT id, invoice_id, sort_order, description, qty, unit_cents, total_cents, created_at
          FROM public.invoice_lines
          WHERE invoice_id = ANY($1)
-         ORDER BY invoice_id ASC, line_index ASC, created_at ASC`,
+         ORDER BY invoice_id ASC, sort_order ASC, created_at ASC`,
         [invoiceIds],
       );
       lineRows = lineRes.rows as InvoiceLineRow[];
@@ -519,7 +497,7 @@ export async function GET(req: NextRequest) {
       const lineItems = mapLineItems(lines);
       const totalCents = lines.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
       const totalAmount = fromCents(totalCents);
-      const meterSnapshot = extractMeterSnapshot(lines);
+      const meterSnapshot = (invoice.meta?.meterSnapshot ?? null) as MeterSnapshot | null;
       const issueDate = invoice.invoice_date ? new Date(invoice.invoice_date) : reference;
       const dueDate = invoice.due_date
         ? new Date(invoice.due_date)

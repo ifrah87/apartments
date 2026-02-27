@@ -41,6 +41,27 @@ type InvoiceRow = {
   status: "Unpaid" | "Partially Paid" | "Paid";
 };
 
+type DraftLineItem = {
+  id: string;
+  description: string;
+  qty: number;
+  unitCents: number;
+  totalCents: number;
+};
+
+type DraftInvoice = {
+  tenantId: string;
+  tenantName: string;
+  unitId: string;
+  unitLabel: string;
+  period: string;
+  invoiceDate: string;
+  dueDate: string;
+  lineItems: DraftLineItem[];
+  month: string;
+  year: string;
+};
+
 type UnitRecord = {
   id: string;
   unit: string;
@@ -74,6 +95,14 @@ const formatter = new Intl.NumberFormat("en-US", { style: "currency", currency: 
 
 function formatCurrency(value: number) {
   return formatter.format(value || 0);
+}
+
+function formatCents(value: number) {
+  return formatCurrency((value || 0) / 100);
+}
+
+function toCents(value: number) {
+  return Math.round(Number(value || 0) * 100);
 }
 
 function parseInvoiceDate(value?: string) {
@@ -141,6 +170,9 @@ export default function BillsPage() {
   const [generating, setGenerating] = useState(false);
   const [generatorMonth, setGeneratorMonth] = useState("February");
   const [generatorYear, setGeneratorYear] = useState("2026");
+  const [draftInvoice, setDraftInvoice] = useState<DraftInvoice | null>(null);
+  const [draftItems, setDraftItems] = useState<DraftLineItem[]>([]);
+  const [draftSaving, setDraftSaving] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<InvoiceRow | null>(null);
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
   const [meterSnapshot, setMeterSnapshot] = useState<MeterSnapshot | null>(null);
@@ -243,6 +275,18 @@ export default function BillsPage() {
     amount: overrides?.amount ?? 0,
   });
 
+  const createDraftLineItem = (overrides?: Partial<DraftLineItem>): DraftLineItem => {
+    const qty = Number(overrides?.qty ?? 1);
+    const unitCents = Number(overrides?.unitCents ?? 0);
+    return {
+      id: overrides?.id || (globalThis.crypto?.randomUUID?.() ?? `draft-${Math.random().toString(36).slice(2)}`),
+      description: overrides?.description ?? "",
+      qty,
+      unitCents,
+      totalCents: Number(overrides?.totalCents ?? Math.round(qty * unitCents)),
+    };
+  };
+
   const normalizeSnapshot = (snapshot?: MeterSnapshot | null): MeterSnapshot => {
     if (snapshot) return snapshot;
     return {
@@ -309,6 +353,12 @@ export default function BillsPage() {
     setEditingSaving(false);
   };
 
+  const closeDraft = () => {
+    setDraftInvoice(null);
+    setDraftItems([]);
+    setDraftSaving(false);
+  };
+
   const updateLineItem = (id: string, field: keyof InvoiceLineItem, value: string | number) => {
     setLineItems((prev) =>
       prev.map((item) => {
@@ -327,6 +377,29 @@ export default function BillsPage() {
 
   const addLineItem = () => {
     setLineItems((prev) => [...prev, createLineItem({ description: "", qty: 1, rate: 0, amount: 0 })]);
+  };
+
+  const updateDraftItem = (id: string, field: keyof DraftLineItem, value: string | number) => {
+    setDraftItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        const next = {
+          ...item,
+          [field]: field === "description" ? String(value) : Number(value),
+        } as DraftLineItem;
+        const qty = Number(next.qty || 0);
+        const unitCents = Number(next.unitCents || 0);
+        return { ...next, totalCents: Math.round(qty * unitCents) };
+      }),
+    );
+  };
+
+  const removeDraftItem = (id: string) => {
+    setDraftItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const addDraftItem = () => {
+    setDraftItems((prev) => [...prev, createDraftLineItem({ description: "", qty: 1, unitCents: 0 })]);
   };
 
   const updateSnapshot = (field: keyof MeterSnapshot, value: string | number) => {
@@ -460,10 +533,13 @@ export default function BillsPage() {
 
   const runGenerator = async () => {
     if (!selectedUnits.length) return;
+    if (selectedUnits.length !== 1) {
+      alert("Select a single unit to review before creating an invoice.");
+      return;
+    }
     setGenerating(true);
-    const popup = window.open("about:blank", "_blank", "noopener,noreferrer");
     try {
-      const res = await fetch("/api/bills", {
+      const res = await fetch("/api/bills?dryRun=1", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -474,38 +550,89 @@ export default function BillsPage() {
       });
       const payload = await res.json().catch(() => null);
       if (!res.ok || !payload?.ok) {
-        popup?.close();
-        alert(payload?.error || "Failed to generate invoices.");
+        alert(payload?.error || "Failed to generate invoice preview.");
         setGenerating(false);
         return;
       }
 
-      if (Array.isArray(payload?.data)) {
-        setInvoices(payload.data.map(normalizeInvoice));
+      const draft = payload?.draft;
+      if (!draft) {
+        alert("No preview available.");
+        setGenerating(false);
+        return;
       }
 
-      if (Array.isArray(payload?.skipped) && payload.skipped.length) {
-        alert(`Skipped: ${payload.skipped.join(", ")}`);
-      }
+      const draftItems = Array.isArray(draft.lineItems)
+        ? draft.lineItems.map((item: any) =>
+            createDraftLineItem({
+              description: String(item?.description ?? ""),
+              qty: Number(item?.qty ?? 0),
+              unitCents: Number(item?.unit_cents ?? 0),
+              totalCents: Number(item?.total_cents ?? 0),
+            }),
+          )
+        : [];
 
-      const params = new URLSearchParams({
-        mode: "pdf",
+      setDraftInvoice({
+        tenantId: String(draft.tenantId || ""),
+        tenantName: String(draft.tenantName || ""),
+        unitId: String(draft.unitId || ""),
+        unitLabel: String(draft.unitLabel || ""),
+        period: String(draft.period || ""),
+        invoiceDate: String(draft.invoiceDate || ""),
+        dueDate: String(draft.dueDate || ""),
+        lineItems: draftItems,
         month: generatorMonth,
         year: generatorYear,
       });
-      if (popup) {
-        popup.location.href = `/api/invoices/monthly?${params.toString()}`;
-      } else {
-        window.open(`/api/invoices/monthly?${params.toString()}`, "_blank", "noopener,noreferrer");
-      }
-      setSelectedUnits([]);
+      setDraftItems(draftItems);
       setShowGenerator(false);
+      setSelectedUnits([]);
     } catch (err) {
-      console.error("Failed to generate invoices", err);
-      popup?.close();
-      alert("Failed to generate invoices.");
+      console.error("Failed to generate invoice preview", err);
+      alert("Failed to generate invoice preview.");
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const confirmDraft = async () => {
+    if (!draftInvoice) return;
+    setDraftSaving(true);
+    try {
+      const res = await fetch("/api/bills", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          unitIds: [draftInvoice.unitId],
+          month: draftInvoice.month,
+          year: draftInvoice.year,
+          lineItems: draftItems.map((item) => ({
+            description: item.description,
+            qty: Number(item.qty || 0),
+            unit_cents: Number(item.unitCents || 0),
+            total_cents: Number(item.totalCents || 0),
+          })),
+        }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || payload?.ok === false) {
+        throw new Error(payload?.error || "Failed to create invoice.");
+      }
+      if (Array.isArray(payload?.data)) {
+        setInvoices(payload.data.map(normalizeInvoice));
+      } else {
+        const reload = await fetch("/api/bills", { cache: "no-store" });
+        const reloadPayload = await reload.json().catch(() => null);
+        const reloadData = reloadPayload?.ok ? reloadPayload.data : reloadPayload;
+        setInvoices(Array.isArray(reloadData) ? reloadData.map(normalizeInvoice) : []);
+      }
+      closeDraft();
+    } catch (err) {
+      console.error("Failed to create invoice", err);
+      alert(err instanceof Error ? err.message : "Failed to create invoice.");
+    } finally {
+      setDraftSaving(false);
     }
   };
 
@@ -815,6 +942,151 @@ export default function BillsPage() {
                   ? "Generating..."
                   : `Generate ${selectedUnits.length} Invoice${selectedUnits.length === 1 ? "" : "s"}`}
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {draftInvoice ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-8 backdrop-blur-sm">
+          <div className="w-full max-w-4xl rounded-2xl border border-white/10 bg-panel/95 p-6 shadow-2xl">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="grid h-9 w-9 place-items-center rounded-lg bg-white/5 text-accent">
+                  <FileDown className="h-4 w-4" />
+                </span>
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-100">Review Invoice</h2>
+                  <p className="text-xs text-slate-400">
+                    {draftInvoice.unitLabel} • {draftInvoice.tenantName} • {draftInvoice.period}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeDraft}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-panel/60 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-white/20"
+              >
+                <X className="h-3 w-3" />
+                Close
+              </button>
+            </div>
+
+            <div className="mt-6 space-y-6">
+              <div className="rounded-xl border border-white/10 bg-panel/70 p-4 text-xs text-slate-400">
+                <div className="flex flex-wrap gap-6">
+                  <div>
+                    <p className="uppercase tracking-wide text-slate-500">Invoice Date</p>
+                    <p className="mt-1 text-sm text-slate-100">{draftInvoice.invoiceDate}</p>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-wide text-slate-500">Due Date</p>
+                    <p className="mt-1 text-sm text-slate-100">{draftInvoice.dueDate}</p>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-wide text-slate-500">Period</p>
+                    <p className="mt-1 text-sm text-slate-100">{draftInvoice.period}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-panel/70 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-100">Line Items</h3>
+                    <p className="text-xs text-slate-400">Edit description, quantity, and unit price.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addDraftItem}
+                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-panel/60 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-white/20"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Add Line
+                  </button>
+                </div>
+
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead>
+                      <tr className="text-xs uppercase tracking-wide text-slate-500">
+                        <th className="px-3 py-2">Description</th>
+                        <th className="px-3 py-2">Qty</th>
+                        <th className="px-3 py-2">Unit Price</th>
+                        <th className="px-3 py-2 text-right">Total</th>
+                        <th className="px-3 py-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-slate-300">
+                      {draftItems.map((item) => (
+                        <tr key={item.id} className="border-t border-white/10">
+                          <td className="px-3 py-2">
+                            <input
+                              value={item.description}
+                              onChange={(event) => updateDraftItem(item.id, "description", event.target.value)}
+                              className="w-full rounded-lg border border-white/10 bg-transparent px-2 py-1 text-sm text-slate-100"
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number"
+                              value={item.qty}
+                              onChange={(event) => updateDraftItem(item.id, "qty", event.target.value)}
+                              className="w-24 rounded-lg border border-white/10 bg-transparent px-2 py-1 text-sm text-slate-100"
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={(item.unitCents / 100).toFixed(2)}
+                              onChange={(event) =>
+                                updateDraftItem(item.id, "unitCents", toCents(Number(event.target.value)))
+                              }
+                              className="w-28 rounded-lg border border-white/10 bg-transparent px-2 py-1 text-sm text-slate-100"
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-right text-slate-100">
+                            {formatCents(item.totalCents)}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <button
+                              type="button"
+                              onClick={() => removeDraftItem(item.id)}
+                              className="rounded-full bg-rose-500/15 px-3 py-1 text-xs font-semibold text-rose-200"
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {!draftItems.length ? (
+                        <tr>
+                          <td colSpan={5} className="px-3 py-4 text-center text-xs text-slate-500">
+                            No line items yet.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-slate-300">
+                  Total Due:{" "}
+                  <span className="font-semibold text-slate-100">
+                    {formatCents(draftItems.reduce((sum, item) => sum + (item.totalCents || 0), 0))}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={confirmDraft}
+                  disabled={draftSaving}
+                  className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2 text-xs font-semibold text-slate-900 shadow-[0_10px_20px_rgba(56,189,248,0.25)] hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {draftSaving ? "Creating..." : "Confirm & Create Invoice"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

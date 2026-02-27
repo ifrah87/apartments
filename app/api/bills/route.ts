@@ -163,10 +163,20 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = (await req.json()) as { unitIds?: string[]; month?: string; year?: string };
+    const url = new URL(req.url);
+    const dryRun = url.searchParams.get("dryRun") === "1";
+    const payload = (await req.json().catch(() => ({}))) as {
+      unitIds?: string[];
+      month?: string;
+      year?: string;
+      lineItems?: Array<{ description?: string; qty?: number; unit_cents?: number; total_cents?: number }>;
+    };
     const unitIds = Array.isArray(payload?.unitIds) ? payload.unitIds.filter(Boolean) : [];
     if (!unitIds.length) {
       return NextResponse.json({ ok: false, error: "Select at least one unit." }, { status: 400 });
+    }
+    if (unitIds.length !== 1) {
+      return NextResponse.json({ ok: false, error: "Select a single unit to generate an invoice." }, { status: 400 });
     }
 
     const monthValue = payload?.month || "";
@@ -227,155 +237,179 @@ export async function POST(req: NextRequest) {
     });
 
     const now = new Date().toISOString();
-    const created: StoredInvoice[] = [];
-    const skipped: string[] = [];
-
-    for (const unitId of unitIds) {
-      const unit = units.find((row) => row.id === unitId);
-      if (!unit) {
-        skipped.push(unitId);
-        continue;
-      }
-      const propertyKey = (unit.property_id || "").toLowerCase();
-      const unitKey = `${propertyKey}::${unit.unit}`.toLowerCase();
-      const tenant = tenantIndex.get(unitKey) || tenantIndex.get(`::${unit.unit}`.toLowerCase());
-      if (!tenant) {
-        skipped.push(unit.unit);
-        continue;
-      }
-      const tenantId = normalizeId(tenant.id);
-      const { rows, totals } = createStatement({
-        tenant: {
-          id: tenant.id,
-          name: tenant.name,
-          property_id: tenant.property_id ?? undefined,
-          building: tenant.building ?? undefined,
-          unit: tenant.unit ?? undefined,
-          reference: tenant.reference ?? undefined,
-          monthly_rent: tenant.monthly_rent ?? undefined,
-          due_day: tenant.due_day ?? undefined,
-        },
-        start,
-        end,
-        payments: [],
-        additionalCharges: chargeIndex.get(tenantId) || [],
-      });
-
-      if (!totals.charges) {
-        skipped.push(unit.unit);
-        continue;
-      }
-
-      const { lineItems, meterSnapshot } = buildInvoiceLineItems(rows, reference);
-      const id = stableUuid(`inv-${tenantId}-${periodKey}`);
-      const lineRows = lineItems.map((item, index) => ({
-        line_index: index,
-        description: item.description,
-        quantity: Number(item.qty || 0),
-        unit_price_cents: toCents(item.rate),
-        tax_cents: 0,
-        total_cents: toCents(item.amount),
-        meta: item.meta ?? null,
-      }));
-      const totalCents = lineRows.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
-      const invoiceDate = reference;
-      const dueDay = tenant.due_day ?? 5;
-      const dueDate = dueDateForMonth(reference, dueDay);
-      created.push({
-        id,
-        tenantId: tenant.id,
-        tenantName: tenant.name,
-        unitId: unit.id,
-        unitLabel: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
-        invoiceDate: reference.toISOString().slice(0, 10),
-        total: Number((totalCents / 100).toFixed(2)),
-        outstanding: Number((totalCents / 100).toFixed(2)),
-        status: "Unpaid",
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      try {
-        await query("BEGIN");
-        await query(
-          `INSERT INTO public.invoices (id, tenant_id, unit_id, invoice_date, due_date, status, currency, subtotal_cents, tax_cents, total_cents, notes, meta)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-           ON CONFLICT (id) DO UPDATE SET
-             tenant_id = EXCLUDED.tenant_id,
-             unit_id = EXCLUDED.unit_id,
-             invoice_date = EXCLUDED.invoice_date,
-             due_date = EXCLUDED.due_date,
-             status = EXCLUDED.status,
-             currency = EXCLUDED.currency,
-             subtotal_cents = EXCLUDED.subtotal_cents,
-             tax_cents = EXCLUDED.tax_cents,
-             total_cents = EXCLUDED.total_cents,
-             notes = EXCLUDED.notes,
-             meta = EXCLUDED.meta`,
-          [
-            id,
-            tenant.id,
-            unit.id,
-            invoiceDate,
-            dueDate,
-            "draft",
-            "USD",
-            totalCents,
-            0,
-            totalCents,
-            null,
-            meterSnapshot ? { meterSnapshot } : null,
-          ],
-        );
-        await query(`DELETE FROM public.invoice_lines WHERE invoice_id = $1`, [id]);
-        if (lineRows.length) {
-          const values: any[] = [];
-          const placeholders = lineRows
-            .map((row, idx) => {
-              const offset = idx * 8;
-              values.push(id, row.line_index, row.description, row.quantity, row.unit_price_cents, row.tax_cents, row.total_cents, row.meta);
-              return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8})`;
-            })
-            .join(",");
-          await query(
-            `INSERT INTO public.invoice_lines (invoice_id, line_index, description, quantity, unit_price_cents, tax_cents, total_cents, meta)
-             VALUES ${placeholders}`,
-            values,
-          );
-        }
-        await query("COMMIT");
-      } catch (err) {
-        try {
-          await query("ROLLBACK");
-        } catch {
-          // ignore rollback errors
-        }
-        throw err;
-      }
+    const unitId = unitIds[0];
+    const unit = units.find((row) => row.id === unitId);
+    if (!unit) {
+      return NextResponse.json({ ok: false, error: "Unit not found." }, { status: 404 });
+    }
+    const propertyKey = (unit.property_id || "").toLowerCase();
+    const unitKey = `${propertyKey}::${unit.unit}`.toLowerCase();
+    const tenant = tenantIndex.get(unitKey) || tenantIndex.get(`::${unit.unit}`.toLowerCase());
+    if (!tenant) {
+      return NextResponse.json({ ok: false, error: "Tenant not found for this unit." }, { status: 404 });
     }
 
-    if (!created.length) {
+    const tenantId = normalizeId(tenant.id);
+    const { rows, totals } = createStatement({
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        property_id: tenant.property_id ?? undefined,
+        building: tenant.building ?? undefined,
+        unit: tenant.unit ?? undefined,
+        reference: tenant.reference ?? undefined,
+        monthly_rent: tenant.monthly_rent ?? undefined,
+        due_day: tenant.due_day ?? undefined,
+      },
+      start,
+      end,
+      payments: [],
+      additionalCharges: chargeIndex.get(tenantId) || [],
+    });
+
+    if (!totals.charges) {
       return NextResponse.json(
-        { ok: false, error: "No invoices generated. Ensure tenants and rent are set." },
+        { ok: false, error: "No charges found for this tenant." },
         { status: 400 },
       );
     }
+
+    const { lineItems } = buildInvoiceLineItems(rows, reference);
+    const defaultLineItems = lineItems.map((item) => {
+      const unitCents = toCents(item.rate);
+      const qty = Number(item.qty || 0);
+      return {
+        description: item.description,
+        qty,
+        unit_cents: unitCents,
+        total_cents: Math.round(qty * unitCents),
+      };
+    });
+
+    const invoiceDate = reference;
+    const dueDay = tenant.due_day ?? 5;
+    const dueDate = dueDateForMonth(reference, dueDay);
+    const draft = {
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      unitId: unit.id,
+      unitLabel: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
+      period: periodKey,
+      invoiceDate: invoiceDate.toISOString().slice(0, 10),
+      dueDate: dueDate.toISOString().slice(0, 10),
+      lineItems: defaultLineItems,
+    };
+
+    if (dryRun) {
+      return NextResponse.json({ ok: true, mode: "preview", draft });
+    }
+
+    const inputLineItems = Array.isArray(payload?.lineItems) ? payload.lineItems : draft.lineItems;
+    const normalizedLineItems = inputLineItems
+      .map((item) => {
+        const description = String(item?.description ?? "").trim();
+        const qty = Number(item?.qty ?? 0);
+        const unitCents = Math.round(Number(item?.unit_cents ?? 0));
+        const totalCents = Math.round(Number(item?.total_cents ?? qty * unitCents));
+        return {
+          description,
+          qty,
+          unit_cents: unitCents,
+          total_cents: totalCents,
+        };
+      })
+      .filter((item) => item.description);
+
+    const totalCents = normalizedLineItems.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
+    const id = stableUuid(`inv-${tenantId}-${periodKey}`);
+
+    try {
+      await query("BEGIN");
+      await query(
+        `INSERT INTO public.invoices (id, tenant_id, unit_id, invoice_date, due_date, status, currency, subtotal_cents, tax_cents, total_cents, notes, meta, period)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         ON CONFLICT (id) DO UPDATE SET
+           tenant_id = EXCLUDED.tenant_id,
+           unit_id = EXCLUDED.unit_id,
+           invoice_date = EXCLUDED.invoice_date,
+           due_date = EXCLUDED.due_date,
+           status = EXCLUDED.status,
+           currency = EXCLUDED.currency,
+           subtotal_cents = EXCLUDED.subtotal_cents,
+           tax_cents = EXCLUDED.tax_cents,
+           total_cents = EXCLUDED.total_cents,
+           notes = EXCLUDED.notes,
+           meta = EXCLUDED.meta,
+           period = EXCLUDED.period`,
+        [
+          id,
+          tenant.id,
+          unit.id,
+          invoiceDate,
+          dueDate,
+          "draft",
+          "USD",
+          totalCents,
+          0,
+          totalCents,
+          null,
+          null,
+          periodKey,
+        ],
+      );
+      await query(`DELETE FROM public.invoice_lines WHERE invoice_id = $1`, [id]);
+      if (normalizedLineItems.length) {
+        const values: any[] = [];
+        const placeholders = normalizedLineItems
+          .map((row, idx) => {
+            const offset = idx * 6;
+            values.push(id, idx, row.description, row.qty, row.unit_cents, row.total_cents);
+            return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`;
+          })
+          .join(",");
+        await query(
+          `INSERT INTO public.invoice_lines (invoice_id, sort_order, description, qty, unit_cents, total_cents)
+           VALUES ${placeholders}`,
+          values,
+        );
+      }
+      await query("COMMIT");
+    } catch (err) {
+      try {
+        await query("ROLLBACK");
+      } catch {
+        // ignore rollback errors
+      }
+      throw err;
+    }
+
+    const created: StoredInvoice = {
+      id,
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      unitId: unit.id,
+      unitLabel: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
+      invoiceDate: invoiceDate.toISOString().slice(0, 10),
+      total: Number((totalCents / 100).toFixed(2)),
+      outstanding: Number((totalCents / 100).toFixed(2)),
+      status: "Unpaid",
+      createdAt: now,
+      updatedAt: now,
+    };
 
     const updated = await datasetsRepo.updateDataset<StoredInvoice[]>(
       INVOICES_KEY,
       (current) => {
         const map = new Map<string, StoredInvoice>();
         (Array.isArray(current) ? current : []).forEach((item) => map.set(item.id, item));
-        created.forEach((item) => {
-          const existing = map.get(item.id);
-          map.set(item.id, existing ? { ...existing, ...item, updatedAt: now } : item);
-        });
+        const existing = map.get(created.id);
+        map.set(created.id, existing ? { ...existing, ...created, updatedAt: now } : created);
         return Array.from(map.values());
       },
       [],
     );
 
-    return NextResponse.json({ ok: true, data: updated, created, skipped });
+    return NextResponse.json({ ok: true, invoiceId: id, data: updated, created: [created] });
   } catch (err) {
     console.error("❌ failed to generate bills", err);
     return handleError(err);

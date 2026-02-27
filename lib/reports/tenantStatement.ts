@@ -1,7 +1,7 @@
 export type TenantRecord = {
   id: string;
   name: string;
-  property_id?: string;
+  property_id?: string | null;
   building?: string;
   unit?: string;
   reference?: string;

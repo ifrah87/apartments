@@ -24,13 +24,11 @@ function fromCents(value: number | null | undefined) {
 type InvoiceLineRow = {
   id: string;
   invoice_id: string;
-  line_index: number;
+  sort_order: number;
   description: string;
-  quantity: number;
-  unit_price_cents: number;
-  tax_cents: number;
+  qty: number;
+  unit_cents: number;
   total_cents: number;
-  meta: Record<string, any> | null;
   created_at?: string;
 };
 
@@ -76,70 +74,14 @@ function normalizeMeterSnapshot(input: unknown): MeterSnapshot | null {
   };
 }
 
-function applyMeterSnapshot(lineItems: InvoiceLineItem[], meterSnapshot: MeterSnapshot | null) {
-  if (!meterSnapshot) return lineItems;
-  const next = [...lineItems];
-  const electricityIndex = next.findIndex((item) =>
-    item.description.toLowerCase().includes("electric"),
-  );
-  const electricityItem: InvoiceLineItem = {
-    id: electricityIndex >= 0 ? next[electricityIndex].id : `line-${Math.random().toString(36).slice(2)}`,
-    description: "Electricity",
-    qty: meterSnapshot.usage,
-    rate: meterSnapshot.rate,
-    amount: meterSnapshot.amount,
-    meta: {
-      kind: "utility",
-      meterType: "electricity",
-      prevDate: meterSnapshot.prevDate,
-      prevValue: meterSnapshot.prevReading,
-      currentDate: meterSnapshot.currDate,
-      currentValue: meterSnapshot.currReading,
-      usage: meterSnapshot.usage,
-      rate: meterSnapshot.rate,
-      unitLabel: meterSnapshot.unitLabel || "kWh",
-    },
-  };
-  if (electricityIndex >= 0) {
-    next[electricityIndex] = electricityItem;
-  } else {
-    next.push(electricityItem);
-  }
-  return next;
-}
-
 function mapInvoiceLines(rows: InvoiceLineRow[]): InvoiceLineItem[] {
   return rows.map((row) => ({
     id: String(row.id),
     description: String(row.description || ""),
-    qty: Number(row.quantity || 0),
-    rate: fromCents(row.unit_price_cents),
+    qty: Number(row.qty || 0),
+    rate: fromCents(row.unit_cents),
     amount: fromCents(row.total_cents),
-    meta: row.meta ?? undefined,
   }));
-}
-
-function extractMeterSnapshot(rows: InvoiceLineRow[]): MeterSnapshot | null {
-  for (const row of rows) {
-    const meta = row.meta;
-    if (!meta || typeof meta !== "object") continue;
-    if (String(meta.kind || "").toLowerCase() !== "utility") continue;
-    if (String(meta.meterType || "").toLowerCase() !== "electricity") continue;
-    const usage = toNumber(meta.usage ?? row.quantity);
-    const rate = toNumber(meta.rate, fromCents(row.unit_price_cents));
-    const amount = toNumber(meta.amount ?? usage * rate);
-    return {
-      prevDate: String(meta.prevDate ?? ""),
-      prevReading: toNumber(meta.prevValue),
-      currDate: String(meta.currentDate ?? ""),
-      currReading: toNumber(meta.currentValue),
-      usage,
-      rate,
-      amount,
-      unitLabel: meta.unitLabel ? String(meta.unitLabel) : "kWh",
-    };
-  }
-  return null;
 }
 
 export async function GET(_req: NextRequest, context: { params: ParamsMaybePromise }) {
@@ -153,17 +95,18 @@ export async function GET(_req: NextRequest, context: { params: ParamsMaybePromi
   if (!invoiceRes.rows.length) {
     return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
   }
+  const invoiceMeta = (invoiceRes.rows[0]?.meta ?? null) as Record<string, any> | null;
   const lineRes = await query(
-    `SELECT id, invoice_id, line_index, description, quantity, unit_price_cents, tax_cents, total_cents, meta, created_at
+    `SELECT id, invoice_id, sort_order, description, qty, unit_cents, total_cents, created_at
      FROM public.invoice_lines
      WHERE invoice_id = $1
-     ORDER BY line_index ASC, created_at ASC`,
+     ORDER BY sort_order ASC, created_at ASC`,
     [id],
   );
   const lineRows = lineRes.rows as InvoiceLineRow[];
   const lineItems = mapInvoiceLines(lineRows);
   const totalCents = lineRows.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
-  const meterSnapshot = extractMeterSnapshot(lineRows);
+  const meterSnapshot = (invoiceMeta?.meterSnapshot ?? null) as MeterSnapshot | null;
   return NextResponse.json({
     ok: true,
     data: {
@@ -180,18 +123,15 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
   const { id } = await Promise.resolve(context.params);
   try {
     const body = await req.json();
-    let lineItems = normalizeLineItems(body?.lineItems);
+    const lineItems = normalizeLineItems(body?.lineItems);
     const meterSnapshot = normalizeMeterSnapshot(body?.meterSnapshot);
-    lineItems = applyMeterSnapshot(lineItems, meterSnapshot);
 
     const lineRows = lineItems.map((item, index) => ({
-      line_index: index,
+      sort_order: index,
       description: item.description,
-      quantity: Number(item.qty || 0),
-      unit_price_cents: toCents(item.rate),
-      tax_cents: 0,
+      qty: Number(item.qty || 0),
+      unit_cents: toCents(item.rate),
       total_cents: toCents(item.amount),
-      meta: item.meta ?? null,
     }));
     const totalCents = lineRows.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
     const totalAmount = fromCents(totalCents);
@@ -202,13 +142,13 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
       const values: any[] = [];
       const placeholders = lineRows
         .map((row, idx) => {
-          const offset = idx * 8;
-          values.push(id, row.line_index, row.description, row.quantity, row.unit_price_cents, row.tax_cents, row.total_cents, row.meta);
-          return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8})`;
+          const offset = idx * 6;
+          values.push(id, row.sort_order, row.description, row.qty, row.unit_cents, row.total_cents);
+          return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`;
         })
         .join(",");
       await query(
-        `INSERT INTO public.invoice_lines (invoice_id, line_index, description, quantity, unit_price_cents, tax_cents, total_cents, meta)
+        `INSERT INTO public.invoice_lines (invoice_id, sort_order, description, qty, unit_cents, total_cents)
          VALUES ${placeholders}`,
         values,
       );
@@ -218,9 +158,10 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
        SET subtotal_cents = $1,
            tax_cents = $2,
            total_cents = $3,
+           meta = $4,
            updated_at = now()
-       WHERE id = $4`,
-      [totalCents, 0, totalCents, id],
+       WHERE id = $5`,
+      [totalCents, 0, totalCents, meterSnapshot ? { meterSnapshot } : null, id],
     );
     await query("COMMIT");
 
