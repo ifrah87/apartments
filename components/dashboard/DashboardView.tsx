@@ -11,6 +11,8 @@ import type { OverdueRow } from "@/lib/reports/rentInsights";
 import type { Txn } from "@/lib/reports/ledger";
 import type { OccupancySummary, TurnoverSummary } from "@/lib/reports/occupancyReports";
 import Link from "next/link";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { opt } from "@/src/lib/utils/normalize";
 
 type BankSummary = {
   bankBalance: number;
@@ -38,16 +40,7 @@ type Props = {
   turnover: TurnoverSummary;
 };
 
-type TenantRecord = {
-  id: string;
-  name: string;
-  building?: string;
-  property_id?: string;
-  unit?: string;
-  phone?: string;
-  monthly_rent?: string;
-  due_day?: string;
-};
+type TenantWithPhone = TenantRecord & { phone?: string | null };
 
 export default function DashboardView({
   rent,
@@ -62,7 +55,7 @@ export default function DashboardView({
   turnover,
 }: Props) {
   const { t, language } = useTranslations();
-  const [tenants, setTenants] = useState<TenantRecord[]>([]);
+  const [tenants, setTenants] = useState<TenantWithPhone[]>([]);
   const [smsSendingKey, setSmsSendingKey] = useState<string | null>(null);
   const locale = language === "so" ? "so-SO" : "en-US";
   const lastUpdatedText = bank.lastUpdatedISO
@@ -78,35 +71,40 @@ export default function DashboardView({
   useEffect(() => {
     fetch(`/api/tenants?ts=${Date.now()}`, { cache: "no-store" })
       .then((res) => res.json())
-      .then((payload) =>
-        setTenants(payload?.ok === false ? [] : (payload?.ok ? payload.data : payload) || []),
-      )
+      .then((payload) => {
+        const data = payload?.ok === false ? [] : (payload?.ok ? payload.data : payload) || [];
+        const normalized = Array.isArray(data) ? data.map(normalizeTenant) : [];
+        setTenants(normalized);
+      })
       .catch(() => setTenants([]));
   }, []);
 
   const tenantIndex = useMemo(() => {
-    const map = new Map<string, TenantRecord>();
+    const map = new Map<string, TenantWithPhone>();
     tenants.forEach((tenant) => {
-      const key = makeTenantKey(tenant.name, tenant.unit, tenant.property_id || tenant.building || "");
+      const property = opt(tenant.property_id) || opt(tenant.building) || "";
+      const unit = opt(tenant.unit) || "";
+      const key = makeTenantKey(tenant.name, unit, property);
       if (key) map.set(key, tenant);
     });
     return map;
   }, [tenants]);
 
-  const handleSendLateSms = async (tenant: TenantRecord, rowKey: string) => {
-    if (!tenant.phone) return;
+  const handleSendLateSms = async (tenant: TenantWithPhone, rowKey: string) => {
+    const phone = opt(tenant.phone);
+    if (!phone) return;
     setSmsSendingKey(rowKey);
     try {
       const body = buildRentReminderBody({
         name: tenant.name,
-        monthlyRent: tenant.monthly_rent,
-        dueDay: tenant.due_day,
+        monthlyRent: opt(tenant.monthly_rent),
+        dueDay: opt(tenant.due_day),
         locale,
       });
       const res = await fetch("/api/sms/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: tenant.phone, body }),
+        body: JSON.stringify({ to: phone, body }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {
@@ -253,8 +251,8 @@ export default function DashboardView({
                   {overdueRows.slice(0, 10).map((row) => {
                     const rowKey = `${row.propertyId}-${row.unit}-${row.tenant}`;
                     const tenant = tenantIndex.get(makeTenantKey(row.tenant, row.unit, row.propertyId));
-                    const isLate = tenant ? isPastGracePeriod({ dueDay: tenant.due_day }) : false;
-                    const canSend = Boolean(tenant?.phone && isLate);
+                    const isLate = tenant ? isPastGracePeriod({ dueDay: opt(tenant.due_day) }) : false;
+                    const canSend = Boolean(opt(tenant?.phone) && isLate);
                     return (
                       <tr key={rowKey} className="border-t border-slate-100">
                         <td className="px-4 py-3 text-slate-900">
@@ -420,6 +418,19 @@ function formatCurrency(value: number) {
 function formatDate(value: string, locale: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(locale, { month: "short", day: "numeric" });
+}
+
+function normalizeTenant(tenant: TenantWithPhone): TenantWithPhone {
+  return {
+    ...tenant,
+    building: opt(tenant.building),
+    property_id: opt(tenant.property_id),
+    unit: opt(tenant.unit),
+    phone: opt(tenant.phone),
+    monthly_rent: opt(tenant.monthly_rent),
+    due_day: opt(tenant.due_day),
+    reference: opt(tenant.reference),
+  };
 }
 
 function sumRows(rows: OverdueRow[]) {

@@ -2,17 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
-
-type TenantRecord = {
-  id: string;
-  name: string;
-  building?: string;
-  property_id?: string;
-  unit?: string;
-  monthly_rent?: string;
-  due_day?: string;
-  reference?: string;
-};
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 
 export default function TenantPortalPage() {
   const [tenants, setTenants] = useState<TenantRecord[]>([]);

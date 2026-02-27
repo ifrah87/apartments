@@ -1,6 +1,8 @@
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { listManualPayments, type ManualPayment } from "@/lib/reports/manualPayments";
-import { createStatement, normalizeId, type ChargeEntry, type PaymentEntry, type StatementRow, type TenantRecord } from "@/lib/reports/tenantStatement";
+import { createStatement, normalizeId, type ChargeEntry, type PaymentEntry, type StatementRow } from "@/lib/reports/tenantStatement";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { opt } from "@/src/lib/utils/normalize";
 
 type RawPayment = {
   date: string;
@@ -73,6 +75,14 @@ function toNumber(value: unknown, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
   const num = typeof value === "number" ? value : Number(String(value).replace(/[^\d.-]/g, ""));
   return Number.isFinite(num) ? num : fallback;
+}
+
+function tenantPropertyId(tenant: TenantRecord) {
+  return opt(tenant.property_id) ?? opt(tenant.building);
+}
+
+function tenantUnit(tenant: TenantRecord) {
+  return opt(tenant.unit);
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -264,7 +274,7 @@ function deriveLeaseEnd(leaseStart: Date | undefined) {
 }
 
 function findUnitRecord(ctx: ReportingContext, tenant: TenantRecord) {
-  const unitLabel = (tenant.unit || "").trim();
+  const unitLabel = (tenantUnit(tenant) || "").trim();
   if (!unitLabel) return undefined;
   return ctx.units.find((unit) => String(unit.unit).trim() === unitLabel);
 }
@@ -315,7 +325,7 @@ export async function buildRentRollReport(filters: RentRollFilters, properties: 
   const unitTypes = new Set<string>();
 
   ctx.tenants.forEach((tenant) => {
-    const tenantProperty = (tenant.property_id || "").toLowerCase();
+    const tenantProperty = (tenantPropertyId(tenant) || "").toLowerCase();
     if (propertyFilter && tenantProperty !== propertyFilter) return;
     const tenantId = normalizeId(tenant.id);
     const monthlyRent = toNumber(tenant.monthly_rent);
@@ -365,9 +375,9 @@ export async function buildRentRollReport(filters: RentRollFilters, properties: 
     }
     const expectedRent = prorated || monthlyRent;
     const row: RentRollRow = {
-      propertyId: tenant.property_id || "",
-      propertyName: getPropertyName(tenant.property_id, properties),
-      unit: tenant.unit || "—",
+      propertyId: tenantPropertyId(tenant) || "",
+      propertyName: getPropertyName(tenantPropertyId(tenant), properties),
+      unit: tenantUnit(tenant) || "—",
       tenant: tenant.name,
       leaseStart: toISODate(leaseStart),
       leaseEnd: toISODate(leaseEnd),
@@ -483,9 +493,9 @@ export async function buildRentChargeReport(
 
   const rows = ctx.tenants
     .map((tenant) => {
-      if (propertyFilter && (tenant.property_id || "").toLowerCase() !== propertyFilter) return null;
+      if (propertyFilter && (tenantPropertyId(tenant) || "").toLowerCase() !== propertyFilter) return null;
       if (textFilter) {
-        const haystack = `${tenant.name} ${tenant.unit}`.toLowerCase();
+        const haystack = `${tenant.name} ${tenantUnit(tenant) || ""}`.toLowerCase();
         if (!haystack.includes(textFilter)) return null;
       }
       const tenantId = normalizeId(tenant.id);
@@ -497,10 +507,10 @@ export async function buildRentChargeReport(
       const nextRent = Number((currentRent * (1 + increasePct)).toFixed(2));
       const changeType: RentChargeRow["changeType"] = nextRent > currentRent ? "Increase" : "Renewal";
       return {
-        propertyId: tenant.property_id || "",
-        propertyName: getPropertyName(tenant.property_id, properties),
+        propertyId: tenantPropertyId(tenant) || "",
+        propertyName: getPropertyName(tenantPropertyId(tenant), properties),
         tenant: tenant.name,
-        unit: tenant.unit || "—",
+        unit: tenantUnit(tenant) || "—",
         currentRent,
         nextRent,
         effectiveDate: toISODate(nextEffective)!,
@@ -582,7 +592,7 @@ export async function buildOverdueRentReport(
   const rows: OverdueRow[] = [];
 
   ctx.tenants.forEach((tenant) => {
-    if (propertyFilter && (tenant.property_id || "").toLowerCase() !== propertyFilter) return;
+    if (propertyFilter && (tenantPropertyId(tenant) || "").toLowerCase() !== propertyFilter) return;
     const tenantId = normalizeId(tenant.id);
     const payments = ctx.paymentIndex.get(tenantId) || [];
     const tenantCharges = ctx.charges.get(tenantId) || [];
@@ -615,9 +625,9 @@ export async function buildOverdueRentReport(
 
     rows.push({
       tenant: tenant.name,
-      propertyId: tenant.property_id || "",
-      propertyName: getPropertyName(tenant.property_id, properties),
-      unit: tenant.unit || "—",
+      propertyId: tenantPropertyId(tenant) || "",
+      propertyName: getPropertyName(tenantPropertyId(tenant), properties),
+      unit: tenantUnit(tenant) || "—",
       monthlyRent: toNumber(tenant.monthly_rent),
       lastPaymentDate: lastPayment ? lastPayment.date : undefined,
       lastPaymentAmount: lastPayment ? lastPayment.amount : undefined,
@@ -682,7 +692,7 @@ export async function buildLeaseExpiryReport(
   const unitTypes = new Set<string>();
 
   ctx.tenants.forEach((tenant) => {
-    if (propertyFilter && (tenant.property_id || "").toLowerCase() !== propertyFilter) return;
+    if (propertyFilter && (tenantPropertyId(tenant) || "").toLowerCase() !== propertyFilter) return;
     const tenantId = normalizeId(tenant.id);
     const leaseStart = deriveLeaseStart(tenantId, ctx);
     const leaseEnd = deriveLeaseEnd(leaseStart);
@@ -705,9 +715,9 @@ export async function buildLeaseExpiryReport(
 
     rows.push({
       tenant: tenant.name,
-      propertyId: tenant.property_id || "",
-      propertyName: getPropertyName(tenant.property_id, properties),
-      unit: tenant.unit || "—",
+      propertyId: tenantPropertyId(tenant) || "",
+      propertyName: getPropertyName(tenantPropertyId(tenant), properties),
+      unit: tenantUnit(tenant) || "—",
       unitType,
       leaseStart: toISODate(leaseStart),
       leaseEnd: toISODate(leaseEnd),

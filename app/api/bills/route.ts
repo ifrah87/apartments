@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { datasetsRepo, tenantsRepo, unitsRepo, type RepoError, type TenantRecord as RepoTenantRecord } from "@/lib/repos";
+import { datasetsRepo, tenantsRepo, unitsRepo, type RepoError } from "@/lib/repos";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { opt } from "@/src/lib/utils/normalize";
 import { query } from "@/lib/db";
 import { createStatement, normalizeId } from "@/lib/reports/tenantStatement";
 import { buildInvoiceLineItems } from "@/lib/invoices/lineItems";
@@ -139,12 +141,12 @@ function stableUuid(seed: string) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function buildTenantIndex(tenants: RepoTenantRecord[]) {
-  const map = new Map<string, RepoTenantRecord>();
+function buildTenantIndex(tenants: TenantRecord[]) {
+  const map = new Map<string, TenantRecord>();
   tenants.forEach((tenant) => {
-    const unit = tenant.unit || "";
+    const unit = opt(tenant.unit) || "";
     if (!unit) return;
-    const property = tenant.property_id || tenant.building || "";
+    const property = opt(tenant.property_id) || opt(tenant.building) || "";
     map.set(`${property}::${unit}`.toLowerCase(), tenant);
     map.set(`::${unit}`.toLowerCase(), tenant);
   });
@@ -254,12 +256,12 @@ export async function POST(req: NextRequest) {
       tenant: {
         id: tenant.id,
         name: tenant.name,
-        property_id: tenant.property_id ?? undefined,
-        building: tenant.building ?? undefined,
-        unit: tenant.unit ?? undefined,
-        reference: tenant.reference ?? undefined,
-        monthly_rent: tenant.monthly_rent ?? undefined,
-        due_day: tenant.due_day ?? undefined,
+        property_id: opt(tenant.property_id),
+        building: opt(tenant.building),
+        unit: opt(tenant.unit),
+        reference: opt(tenant.reference),
+        monthly_rent: opt(tenant.monthly_rent),
+        due_day: opt(tenant.due_day),
       },
       start,
       end,

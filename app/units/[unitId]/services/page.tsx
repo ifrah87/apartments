@@ -5,18 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { PencilLine, Trash2 } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 
 type UnitRecord = {
   id: string;
   property_id: string | null;
   unit: string;
-};
-
-type TenantRecord = {
-  name: string;
-  property_id?: string;
-  building?: string;
-  unit?: string;
 };
 
 type PropertyRecord = {

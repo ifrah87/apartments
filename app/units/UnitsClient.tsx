@@ -7,6 +7,7 @@ import { FileText, X } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { resolveCurrentPropertyId, setCurrentPropertyId } from "@/lib/currentProperty";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 
 type UnitRecord = {
   id: string;
@@ -17,15 +18,6 @@ type UnitRecord = {
   beds?: string | null;
   rent?: number | null;
   status?: string | null;
-};
-
-type TenantRecord = {
-  id: string;
-  name: string;
-  property_id?: string;
-  building?: string;
-  unit?: string;
-  monthly_rent?: string;
 };
 
 type LeaseAgreement = {

@@ -1,7 +1,8 @@
 import { bankTransactionsRepo, datasetsRepo, tenantsRepo } from "@/lib/repos";
 import { listManualPayments } from "@/lib/reports/manualPayments";
 import { createStatement, normalizeId } from "@/lib/reports/tenantStatement";
-import type { TenantRecord as RepoTenantRecord } from "@/lib/repos/tenantsRepo";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { opt } from "@/src/lib/utils/normalize";
 import type { LeaseAgreement } from "@/lib/leases";
 
 export type RentLedgerEntry = {
@@ -45,15 +46,15 @@ function withinRange(date: string, start: Date, end: Date) {
   return normalized >= start && normalized <= end;
 }
 
-function matchesProperty(tenant: RepoTenantRecord, propertyFilter: string) {
+function matchesProperty(tenant: TenantRecord, propertyFilter: string) {
   if (!propertyFilter) return true;
   const key = propertyFilter.toLowerCase();
   return (tenant.property_id || "").toLowerCase() === key || (tenant.building || "").toLowerCase() === key;
 }
 
-function buildTenantIndex(tenants: RepoTenantRecord[]) {
-  const byId = new Map<string, RepoTenantRecord>();
-  const byUnit = new Map<string, RepoTenantRecord>();
+function buildTenantIndex(tenants: TenantRecord[]) {
+  const byId = new Map<string, TenantRecord>();
+  const byUnit = new Map<string, TenantRecord>();
   tenants.forEach((tenant) => {
     const id = normalizeId(tenant.id);
     if (id) byId.set(id, tenant);
@@ -81,12 +82,21 @@ export async function buildRentLedger(filters: RentLedgerFilters = {}): Promise<
   const end = normalizeDay(endDate);
   const propertyFilter = (filters.propertyId || "").trim().toLowerCase();
 
-  const [tenants, leases, manualPayments, bankTransactions] = await Promise.all([
+  const [rawTenants, leases, manualPayments, bankTransactions] = await Promise.all([
     tenantsRepo.listTenants(),
     datasetsRepo.getDataset<LeaseAgreement[]>("lease_agreements", []),
     listManualPayments(),
     bankTransactionsRepo.listTransactions({ start: toISO(start), end: toISO(end) }),
   ]);
+  const tenants: TenantRecord[] = rawTenants.map((tenant) => ({
+    ...tenant,
+    property_id: opt(tenant.property_id),
+    building: opt(tenant.building),
+    unit: opt(tenant.unit),
+    monthly_rent: opt(tenant.monthly_rent),
+    due_day: opt(tenant.due_day),
+    reference: opt(tenant.reference),
+  }));
 
   const relevantTenants = tenants.filter((tenant) => matchesProperty(tenant, propertyFilter));
   const tenantIndex = buildTenantIndex(relevantTenants);

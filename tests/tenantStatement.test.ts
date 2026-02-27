@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { createStatement, normalizeId, TenantRecord } from "../lib/reports/tenantStatement";
+import { createStatement, normalizeId } from "../lib/reports/tenantStatement";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 
 function makeTenant(partial: Partial<TenantRecord> = {}): TenantRecord {
   return {

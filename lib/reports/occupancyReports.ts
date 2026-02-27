@@ -1,7 +1,9 @@
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { fetchPropertyOptions } from "@/lib/reports/propertyHelpers";
 import type { PropertyInfo } from "@/lib/reports/rentInsights";
-import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
+import { normalizeId } from "@/lib/reports/tenantStatement";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { opt } from "@/src/lib/utils/normalize";
 
 type UnitInventory = {
   property_id: string;
@@ -138,7 +140,8 @@ export async function buildOccupancyReport(filters: OccupancyFilters, properties
 
   const tenantMap = new Map<string, TenantRecord>();
   tenants.forEach((tenant) => {
-    tenantMap.set(unitKey(tenant.property_id || tenant.building, tenant.unit), tenant);
+    const propertyKey = opt(tenant.property_id) ?? opt(tenant.building) ?? "";
+    tenantMap.set(unitKey(propertyKey, opt(tenant.unit)), tenant);
   });
 
   const rows = units

@@ -1,5 +1,7 @@
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
-import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
+import { normalizeId } from "@/lib/reports/tenantStatement";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { opt } from "@/src/lib/utils/normalize";
 
 type RawUtilityCharge = {
   tenant_id?: string;
@@ -86,7 +88,7 @@ export async function buildUtilityChargesReport(
       if (tenantId) {
         tenant = tenants.find((t) => normalizeId(t.id) === tenantId);
       }
-      const propertyId = (tenant?.property_id || charge.property_id || "").trim();
+      const propertyId = (opt(tenant?.property_id) || charge.property_id || "").trim();
       if (propertyFilter && propertyId.toLowerCase() !== propertyFilter) return null;
       const propertyName = propertyId ? propertyMap.get(propertyId.toLowerCase()) || propertyId : undefined;
       const amount = toNumber(charge.amount);
@@ -98,7 +100,7 @@ export async function buildUtilityChargesReport(
         tenantName: tenant?.name || (communal ? "Communal" : "Unknown tenant"),
         propertyId: propertyId || undefined,
         propertyName,
-        unit: tenant?.unit,
+        unit: opt(tenant?.unit),
         description: charge.description || "Utility charge",
         amount,
         paidAmount,

@@ -1,4 +1,4 @@
-import type { TenantRecord } from "@/lib/repos/tenantsRepo";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 
 export type { TenantRecord };
 

@@ -4,18 +4,13 @@ import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { fetchPropertyOptions } from "@/lib/reports/propertyHelpers";
 import ReportControlsBar from "@/components/reports/ReportControlsBar";
 import ReportOpenTracker from "@/components/reports/ReportOpenTracker";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { opt } from "@/src/lib/utils/normalize";
 
-type TenantRecord = {
-  id: string;
-  name: string;
-  property_id?: string;
-  building?: string;
-  unit?: string;
-  phone?: string;
-  monthly_rent?: string | number;
-  due_day?: string | number;
-  due_date?: string;
-  next_due_date?: string;
+type TenantWithDueDates = TenantRecord & {
+  phone?: string | null;
+  due_date?: string | null;
+  next_due_date?: string | null;
 };
 
 type PaymentRecord = {
@@ -55,11 +50,12 @@ export default async function UpcomingPaymentsPage({ searchParams }: { searchPar
   const start = sp.from || sp.start || defaultStart;
   const end = sp.to || sp.end || defaultEnd;
   const propertyId = sp.propertyId || sp.property || "all";
-  const [tenants, payments, properties] = await Promise.all([
-    fetchJson<TenantRecord[]>("/api/tenants"),
+  const [rawTenants, payments, properties] = await Promise.all([
+    fetchJson<TenantWithDueDates[]>("/api/tenants"),
     fetchJson<PaymentRecord[]>("/api/payments"),
     fetchPropertyOptions(),
   ]);
+  const tenants = rawTenants.map(normalizeTenant);
 
   const referenceDate = deriveReferenceDate(payments);
   const paidIndex = buildPaidIndex(payments);
@@ -187,10 +183,10 @@ function safeDate(value?: string | number | null): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function resolveDueDate(tenant: TenantRecord, referenceDate: Date): Date | null {
+function resolveDueDate(tenant: TenantWithDueDates, referenceDate: Date): Date | null {
   const explicitDate = safeDate(tenant.due_date || tenant.next_due_date);
   if (explicitDate) return explicitDate;
-  const dueDayRaw = tenant.due_day;
+  const dueDayRaw = tenant.due_day ?? null;
   const dueDay = Number(dueDayRaw);
   if (!Number.isFinite(dueDay)) return null;
   const due = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), dueDay);
@@ -201,7 +197,7 @@ function resolveDueDate(tenant: TenantRecord, referenceDate: Date): Date | null 
 }
 
 function buildUpcomingRows(
-  tenants: TenantRecord[],
+  tenants: TenantWithDueDates[],
   properties: { id: string; name?: string }[],
   referenceDate: Date,
   paidIndex: Map<string, Set<string>>,
@@ -235,6 +231,21 @@ function normalizeId(value: unknown) {
   return String(value ?? "")
     .trim()
     .replace(/\.0$/, "");
+}
+
+function normalizeTenant(tenant: TenantWithDueDates): TenantWithDueDates {
+  return {
+    ...tenant,
+    building: opt(tenant.building),
+    property_id: opt(tenant.property_id),
+    unit: opt(tenant.unit),
+    monthly_rent: opt(tenant.monthly_rent),
+    due_day: opt(tenant.due_day),
+    reference: opt(tenant.reference),
+    phone: opt(tenant.phone),
+    due_date: opt(tenant.due_date),
+    next_due_date: opt(tenant.next_due_date),
+  };
 }
 
 function buildPaidIndex(payments: PaymentRecord[]) {

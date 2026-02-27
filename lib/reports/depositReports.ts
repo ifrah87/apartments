@@ -1,5 +1,7 @@
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
-import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
+import { normalizeId } from "@/lib/reports/tenantStatement";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { opt } from "@/src/lib/utils/normalize";
 import type { PropertyInfo } from "@/lib/reports/rentInsights";
 
 type RawDepositSummary = {
@@ -104,9 +106,10 @@ export async function buildDepositReport(filters: DepositFilters, properties: Pr
       const tenantId = normalizeId(tenant.id);
       const summary = summaryMap.get(tenantId);
       if (!summary) return null;
-      if (propertyFilter && (tenant.property_id || "").toLowerCase() !== propertyFilter && (tenant.building || "").toLowerCase() !== propertyFilter) {
+      if (propertyFilter && (opt(tenant.property_id) || "").toLowerCase() !== propertyFilter && (opt(tenant.building) || "").toLowerCase() !== propertyFilter) {
         return null;
       }
+      const pid = opt(tenant.property_id) ?? opt(tenant.building);
       const charged = toNumber(summary.deposit_charged);
       const received = toNumber(summary.deposit_received);
       const released = toNumber(summary.deposit_released);
@@ -115,9 +118,9 @@ export async function buildDepositReport(filters: DepositFilters, properties: Pr
       return {
         tenantId,
         tenantName: tenant.name,
-        propertyId: ((tenant.property_id ?? tenant.building) ?? undefined),
-        propertyName: propertyName((tenant.property_id ?? tenant.building) ?? undefined, properties),
-        unit: (tenant.unit ?? undefined),
+        propertyId: pid,
+        propertyName: pid ? propertyName(pid, properties) : undefined,
+        unit: opt(tenant.unit),
         charged,
         received,
         released: Math.abs(released),
@@ -152,14 +155,14 @@ export async function buildDepositReport(filters: DepositFilters, properties: Pr
       const tenantId = normalizeId(txn.tenant_id);
       const tenantInfo = tenantIndex.get(tenantId);
       if (!tenantInfo) return null;
-      const propertyId = tenantInfo.tenant.property_id || tenantInfo.tenant.building;
+      const propertyId = opt(tenantInfo.tenant.property_id) ?? opt(tenantInfo.tenant.building);
       if (propertyFilter && (propertyId || "").toLowerCase() !== propertyFilter) return null;
       return {
         tenantId,
         tenantName: tenantInfo.tenant.name,
         propertyId,
         propertyName: tenantInfo.propertyName,
-        unit: tenantInfo.tenant.unit,
+        unit: opt(tenantInfo.tenant.unit),
         date: txn.date,
         type: txn.type,
         amount: toNumber(txn.amount),

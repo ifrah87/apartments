@@ -16,6 +16,7 @@ import {
   Plus,
 } from "lucide-react";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 
 type UnitCard = {
   id: string;
@@ -66,14 +67,6 @@ type UnitRecord = {
   id: string;
   unit: string;
   property_id: string | null;
-};
-
-type TenantRecord = {
-  id: string;
-  name: string;
-  property_id?: string;
-  building?: string;
-  unit?: string;
 };
 
 type LeaseRecord = {

@@ -5,10 +5,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { tenantsRepo } from "@/lib/repos";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
-import {
-  normalizeId,
-  type TenantRecord,
-} from "@/lib/reports/tenantStatement";
+import { normalizeId } from "@/lib/reports/tenantStatement";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { opt } from "@/src/lib/utils/normalize";
 import { buildCompanyProfile, getOrganizationSnapshot, type CompanyProfile } from "@/lib/settings/organization";
 
 export const runtime = "nodejs";
@@ -428,7 +427,16 @@ export async function GET(req: NextRequest) {
     }
 
     const { start, end } = monthRange(reference);
-    const tenants = await tenantsRepo.listTenants();
+    const rawTenants = await tenantsRepo.listTenants();
+    const tenants: TenantRecord[] = rawTenants.map((tenant) => ({
+      ...tenant,
+      property_id: opt(tenant.property_id),
+      building: opt(tenant.building),
+      unit: opt(tenant.unit),
+      monthly_rent: opt(tenant.monthly_rent),
+      due_day: opt(tenant.due_day),
+      reference: opt(tenant.reference),
+    }));
     const normalizedTenantId = normalizeId(requestedTenantId);
     const scopedTenants = normalizedTenantId
       ? tenants.filter((tenant) => {

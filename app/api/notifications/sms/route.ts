@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { sendSms } from "@/lib/twilio";
 import { normalizeId } from "@/lib/reports/tenantStatement";
 import { buildCompanyProfile, getOrganizationSnapshot } from "@/lib/settings/organization";
-import { tenantsRepo, type TenantRecord } from "@/lib/repos";
+import { tenantsRepo } from "@/lib/repos";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 
 type SmsRequest = {
   tenantId?: string;

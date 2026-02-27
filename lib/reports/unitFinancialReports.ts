@@ -1,6 +1,8 @@
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
 import { listManualPayments } from "@/lib/reports/manualPayments";
-import { normalizeId, type TenantRecord } from "@/lib/reports/tenantStatement";
+import { normalizeId } from "@/lib/reports/tenantStatement";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { opt } from "@/src/lib/utils/normalize";
 import type { PropertyInfo } from "@/lib/reports/rentInsights";
 
 type UnitInventory = {
@@ -143,7 +145,8 @@ export async function buildUnitFinancialReport(
 
   const tenantIndex = new Map<string, TenantRecord>();
   tenants.forEach((tenant) => {
-    tenantIndex.set(unitKey(tenant.property_id || tenant.building, tenant.unit), tenant);
+    const propertyKey = opt(tenant.property_id) ?? opt(tenant.building) ?? "";
+    tenantIndex.set(unitKey(propertyKey, opt(tenant.unit)), tenant);
   });
 
   const rows = units
