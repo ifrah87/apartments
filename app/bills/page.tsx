@@ -1133,7 +1133,7 @@ export default function BillsPage() {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-semibold text-slate-100">Line Items</h3>
-                      <p className="text-xs text-slate-400">Edit description, quantity, and rate.</p>
+                      <p className="text-xs text-slate-400">Edit description, quantity, and unit rate.</p>
                     </div>
                     <button
                       type="button"
@@ -1151,7 +1151,7 @@ export default function BillsPage() {
                         <tr className="text-xs uppercase tracking-wide text-slate-500">
                           <th className="px-3 py-2">Description</th>
                           <th className="px-3 py-2">Qty</th>
-                          <th className="px-3 py-2">Rate</th>
+                          <th className="px-3 py-2">Unit rate</th>
                           <th className="px-3 py-2 text-right">Amount</th>
                           <th className="px-3 py-2 text-right">Actions</th>
                         </tr>
@@ -1211,7 +1211,7 @@ export default function BillsPage() {
                 <div className="rounded-xl border border-white/10 bg-panel/70 p-4">
                   <div>
                     <h3 className="text-sm font-semibold text-slate-100">Electricity Meter Snapshot</h3>
-                    <p className="text-xs text-slate-400">Update readings and rate (usage auto-calculates).</p>
+                    <p className="text-xs text-slate-400">Update readings and unit rate (usage auto-calculates).</p>
                   </div>
 
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -1261,7 +1261,7 @@ export default function BillsPage() {
                       />
                     </label>
                     <label className="text-xs text-slate-400">
-                      Rate
+                      Unit rate
                       <input
                         type="number"
                         step="0.01"

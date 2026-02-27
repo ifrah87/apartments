@@ -21,36 +21,135 @@ type ChargeRow = {
   meter_reading_id?: string;
 };
 
-type MeterBillingRow = {
-  meter_type: string;
-  usage: number;
-  rate: number;
-  amount: number;
-  prev_reading: number;
-  cur_reading: number;
+type ServiceRecord = {
+  id: string;
+  name?: string;
+  rate?: number;
+  icon?: string;
 };
 
-async function fetchMeterBilling(unitId: string, period: string): Promise<MeterBillingRow[]> {
+type UnitServiceRecord = {
+  id: string;
+  unitId: string;
+  propertyId?: string;
+  serviceId: string;
+  startDate: string;
+};
+
+type BuildingServiceRecord = {
+  id: string;
+  propertyId: string;
+  serviceId: string;
+  startDate: string;
+};
+
+type ReadingSnapshot = {
+  prevReading: number;
+  prevDate: string;
+  currReading: number;
+  currDate: string;
+  usage: number;
+};
+
+function normalizeServiceList(value: unknown): ServiceRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as ServiceRecord[];
+}
+
+function normalizeUnitServices(value: unknown): UnitServiceRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as UnitServiceRecord[];
+}
+
+function normalizeBuildingServices(value: unknown): BuildingServiceRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as BuildingServiceRecord[];
+}
+
+async function fetchElectricityRate(unitId: string, propertyId?: string | null): Promise<number | null> {
+  const [rawServices, rawUnitServices, rawBuildingServices] = await Promise.all([
+    datasetsRepo.getDataset<ServiceRecord[]>("services", []),
+    datasetsRepo.getDataset<UnitServiceRecord[]>("unit_services", []),
+    datasetsRepo.getDataset<BuildingServiceRecord[]>("building_services", []),
+  ]);
+
+  const services = normalizeServiceList(rawServices);
+  const unitServices = normalizeUnitServices(rawUnitServices);
+  const buildingServices = normalizeBuildingServices(rawBuildingServices);
+
+  const electricityServiceIds = new Set(
+    services
+      .filter((service) => {
+        const name = String(service.name ?? "").toLowerCase();
+        const icon = String(service.icon ?? "").toLowerCase();
+        return name.includes("electric") || icon === "electricity";
+      })
+      .map((service) => String(service.id)),
+  );
+
+  if (!electricityServiceIds.size) return null;
+
+  const unitService = unitServices.find(
+    (entry) => entry.unitId === unitId && electricityServiceIds.has(String(entry.serviceId)),
+  );
+  const buildingService = propertyId
+    ? buildingServices.find(
+        (entry) => entry.propertyId === propertyId && electricityServiceIds.has(String(entry.serviceId)),
+      )
+    : undefined;
+
+  const serviceId = unitService?.serviceId ?? buildingService?.serviceId;
+  if (!serviceId) return null;
+
+  const service = services.find((entry) => String(entry.id) === String(serviceId));
+  const rate = service?.rate !== undefined ? Number(service.rate) : 0;
+  return Number.isFinite(rate) && rate > 0 ? rate : null;
+}
+
+async function fetchElectricitySnapshot(
+  unitNumber: string,
+  monthStart: string,
+  monthEndExclusive: string,
+): Promise<ReadingSnapshot | null> {
+  if (!unitNumber) return null;
   try {
-    const res = await query(
-      `SELECT meter_type, usage, rate, amount, prev_reading, cur_reading
-       FROM public.meter_billing
-       WHERE unit_id = $1 AND period = $2`,
-      [unitId, period],
-    );
-    return res.rows.map((row: any) => ({
-      meter_type: String(row.meter_type || ""),
-      usage: Number(row.usage || 0),
-      rate: Number(row.rate || 0),
-      amount: Number(row.amount || 0),
-      prev_reading: Number(row.prev_reading || 0),
-      cur_reading: Number(row.cur_reading || 0),
-    }));
+    const [prevRes, curRes] = await Promise.all([
+      query(
+        `SELECT reading_value, reading_date
+         FROM public.meter_readings
+         WHERE unit = $1 AND lower(meter_type) = 'electricity' AND reading_date < $2
+         ORDER BY reading_date DESC, created_at DESC
+         LIMIT 1`,
+        [unitNumber, monthStart],
+      ),
+      query(
+        `SELECT reading_value, reading_date
+         FROM public.meter_readings
+         WHERE unit = $1 AND lower(meter_type) = 'electricity' AND reading_date >= $2 AND reading_date < $3
+         ORDER BY reading_date DESC, created_at DESC
+         LIMIT 1`,
+        [unitNumber, monthStart, monthEndExclusive],
+      ),
+    ]);
+
+    const prevRow = prevRes.rows[0];
+    const curRow = curRes.rows[0];
+    if (!prevRow || !curRow) return null;
+    const prevReading = Number(prevRow.reading_value || 0);
+    const currReading = Number(curRow.reading_value || 0);
+    const usage = Math.max(0, Number((currReading - prevReading).toFixed(2)));
+    return {
+      prevReading,
+      prevDate: String(prevRow.reading_date),
+      currReading,
+      currDate: String(curRow.reading_date),
+      usage,
+    };
   } catch (err: any) {
     const code = err?.code;
     const message = err instanceof Error ? err.message : String(err);
-    if (code === "42P01" || message.includes('relation "meter_billing" does not exist')) {
-      return [];
+    if (code === "42P01" || message.includes('relation "meter_readings" does not exist')) {
+      return null;
     }
     throw err;
   }
@@ -177,6 +276,9 @@ export async function POST(req: NextRequest) {
     const reference = new Date(Date.UTC(year, monthIndex, 1));
     const periodKey = `${reference.getUTCFullYear()}-${String(reference.getUTCMonth() + 1).padStart(2, "0")}`;
     const { start, end } = monthRange(reference);
+    const monthStartKey = start.toISOString().slice(0, 10);
+    const monthEndExclusive = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 1));
+    const monthEndKey = monthEndExclusive.toISOString().slice(0, 10);
 
     const [units, tenants, charges] = await Promise.all([
       unitsRepo.listUnits(),
@@ -287,31 +389,49 @@ export async function POST(req: NextRequest) {
         total_cents: Math.round(qty * unitCents),
       };
     });
-    const meterBilling = await fetchMeterBilling(unit.id, periodKey);
-    const meterLineItems = meterBilling.map((billing) => {
-      const unitCents = toCents(Number(billing.rate || 0));
-      const qty = Number(billing.usage || 0);
-      return {
-        description: billing.meter_type === "water" ? "Water" : "Electricity",
+    const electricityRate = await fetchElectricityRate(unit.id, unit.property_id ?? null);
+    const electricitySnapshot =
+      electricityRate !== null ? await fetchElectricitySnapshot(unit.unit, monthStartKey, monthEndKey) : null;
+    const meterLineItems: Array<{
+      description: string;
+      qty: number;
+      unit_cents: number;
+      total_cents: number;
+    }> = [];
+    let meterSnapshot: {
+      prevDate: string;
+      prevReading: number;
+      currDate: string;
+      currReading: number;
+      usage: number;
+      rate: number;
+      amount: number;
+      unitLabel: string;
+    } | null = null;
+
+    if (electricityRate !== null && electricitySnapshot) {
+      const unitCents = toCents(electricityRate);
+      const qty = Number(electricitySnapshot.usage || 0);
+      const totalCents = Math.round(qty * unitCents);
+      meterLineItems.push({
+        description: `Electricity (Prev: ${electricitySnapshot.prevReading}, Cur: ${electricitySnapshot.currReading})`,
         qty,
         unit_cents: unitCents,
-        total_cents: toCents(Number(billing.amount || 0)),
+        total_cents: totalCents,
+      });
+      meterSnapshot = {
+        prevDate: electricitySnapshot.prevDate,
+        prevReading: electricitySnapshot.prevReading,
+        currDate: electricitySnapshot.currDate,
+        currReading: electricitySnapshot.currReading,
+        usage: electricitySnapshot.usage,
+        rate: electricityRate,
+        amount: Number((electricitySnapshot.usage * electricityRate).toFixed(2)),
+        unitLabel: "kWh",
       };
-    });
+    }
+
     const mergedLineItems = [...defaultLineItems, ...meterLineItems];
-    const electricityBilling = meterBilling.find((row) => row.meter_type === "electricity");
-    const meterSnapshot = electricityBilling
-      ? {
-          prevDate: "",
-          prevReading: Number(electricityBilling.prev_reading || 0),
-          currDate: "",
-          currReading: Number(electricityBilling.cur_reading || 0),
-          usage: Number(electricityBilling.usage || 0),
-          rate: Number(electricityBilling.rate || 0),
-          amount: Number(electricityBilling.amount || 0),
-          unitLabel: "kWh",
-        }
-      : null;
 
     const invoiceDate = reference;
     const dueDay = tenant.due_day ?? 5;
