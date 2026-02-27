@@ -35,6 +35,7 @@ type InvoiceRow = {
   tenantId: string;
   tenantName: string;
   period: string;
+  invoiceDate?: string;
   total: number;
   outstanding: number;
   status: "Unpaid" | "Partially Paid" | "Paid";
@@ -75,19 +76,55 @@ function formatCurrency(value: number) {
   return formatter.format(value || 0);
 }
 
+function parseInvoiceDate(value?: string) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const date = trimmed.length === 10 ? new Date(`${trimmed}T00:00:00Z`) : new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatInvoicePeriod(value?: string) {
+  const date = parseInvoiceDate(value);
+  if (!date) return "";
+  return date.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+function getInvoicePeriodLabel(invoice: InvoiceRow) {
+  return formatInvoicePeriod(invoice.invoiceDate) || invoice.period || "";
+}
+
+function getInvoiceMonthYear(invoice: InvoiceRow) {
+  const date = parseInvoiceDate(invoice.invoiceDate);
+  if (date) {
+    return {
+      month: date.toLocaleString("en-US", { month: "long", timeZone: "UTC" }),
+      year: String(date.getUTCFullYear()),
+    };
+  }
+  const parts = (invoice.period || "").trim().split(" ");
+  if (parts.length < 2) return { month: "", year: "" };
+  const year = parts.pop() || "";
+  const month = parts.join(" ");
+  return { month, year };
+}
+
 function normalizeInvoice(row: any): InvoiceRow {
   const status = row?.status;
   const normalizedStatus: InvoiceRow["status"] =
     status === "Paid" || status === "Partially Paid" || status === "Unpaid" ? status : "Unpaid";
   const unitLabel = row?.unitLabel || row?.unit || row?.unit_name || "Unit";
   const tenantName = row?.tenantName || row?.tenant || "Tenant";
+  const invoiceDate = row?.invoiceDate ?? row?.invoice_date ?? "";
+  const period = formatInvoicePeriod(String(invoiceDate)) || String(row?.period ?? "");
   return {
     id: String(row?.id ?? ""),
     unitId: String(row?.unitId ?? row?.unit_id ?? ""),
     unitLabel: String(unitLabel),
     tenantId: String(row?.tenantId ?? row?.tenant_id ?? ""),
     tenantName: String(tenantName),
-    period: String(row?.period ?? ""),
+    period,
+    invoiceDate: invoiceDate ? String(invoiceDate) : undefined,
     total: Number(row?.total ?? 0),
     outstanding: Number(row?.outstanding ?? row?.total ?? 0),
     status: normalizedStatus,
@@ -343,7 +380,7 @@ export default function BillsPage() {
 
   const billingUnits = useMemo<BillingUnit[]>(() => {
     const billedUnitIds = new Set(
-      invoices.filter((invoice) => invoice.period === billingPeriod).map((invoice) => invoice.unitId),
+      invoices.filter((invoice) => getInvoicePeriodLabel(invoice) === billingPeriod).map((invoice) => invoice.unitId),
     );
     return units.map((unit) => ({
       ...unit,
@@ -472,16 +509,8 @@ export default function BillsPage() {
     }
   };
 
-  const parsePeriod = (period: string) => {
-    const parts = period.trim().split(" ");
-    if (parts.length < 2) return { month: "", year: "" };
-    const year = parts.pop() || "";
-    const month = parts.join(" ");
-    return { month, year };
-  };
-
   const buildInvoiceUrl = (invoice: InvoiceRow, mode: "pdf" | "download") => {
-    const { month, year } = parsePeriod(invoice.period);
+    const { month, year } = getInvoiceMonthYear(invoice);
     const params = new URLSearchParams({ mode });
     if (invoice.tenantId) params.set("tenantId", invoice.tenantId);
     if (month) params.set("month", month);
@@ -499,7 +528,7 @@ export default function BillsPage() {
 
   const handleWhatsAppInvoice = (invoice: InvoiceRow) => {
     const invoiceUrl = new URL(buildInvoiceUrl(invoice, "pdf"), window.location.origin).toString();
-    const message = `Invoice for ${invoice.tenantName} (${invoice.period}) - ${formatCurrency(invoice.total)}. ${invoiceUrl}`;
+    const message = `Invoice for ${invoice.tenantName} (${getInvoicePeriodLabel(invoice)}) - ${formatCurrency(invoice.total)}. ${invoiceUrl}`;
     const href = `https://wa.me/?text=${encodeURIComponent(message)}`;
     window.open(href, "_blank", "noopener,noreferrer");
   };
@@ -581,7 +610,7 @@ export default function BillsPage() {
                     <div className="font-semibold text-slate-100">{invoice.unitLabel}</div>
                     <div className="text-xs text-slate-400">{invoice.tenantName}</div>
                   </td>
-                  <td className="px-4 py-3">{invoice.period}</td>
+                  <td className="px-4 py-3">{getInvoicePeriodLabel(invoice)}</td>
                   <td className="px-4 py-3 text-slate-100">{formatCurrency(invoice.total)}</td>
                   <td
                     className={`px-4 py-3 ${
@@ -801,7 +830,7 @@ export default function BillsPage() {
                 <div>
                   <h2 className="text-sm font-semibold text-slate-100">Edit Invoice</h2>
                   <p className="text-xs text-slate-400">
-                    {editingInvoice.unitLabel} • {editingInvoice.tenantName} • {editingInvoice.period}
+                    {editingInvoice.unitLabel} • {editingInvoice.tenantName} • {getInvoicePeriodLabel(editingInvoice)}
                   </p>
                 </div>
               </div>

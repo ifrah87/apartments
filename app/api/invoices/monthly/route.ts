@@ -177,7 +177,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
 
     doc.fillColor("#0f172a").font("Inter-Bold").fontSize(20).text("INVOICE", left, y);
     y += 22;
-    doc.fillColor("#64748b").font("Inter").fontSize(10).text(`Billing period: ${monthLabel(reference)}`, left, y);
+    doc.fillColor("#64748b").font("Inter").fontSize(10).text(`Billing period: ${monthLabel(payload.issueDate)}`, left, y);
 
     const metaX = right - 220;
     const metaTop = doc.page.margins.top;
@@ -332,7 +332,6 @@ function buildInvoiceSection(
   lineItems: InvoiceLineItem[],
   meterSnapshot: MeterSnapshot | null,
   totalAmount: number,
-  reference: Date,
   company: CompanyProfile,
   invoiceNumber: string,
   issueDate: Date,
@@ -374,7 +373,7 @@ function buildInvoiceSection(
         <div>
           ${logo}
           <h1>Invoice</h1>
-          <p class="muted">Billing period: ${monthLabel(reference)}</p>
+          <p class="muted">Billing period: ${monthLabel(issueDate)}</p>
         </div>
         <div class="invoice-meta">
           <div><span>Invoice #</span>${invoiceNumber}</div>
@@ -567,7 +566,6 @@ export async function GET(req: NextRequest) {
           payload.line_items,
           payload.meter_snapshot,
           payload.total_amount,
-          reference,
           company,
           payload.invoiceNumber,
           payload.issueDate,

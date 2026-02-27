@@ -82,7 +82,7 @@ type StoredInvoice = {
   tenantName: string;
   unitId: string;
   unitLabel: string;
-  period: string;
+  invoiceDate: string;
   total: number;
   outstanding: number;
   status: "Unpaid" | "Partially Paid" | "Paid";
@@ -116,10 +116,6 @@ function handleError(err: unknown) {
 function toMonthIndex(value: string) {
   const idx = MONTHS.findIndex((month) => month.toLowerCase() === value.toLowerCase());
   return idx >= 0 ? idx : null;
-}
-
-function monthLabel(reference: Date) {
-  return reference.toLocaleString("en-US", { month: "long", year: "numeric" });
 }
 
 function monthRange(reference: Date) {
@@ -181,7 +177,6 @@ export async function POST(req: NextRequest) {
     }
 
     const reference = new Date(Date.UTC(year, monthIndex, 1));
-    const period = monthLabel(reference);
     const periodKey = `${reference.getUTCFullYear()}-${String(reference.getUTCMonth() + 1).padStart(2, "0")}`;
     const { start, end } = monthRange(reference);
 
@@ -291,7 +286,7 @@ export async function POST(req: NextRequest) {
         tenantName: tenant.name,
         unitId: unit.id,
         unitLabel: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
-        period,
+        invoiceDate: reference.toISOString().slice(0, 10),
         total: Number((totalCents / 100).toFixed(2)),
         outstanding: Number((totalCents / 100).toFixed(2)),
         status: "Unpaid",
