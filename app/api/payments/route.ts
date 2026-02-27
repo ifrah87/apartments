@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
         ? normalizeId(tenantIdRaw)
         : undefined;
 
-    if (tenantIdRaw && tenantIdRaw.trim() !== "" && !isUuid(tenantId)) {
+    if (tenantIdRaw && tenantIdRaw.trim() !== "" && !isUuid(tenantId!)) {
       return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenantIdRaw}` }, { status: 400 });
     }
 
