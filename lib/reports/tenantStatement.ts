@@ -5,7 +5,7 @@ export type TenantRecord = {
   building?: string | null;
   unit?: string | null;
   reference?: string | null;
-  monthly_rent?: string | number;
+  monthly_rent?: string | number | null;
   due_day?: string | number;
 };
 
