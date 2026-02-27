@@ -167,14 +167,22 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const url = new URL(req.url);
-    const dryRun = url.searchParams.get("dryRun") === "1";
-    const payload = (await req.json().catch(() => ({}))) as {
+    type BillsPayload = {
+      tenant_id?: string;
       unitIds?: string[];
       month?: string;
       year?: string;
-      lineItems?: Array<{ description?: string; qty?: number; unit_cents?: number; total_cents?: number }>;
+      lineItems?: {
+        description?: string;
+        qty?: number;
+        unit_cents?: number;
+        total_cents?: number;
+      }[];
     };
+
+    const url = new URL(req.url);
+    const dryRun = url.searchParams.get("dryRun") === "1";
+    const payload = (await req.json().catch(() => ({}))) as BillsPayload;
     const unitIds = Array.isArray(payload?.unitIds) ? payload.unitIds.filter(Boolean) : [];
     if (!unitIds.length) {
       return NextResponse.json({ ok: false, error: "Select at least one unit." }, { status: 400 });
