@@ -42,21 +42,33 @@ export function buildInvoiceLineItems(
         const usage = toNumber(meta?.usage);
         const rate = toNumber(meta?.rate, DEFAULT_RATE);
         const amount = roundMoney(usage * rate);
+        const unitLabel = String(meta?.unitLabel || "kWh");
+        const metaPayload = {
+          kind: "utility",
+          meterType: meterType === "water" ? "water" : "electricity",
+          prevDate: toDateString(meta?.prevDate),
+          prevValue: toNumber(meta?.prevValue),
+          currentDate: toDateString(meta?.currentDate),
+          currentValue: toNumber(meta?.currentValue),
+          usage,
+          rate,
+          unitLabel,
+        };
         lineItems.push({
           id: `utility-${randomUUID()}`,
           description: meterType === "water" ? "Water" : "Electricity",
           qty: usage,
           rate,
           amount,
+          meta: metaPayload,
         });
 
         if (meterType === "electricity") {
-          const unitLabel = String(meta?.unitLabel || "kWh");
           meterSnapshot = {
-            prevDate: toDateString(meta?.prevDate),
-            prevReading: toNumber(meta?.prevValue),
-            currDate: toDateString(meta?.currentDate),
-            currReading: toNumber(meta?.currentValue),
+            prevDate: metaPayload.prevDate,
+            prevReading: metaPayload.prevValue,
+            currDate: metaPayload.currentDate,
+            currReading: metaPayload.currentValue,
             usage,
             rate,
             amount,

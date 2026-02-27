@@ -4,6 +4,7 @@ export type InvoiceLineItem = {
   qty: number;
   rate: number;
   amount: number;
+  meta?: Record<string, unknown>;
 };
 
 export type MeterSnapshot = {

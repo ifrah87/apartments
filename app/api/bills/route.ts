@@ -128,6 +128,21 @@ function monthRange(reference: Date) {
   return { start, end };
 }
 
+function dueDateForMonth(reference: Date, dueDayRaw: string | number | undefined) {
+  const dueDay = Math.max(1, Number(dueDayRaw || 1));
+  const dim = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), Math.min(dueDay, dim)));
+}
+
+function toCents(value: number) {
+  return Math.round(Number(value || 0) * 100);
+}
+
+function stableUuid(seed: string) {
+  const hex = crypto.createHash("md5").update(seed).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 function buildTenantIndex(tenants: RepoTenantRecord[]) {
   const map = new Map<string, RepoTenantRecord>();
   tenants.forEach((tenant) => {
@@ -256,8 +271,20 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const { lineItems, meterSnapshot, totalAmount } = buildInvoiceLineItems(rows, reference);
-      const id = `inv-${tenantId}-${periodKey}`;
+      const { lineItems, meterSnapshot } = buildInvoiceLineItems(rows, reference);
+      const id = stableUuid(`inv-${tenantId}-${periodKey}`);
+      const lineRows = lineItems.map((item, index) => ({
+        line_index: index,
+        description: item.description,
+        quantity: Number(item.qty || 0),
+        unit_price_cents: toCents(item.rate),
+        tax_cents: 0,
+        total_cents: toCents(item.amount),
+        meta: item.meta ?? null,
+      }));
+      const totalCents = lineRows.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
+      const invoiceDate = reference;
+      const dueDate = dueDateForMonth(reference, tenant.due_day);
       created.push({
         id,
         tenantId: tenant.id,
@@ -265,23 +292,70 @@ export async function POST(req: NextRequest) {
         unitId: unit.id,
         unitLabel: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
         period,
-        total: Number(totalAmount.toFixed(2)),
-        outstanding: Number(totalAmount.toFixed(2)),
+        total: Number((totalCents / 100).toFixed(2)),
+        outstanding: Number((totalCents / 100).toFixed(2)),
         status: "Unpaid",
         createdAt: now,
         updatedAt: now,
       });
 
-      await query(
-        `INSERT INTO public.invoices (id, tenant_id, unit_id, period, line_items, meter_snapshot, total_amount)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT (id) DO UPDATE SET
-           line_items = EXCLUDED.line_items,
-           meter_snapshot = EXCLUDED.meter_snapshot,
-           total_amount = EXCLUDED.total_amount,
-           updated_at = now()`,
-        [id, tenant.id, unit.id, periodKey, lineItems, meterSnapshot, totalAmount],
-      );
+      try {
+        await query("BEGIN");
+        await query(
+          `INSERT INTO public.invoices (id, tenant_id, unit_id, invoice_date, due_date, status, currency, subtotal_cents, tax_cents, total_cents, notes, meta)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           ON CONFLICT (id) DO UPDATE SET
+             tenant_id = EXCLUDED.tenant_id,
+             unit_id = EXCLUDED.unit_id,
+             invoice_date = EXCLUDED.invoice_date,
+             due_date = EXCLUDED.due_date,
+             status = EXCLUDED.status,
+             currency = EXCLUDED.currency,
+             subtotal_cents = EXCLUDED.subtotal_cents,
+             tax_cents = EXCLUDED.tax_cents,
+             total_cents = EXCLUDED.total_cents,
+             notes = EXCLUDED.notes,
+             meta = EXCLUDED.meta`,
+          [
+            id,
+            tenant.id,
+            unit.id,
+            invoiceDate,
+            dueDate,
+            "draft",
+            "USD",
+            totalCents,
+            0,
+            totalCents,
+            null,
+            meterSnapshot ? { meterSnapshot } : null,
+          ],
+        );
+        await query(`DELETE FROM public.invoice_lines WHERE invoice_id = $1`, [id]);
+        if (lineRows.length) {
+          const values: any[] = [];
+          const placeholders = lineRows
+            .map((row, idx) => {
+              const offset = idx * 8;
+              values.push(id, row.line_index, row.description, row.quantity, row.unit_price_cents, row.tax_cents, row.total_cents, row.meta);
+              return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8})`;
+            })
+            .join(",");
+          await query(
+            `INSERT INTO public.invoice_lines (invoice_id, line_index, description, quantity, unit_price_cents, tax_cents, total_cents, meta)
+             VALUES ${placeholders}`,
+            values,
+          );
+        }
+        await query("COMMIT");
+      } catch (err) {
+        try {
+          await query("ROLLBACK");
+        } catch {
+          // ignore rollback errors
+        }
+        throw err;
+      }
     }
 
     if (!created.length) {

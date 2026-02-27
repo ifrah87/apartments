@@ -3,54 +3,15 @@ import path from "path";
 import PDFDocument from "pdfkit";
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { datasetsRepo, tenantsRepo } from "@/lib/repos";
-import { buildInvoiceLineItems } from "@/lib/invoices/lineItems";
+import { tenantsRepo } from "@/lib/repos";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
 import {
-  ChargeEntry,
-  createStatement,
   normalizeId,
   type TenantRecord,
-  type StatementRow,
 } from "@/lib/reports/tenantStatement";
 import { buildCompanyProfile, getOrganizationSnapshot, type CompanyProfile } from "@/lib/settings/organization";
 
 export const runtime = "nodejs";
-
-type ChargeRow = {
-  tenant_id: string;
-  date: string;
-  amount: string | number;
-  description?: string;
-  category?: string;
-  meter_reading_id?: string;
-};
-
-type MeterReadingDetail = {
-  id: string;
-  unit: string;
-  meter_type: string;
-  reading_date: string;
-  reading_value: number;
-  prev_value: number;
-  usage: number;
-  amount: number;
-  prev_date?: string | null;
-};
-
-type MeterMeta = {
-  kind?: "utility";
-  meterType: "water" | "electricity";
-  prevDate?: string | Date | null;
-  currentDate?: string | Date | null;
-  prevValue?: number | string;
-  currentValue?: number | string;
-  usage?: number | string;
-  rate?: number | string;
-  unitLabel?: string;
-};
-
-const METER_RATE = 0.41;
 
 const MONTHS = [
   "January",
@@ -67,12 +28,42 @@ const MONTHS = [
   "December",
 ];
 
+type InvoiceHeaderRow = {
+  id: string;
+  tenant_id: string | null;
+  unit_id: string | null;
+  invoice_number: string | null;
+  invoice_date: string | Date | null;
+  due_date: string | Date | null;
+  status: string | null;
+  currency: string | null;
+  notes: string | null;
+  meta: Record<string, any> | null;
+};
+
+type InvoiceLineRow = {
+  id: string;
+  invoice_id: string;
+  line_index: number;
+  description: string;
+  quantity: number;
+  unit_price_cents: number;
+  tax_cents: number;
+  total_cents: number;
+  meta: Record<string, any> | null;
+  created_at?: string;
+};
+
 function toISO(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
 function toMoney(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value || 0);
+}
+
+function fromCents(value: number | null | undefined) {
+  return Number(((value ?? 0) / 100).toFixed(2));
 }
 
 function formatUkDate(value: string | Date) {
@@ -112,133 +103,44 @@ function dueDateForMonth(reference: Date, dueDayRaw: string | number | undefined
   return new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), Math.min(dueDay, dim)));
 }
 
-async function fetchMeterReadingDetails(ids: string[]) {
-  if (!ids.length) return new Map<string, MeterReadingDetail>();
-  let rows: any[] = [];
-  try {
-    const res = await query(
-      `WITH target AS (
-         SELECT id, unit, meter_type
-         FROM meter_readings
-         WHERE id = ANY($1)
-       ),
-       ranked AS (
-         SELECT r.*,
-                LAG(r.reading_date) OVER (PARTITION BY r.unit, r.meter_type ORDER BY r.reading_date, r.created_at) AS prev_date
-         FROM meter_readings r
-         JOIN target t ON t.unit = r.unit AND t.meter_type = r.meter_type
-       )
-       SELECT id, unit, meter_type, reading_date, reading_value, prev_value, usage, amount, prev_date
-       FROM ranked
-       WHERE id = ANY($1)`,
-      [ids],
-    );
-    rows = res.rows;
-  } catch (err: any) {
-    const code = err?.code;
-    const message = err instanceof Error ? err.message : String(err);
-    if (code === "42P01" || message.includes('relation "meter_readings" does not exist')) {
-      return new Map<string, MeterReadingDetail>();
-    }
-    throw err;
-  }
-
-  const map = new Map<string, MeterReadingDetail>();
-  rows.forEach((row: any) => {
-    map.set(String(row.id), {
-      id: String(row.id),
-      unit: String(row.unit),
-      meter_type: String(row.meter_type),
-      reading_date: String(row.reading_date),
-      reading_value: Number(row.reading_value || 0),
-      prev_value: Number(row.prev_value || 0),
-      usage: Number(row.usage || 0),
-      amount: Number(row.amount || 0),
-      prev_date: row.prev_date ? String(row.prev_date) : null,
-    });
-  });
-  return map;
+function mapLineItems(rows: InvoiceLineRow[]): InvoiceLineItem[] {
+  return rows.map((row) => ({
+    id: String(row.id),
+    description: String(row.description || ""),
+    qty: Number(row.quantity || 0),
+    rate: fromCents(row.unit_price_cents),
+    amount: fromCents(row.total_cents),
+    meta: row.meta ?? undefined,
+  }));
 }
 
-function buildChargeIndex(rows: ChargeRow[], readingMap: Map<string, MeterReadingDetail>) {
-  const map = new Map<string, ChargeEntry[]>();
-  rows.forEach((row) => {
-    const tenantId = normalizeId(row.tenant_id);
-    if (!tenantId) return;
-    const meterId = row.meter_reading_id ? String(row.meter_reading_id) : "";
-    const meter = meterId ? readingMap.get(meterId) : undefined;
-    const isUtility = Boolean(meter) || row.category === "utilities";
-    const meterType: MeterMeta["meterType"] = meter?.meter_type === "water" ? "water" : "electricity";
-    const unitLabel = meterType === "water" ? "m3" : "kWh";
-    const entry: ChargeEntry = {
-      date: row.date,
-      amount: Number(row.amount || 0),
-      description: meterType === "water" ? "Water" : meterType === "electricity" ? "Electricity" : row.description || "Charge",
-      category: row.category,
-      meta: isUtility && meter
-        ? {
-            kind: "utility",
-            meterType,
-            prevDate: meter.prev_date,
-            prevValue: meter.prev_value,
-            currentDate: meter.reading_date,
-            currentValue: meter.reading_value,
-            usage: meter.usage,
-            rate: METER_RATE,
-            unitLabel,
-          }
-        : undefined,
+function extractMeterSnapshot(rows: InvoiceLineRow[]): MeterSnapshot | null {
+  for (const row of rows) {
+    const meta = row.meta;
+    if (!meta || typeof meta !== "object") continue;
+    if (String(meta.kind || "").toLowerCase() !== "utility") continue;
+    if (String(meta.meterType || "").toLowerCase() !== "electricity") continue;
+    const usage = Number(meta.usage ?? row.quantity ?? 0);
+    const rate = Number(meta.rate ?? fromCents(row.unit_price_cents));
+    const amount = Number(meta.amount ?? usage * rate);
+    return {
+      prevDate: String(meta.prevDate ?? ""),
+      prevReading: Number(meta.prevValue ?? 0),
+      currDate: String(meta.currentDate ?? ""),
+      currReading: Number(meta.currentValue ?? 0),
+      usage,
+      rate,
+      amount,
+      unitLabel: meta.unitLabel ? String(meta.unitLabel) : "kWh",
     };
-    if (!map.has(tenantId)) {
-      map.set(tenantId, []);
-    }
-    map.get(tenantId)!.push(entry);
-  });
-  return map;
+  }
+  return null;
 }
 
-async function nextInvoiceNumber(reference: Date, tenant: TenantRecord) {
-  await query(`CREATE SEQUENCE IF NOT EXISTS public.invoice_number_seq`);
-  await query(
-    `CREATE TABLE IF NOT EXISTS public.invoice_numbers (
-      seq bigint PRIMARY KEY,
-      invoice_number text NOT NULL UNIQUE,
-      tenant_id text,
-      unit text,
-      property_id uuid,
-      period text,
-      issued_at timestamptz NOT NULL DEFAULT now()
-    )`,
-  );
-  await query(
-    `CREATE INDEX IF NOT EXISTS idx_invoice_numbers_tenant_period
-     ON public.invoice_numbers (tenant_id, period)`,
-  );
-  const year = reference.getUTCFullYear();
-  const period = toISO(reference).slice(0, 7);
-  const seqRes = await query(`SELECT nextval('public.invoice_number_seq') AS seq`);
-  const seqValue = Number(seqRes.rows[0]?.seq || 0);
-  const padded = String(seqValue).padStart(6, "0");
-  const invoiceNumber = `INV-${year}-${padded}`;
-  await query(
-    `INSERT INTO public.invoice_numbers (seq, invoice_number, tenant_id, unit, property_id, period)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [
-      seqValue,
-      invoiceNumber,
-      tenant.id,
-      tenant.unit ? String(tenant.unit) : null,
-      tenant.property_id || null,
-      period,
-    ],
-  );
-  return invoiceNumber;
-}
 
 type InvoicePayload = {
   tenant: TenantRecord;
-  rows: StatementRow[];
-  total: number;
+  invoiceId: string;
   line_items: InvoiceLineItem[];
   meter_snapshot: MeterSnapshot | null;
   total_amount: number;
@@ -351,7 +253,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     y += 4;
     doc.moveTo(left, y).lineTo(right, y).strokeColor("#e2e8f0").stroke();
     y += 10;
-    const totalDue = payload.total_amount ?? payload.total;
+    const totalDue = payload.total_amount;
     doc.font("Inter-Bold").text("Total due", colDesc, y, { width: colAmount - colDesc - 12, align: "right" });
     doc.text(toMoney(totalDue), colAmount, y, { width: 120, align: "right" });
 
@@ -433,11 +335,12 @@ function buildInvoiceSection(
   reference: Date,
   company: CompanyProfile,
   invoiceNumber: string,
+  issueDate: Date,
+  dueDate: Date,
 ) {
   if (!lineItems.length) return "";
   const propertyLabel = tenant.building || tenant.property_id || "—";
   const unitLabel = tenant.unit ? `Unit ${tenant.unit}` : "Unit —";
-  const dueDate = dueDateForMonth(reference, tenant.due_day);
   const fromLines = [company.address, company.phone].filter(Boolean);
 
   const lines = lineItems
@@ -475,7 +378,7 @@ function buildInvoiceSection(
         </div>
         <div class="invoice-meta">
           <div><span>Invoice #</span>${invoiceNumber}</div>
-          <div><span>Issue date</span>${formatUkDate(reference)}</div>
+          <div><span>Issue date</span>${formatUkDate(issueDate)}</div>
           <div><span>Due date</span>${formatUkDate(dueDate)}</div>
         </div>
       </div>
@@ -556,50 +459,92 @@ export async function GET(req: NextRequest) {
           return candidates.some((candidate) => normalizeId(candidate) === normalizedTenantId);
         })
       : tenants;
-    const charges = await datasetsRepo.getDataset<ChargeRow[]>("tenant_charges", []);
-    const meterIds = charges.map((row) => row.meter_reading_id).filter(Boolean) as string[];
-    const readingMap = await fetchMeterReadingDetails(meterIds);
-    const chargeIndex = buildChargeIndex(charges, readingMap);
+    const tenantIndex = new Map<string, TenantRecord>();
+    tenants.forEach((tenant) => tenantIndex.set(String(tenant.id), tenant));
+    const scopedTenantIds = scopedTenants.map((tenant) => String(tenant.id));
 
-    const invoicePayloads = (
-      await Promise.all(
-        scopedTenants.map(async (tenant) => {
-          const tenantId = normalizeId(tenant.id);
-          const statementTenant: TenantRecord = {
-            id: tenant.id,
-            name: tenant.name,
-            property_id: tenant.property_id ?? undefined,
-            building: tenant.building ?? undefined,
-            unit: tenant.unit ?? undefined,
-            reference: tenant.reference ?? undefined,
-            monthly_rent: tenant.monthly_rent ?? undefined,
-            due_day: tenant.due_day ?? undefined,
-          };
-          const additionalCharges = chargeIndex.get(tenantId) || [];
-          const { rows, totals } = createStatement({
-            tenant: statementTenant,
-            start,
-            end,
-            payments: [],
-            additionalCharges,
-          });
-          if (!totals.charges) return null;
-          const { lineItems, meterSnapshot, totalAmount } = buildInvoiceLineItems(rows, reference);
-          const invoiceNumber = await nextInvoiceNumber(reference, statementTenant);
-          return {
-            tenant: statementTenant,
-            rows,
-            total: totals.charges,
-            line_items: lineItems,
-            meter_snapshot: meterSnapshot,
-            total_amount: totalAmount,
-            invoiceNumber,
-            issueDate: reference,
-            dueDate: dueDateForMonth(reference, statementTenant.due_day),
-          } satisfies InvoicePayload;
-        }),
-      )
-    ).filter(Boolean) as InvoicePayload[];
+    let invoiceRows: InvoiceHeaderRow[] = [];
+    if (!normalizedTenantId || scopedTenantIds.length) {
+      if (scopedTenantIds.length) {
+        const res = await query(
+          `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta
+           FROM public.invoices
+           WHERE invoice_date >= $1 AND invoice_date <= $2
+             AND tenant_id = ANY($3)
+           ORDER BY invoice_date ASC, id ASC`,
+          [start, end, scopedTenantIds],
+        );
+        invoiceRows = res.rows as InvoiceHeaderRow[];
+      } else {
+        const res = await query(
+          `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta
+           FROM public.invoices
+           WHERE invoice_date >= $1 AND invoice_date <= $2
+           ORDER BY invoice_date ASC, id ASC`,
+          [start, end],
+        );
+        invoiceRows = res.rows as InvoiceHeaderRow[];
+      }
+    }
+
+    const invoiceIds = invoiceRows.map((row) => String(row.id));
+    let lineRows: InvoiceLineRow[] = [];
+    if (invoiceIds.length) {
+      const lineRes = await query(
+        `SELECT id, invoice_id, line_index, description, quantity, unit_price_cents, tax_cents, total_cents, meta, created_at
+         FROM public.invoice_lines
+         WHERE invoice_id = ANY($1)
+         ORDER BY invoice_id ASC, line_index ASC, created_at ASC`,
+        [invoiceIds],
+      );
+      lineRows = lineRes.rows as InvoiceLineRow[];
+    }
+
+    const linesByInvoice = new Map<string, InvoiceLineRow[]>();
+    lineRows.forEach((row) => {
+      const key = String(row.invoice_id);
+      if (!linesByInvoice.has(key)) {
+        linesByInvoice.set(key, []);
+      }
+      linesByInvoice.get(key)!.push(row);
+    });
+
+    const invoicePayloads = invoiceRows.map((invoice) => {
+      const tenant =
+        tenantIndex.get(String(invoice.tenant_id)) ||
+        ({
+          id: String(invoice.tenant_id || ""),
+          name: "Tenant",
+        } as TenantRecord);
+      const lines = linesByInvoice.get(String(invoice.id)) || [];
+      const lineItems = mapLineItems(lines);
+      const totalCents = lines.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
+      const totalAmount = fromCents(totalCents);
+      const meterSnapshot = extractMeterSnapshot(lines);
+      const issueDate = invoice.invoice_date ? new Date(invoice.invoice_date) : reference;
+      const dueDate = invoice.due_date
+        ? new Date(invoice.due_date)
+        : dueDateForMonth(reference, tenant.due_day);
+      return {
+        tenant: {
+          id: tenant.id,
+          name: tenant.name,
+          property_id: tenant.property_id ?? undefined,
+          building: tenant.building ?? undefined,
+          unit: tenant.unit ?? undefined,
+          reference: tenant.reference ?? undefined,
+          monthly_rent: tenant.monthly_rent ?? undefined,
+          due_day: tenant.due_day ?? undefined,
+        },
+        invoiceId: String(invoice.id),
+        line_items: lineItems,
+        meter_snapshot: meterSnapshot,
+        total_amount: totalAmount,
+        invoiceNumber: invoice.invoice_number || String(invoice.id),
+        issueDate,
+        dueDate,
+      } satisfies InvoicePayload;
+    });
 
     if (wantsPdf) {
       const pdf = await renderInvoicesPdf(invoicePayloads, reference, company);
@@ -621,10 +566,12 @@ export async function GET(req: NextRequest) {
           payload.tenant,
           payload.line_items,
           payload.meter_snapshot,
-          payload.total_amount ?? payload.total,
+          payload.total_amount,
           reference,
           company,
           payload.invoiceNumber,
+          payload.issueDate,
+          payload.dueDate,
         ),
       )
       .filter(Boolean)
