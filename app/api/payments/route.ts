@@ -15,9 +15,14 @@ export async function GET(req: NextRequest) {
     const start = searchParams.get("start") ?? undefined;
     const end = searchParams.get("end") ?? undefined;
     const propertyId = searchParams.get("propertyId") ?? undefined;
-    const tenantIdRaw = searchParams.get("tenantId");
-    const tenantId = tenantIdRaw ? normalizeId(tenantIdRaw) : null;
-    if (tenantIdRaw && (!tenantId || !isUuid(tenantId))) {
+    const tenantIdRaw = searchParams.get("tenantId"); // string | null
+
+    const tenantId =
+      tenantIdRaw && tenantIdRaw.trim() !== ""
+        ? normalizeId(tenantIdRaw)
+        : undefined;
+
+    if (tenantIdRaw && tenantIdRaw.trim() !== "" && !isUuid(tenantId)) {
       return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenantIdRaw}` }, { status: 400 });
     }
 
