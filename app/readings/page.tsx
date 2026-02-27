@@ -270,6 +270,32 @@ export default function ReadingsPage() {
     [rows],
   );
 
+  const { initialRows, historyRows } = useMemo(() => {
+    if (!rows.length) return { initialRows: [] as ApiReading[], historyRows: [] as ApiReading[] };
+    const earliestByKey = new Map<string, ApiReading>();
+    rows.forEach((row) => {
+      const key = `${row.unit.toLowerCase()}||${row.meter_type || ""}`;
+      const rowDate = row.reading_date ? new Date(row.reading_date).getTime() : 0;
+      const existing = earliestByKey.get(key);
+      if (!existing) {
+        earliestByKey.set(key, row);
+        return;
+      }
+      const existingDate = existing.reading_date ? new Date(existing.reading_date).getTime() : 0;
+      if (rowDate < existingDate) {
+        earliestByKey.set(key, row);
+      }
+    });
+    const initial = Array.from(earliestByKey.values()).sort((a, b) => {
+      const unitCompare = a.unit.localeCompare(b.unit, undefined, { numeric: true, sensitivity: "base" });
+      if (unitCompare !== 0) return unitCompare;
+      return String(a.meter_type || "").localeCompare(String(b.meter_type || ""), undefined, { sensitivity: "base" });
+    });
+    const initialIds = new Set(initial.map((row) => row.id));
+    const history = rows.filter((row) => !initialIds.has(row.id));
+    return { initialRows: initial, historyRows: history };
+  }, [rows]);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -386,30 +412,44 @@ export default function ReadingsPage() {
                   <div className="rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-xs uppercase tracking-wide text-slate-400">
                     {meterType === "electricity" ? "Electricity Billing (kWh)" : "Water Billing (m³)"}
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-[11px] uppercase tracking-wide text-slate-500">Last Reading</label>
+                  {lastReading === null ? (
+                    <div className="rounded-lg border border-white/10 bg-surface/70 p-3">
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Initial Reading</p>
+                      <p className="text-xs text-slate-500">First reading for this unit.</p>
                       <input
                         type="number"
                         step="0.01"
-                        value={lastReading !== null ? String(lastReading) : ""}
-                        placeholder="No previous reading"
-                        disabled
-                        className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 disabled:opacity-70"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[11px] uppercase tracking-wide text-slate-500">Current Reading</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Enter reading value"
+                        placeholder="Enter initial reading"
                         value={meterValue}
                         onChange={(event) => setMeterValue(event.target.value)}
-                        className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                        className="mt-3 w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
                       />
                     </div>
-                  </div>
+                  ) : (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <label className="text-[11px] uppercase tracking-wide text-slate-500">Last Reading</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={String(lastReading)}
+                          disabled
+                          className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 disabled:opacity-70"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] uppercase tracking-wide text-slate-500">Current Reading</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="Enter reading value"
+                          value={meterValue}
+                          onChange={(event) => setMeterValue(event.target.value)}
+                          className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Upload Proof (image)</label>
@@ -436,6 +476,50 @@ export default function ReadingsPage() {
       ) : null}
 
       <div className="space-y-6">
+          {initialRows.length ? (
+            <SectionCard className="p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-100">Initial Meter Readings</h2>
+                  <p className="text-sm text-slate-400">Baseline readings for each meter.</p>
+                </div>
+              </div>
+
+              <div className="mt-6 overflow-hidden rounded-2xl border border-white/10">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr>
+                      <th className="px-4 py-3">Unit</th>
+                      <th className="px-4 py-3">Meter</th>
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3">Reading</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-slate-400">
+                    {initialRows.map((row) => (
+                      <tr key={row.id} className="hover:bg-white/5">
+                        <td className="px-4 py-3 font-semibold text-slate-100">{row.unit}</td>
+                        <td className="px-4 py-3 capitalize">{row.meter_type || "—"}</td>
+                        <td className="px-4 py-3">{row.reading_date || "—"}</td>
+                        <td className="px-4 py-3">{row.reading_value.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(row.id)}
+                            className="rounded-md border border-white/10 px-3 py-1 text-xs font-semibold text-slate-400 hover:border-accent/60 hover:text-slate-100"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </SectionCard>
+          ) : null}
+
           <SectionCard className="p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -464,7 +548,7 @@ export default function ReadingsPage() {
                   </tr>
                 </thead>
                 <tbody className="text-slate-400">
-                  {rows.map((row) => (
+                  {historyRows.map((row) => (
                     <tr key={row.id} className="hover:bg-white/5">
                       <td className="px-4 py-3 font-semibold text-slate-100">{row.unit}</td>
                       <td className="px-4 py-3">{row.description}</td>
@@ -486,7 +570,7 @@ export default function ReadingsPage() {
                       </td>
                     </tr>
                   ))}
-                  {!rows.length && !loadingRows && (
+                  {!historyRows.length && !loadingRows && (
                     <tr>
                       <td colSpan={8} className="px-4 py-6 text-center text-sm text-slate-500">
                         No readings yet.
