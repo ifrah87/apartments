@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
@@ -172,6 +172,7 @@ export default function BillsPage() {
   const [meterSnapshot, setMeterSnapshot] = useState<MeterSnapshot | null>(null);
   const [editingLoading, setEditingLoading] = useState(false);
   const [editingSaving, setEditingSaving] = useState(false);
+  const draftInitRef = useRef<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -257,6 +258,17 @@ export default function BillsPage() {
 
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (!draftInvoice) {
+      draftInitRef.current = null;
+      return;
+    }
+    const key = `${draftInvoice.tenantId}-${draftInvoice.unitId}-${draftInvoice.period}`;
+    if (draftInitRef.current === key) return;
+    draftInitRef.current = key;
+    setDraftItems(draftInvoice.lineItems ?? []);
+  }, [draftInvoice]);
 
   const computeTotal = (items: InvoiceLineItem[]) =>
     Number(items.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
@@ -591,7 +603,7 @@ export default function BillsPage() {
   };
 
   const confirmDraft = async () => {
-    if (!draftInvoice) return;
+    if (!draftInvoice || draftSaving) return;
     setDraftSaving(true);
     try {
       const res = await fetch("/api/bills", {

@@ -169,6 +169,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     type BillsPayload = {
+      tenantId?: string;
       tenant_id?: string;
       unitIds?: string[];
       month?: string;
@@ -262,7 +263,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Tenant not found for this unit." }, { status: 404 });
     }
 
-    const rawTenantId = typeof payload?.tenant_id === "string" ? payload.tenant_id : "";
+    const rawTenantId =
+      typeof payload?.tenantId === "string"
+        ? payload.tenantId
+        : typeof payload?.tenant_id === "string"
+          ? payload.tenant_id
+          : "";
     const normalizedTenantId = rawTenantId ? normalizeId(rawTenantId) : "";
     const tenantUuid = normalizedTenantId && isUuid(normalizedTenantId) ? normalizedTenantId : extractUuid(rawTenantId);
     if (rawTenantId && !tenantUuid) {
