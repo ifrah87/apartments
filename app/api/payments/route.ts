@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { bankTransactionsRepo, RepoError } from "@/lib/repos";
+import { normalizeId } from "@/lib/normalizeId";
+import { isUuid } from "@/lib/isUuid";
 
 function handleError(err: unknown) {
   const status = err instanceof RepoError ? err.status : 500;
@@ -13,7 +15,11 @@ export async function GET(req: NextRequest) {
     const start = searchParams.get("start") ?? undefined;
     const end = searchParams.get("end") ?? undefined;
     const propertyId = searchParams.get("propertyId") ?? undefined;
-    const tenantId = searchParams.get("tenantId") ?? undefined;
+    const tenantIdRaw = searchParams.get("tenantId") ?? undefined;
+    const tenantId = tenantIdRaw ? normalizeId(tenantIdRaw) : undefined;
+    if (tenantIdRaw && !isUuid(tenantId)) {
+      return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenantIdRaw}` }, { status: 400 });
+    }
 
     const transactions = await bankTransactionsRepo.listTransactions({ start, end, propertyId, tenantId });
     const normalized = transactions.map((txn) => ({

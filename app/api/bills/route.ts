@@ -4,7 +4,9 @@ import { datasetsRepo, tenantsRepo, unitsRepo, type RepoError } from "@/lib/repo
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { opt } from "@/src/lib/utils/normalize";
 import { query } from "@/lib/db";
-import { createStatement, normalizeId } from "@/lib/reports/tenantStatement";
+import { createStatement } from "@/lib/reports/tenantStatement";
+import { normalizeId } from "@/lib/normalizeId";
+import { isUuid } from "@/lib/isUuid";
 import { buildInvoiceLineItems } from "@/lib/invoices/lineItems";
 
 export const runtime = "nodejs";
@@ -252,6 +254,9 @@ export async function POST(req: NextRequest) {
     }
 
     const tenantId = normalizeId(tenant.id);
+    if (!isUuid(tenantId)) {
+      return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenant.id}` }, { status: 400 });
+    }
     const { rows, totals } = createStatement({
       tenant: {
         id: tenant.id,

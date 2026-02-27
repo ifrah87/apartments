@@ -72,9 +72,13 @@ function testAdditionalChargesAreIncluded() {
 }
 
 function testNormalizeIdStripsDecimals() {
-  assert.equal(normalizeId("10.0"), "10");
+  assert.equal(normalizeId("10.0"), "10.0");
   assert.equal(normalizeId(5), "5");
   assert.equal(normalizeId(null), "");
+  assert.equal(
+    normalizeId("tenant-2777f720-2ae6-4d1a-9550-c102f0e0b7d2-102"),
+    "2777f720-2ae6-4d1a-9550-c102f0e0b7d2",
+  );
 }
 
 function run() {

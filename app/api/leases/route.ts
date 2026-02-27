@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "../../../lib/db";
+import { normalizeId } from "@/lib/normalizeId";
+import { isUuid } from "@/lib/isUuid";
 
 export async function GET() {
   const { rows } = await query(`
@@ -18,11 +20,15 @@ export async function POST(req: Request) {
   if (!tenant_id || !property_id || !rent_amount || !rent_day || !start_date) {
     return NextResponse.json({ error: "missing fields" }, { status: 400 });
   }
+  const tenantId = normalizeId(tenant_id);
+  if (!isUuid(tenantId)) {
+    return NextResponse.json({ error: `Invalid tenant_id: ${tenant_id}` }, { status: 400 });
+  }
   const { rows } = await query(
     `INSERT INTO leases (tenant_id, property_id, rent_amount, rent_day, start_date, status)
      VALUES ($1,$2,$3,$4,$5,'active')
      RETURNING id`,
-    [tenant_id, property_id, rent_amount, rent_day, start_date]
+    [tenantId, property_id, rent_amount, rent_day, start_date],
   );
   return NextResponse.json(rows[0], { status: 201 });
 }

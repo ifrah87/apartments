@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { addManualPayment, deleteManualPayment, listManualPayments } from "@/lib/reports/manualPayments";
+import { normalizeId } from "@/lib/normalizeId";
+import { isUuid } from "@/lib/isUuid";
 
 export async function GET() {
   try {
@@ -17,8 +19,12 @@ export async function POST(req: NextRequest) {
     if (!tenant_id || !amount || !date) {
       return NextResponse.json({ ok: false, error: "tenant_id, amount, and date are required" }, { status: 400 });
     }
+    const tenantId = normalizeId(tenant_id);
+    if (!isUuid(tenantId)) {
+      return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenant_id}` }, { status: 400 });
+    }
     const entry = await addManualPayment({
-      tenant_id: String(tenant_id),
+      tenant_id: tenantId,
       amount: Number(amount),
       date,
       description,

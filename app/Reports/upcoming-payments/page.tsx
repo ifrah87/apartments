@@ -6,6 +6,7 @@ import ReportControlsBar from "@/components/reports/ReportControlsBar";
 import ReportOpenTracker from "@/components/reports/ReportOpenTracker";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { opt } from "@/src/lib/utils/normalize";
+import { normalizeId } from "@/lib/normalizeId";
 
 type TenantWithDueDates = TenantRecord & {
   phone?: string | null;
@@ -225,12 +226,6 @@ function buildUpcomingRows(
   });
 
   return rows.sort((a, b) => a.daysUntil - b.daysUntil);
-}
-
-function normalizeId(value: unknown) {
-  return String(value ?? "")
-    .trim()
-    .replace(/\.0$/, "");
 }
 
 function normalizeTenant(tenant: TenantWithDueDates): TenantWithDueDates {

@@ -1,6 +1,8 @@
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { normalizeId } from "@/lib/normalizeId";
 
 export type { TenantRecord };
+export { normalizeId };
 
 export type StatementRow = {
   date: string;
@@ -77,12 +79,6 @@ function toNumber(value: string | number | undefined | null, fallback = 0) {
   if (value === undefined || value === null) return fallback;
   const num = typeof value === "number" ? value : Number(String(value).replace(/[^\d.-]/g, ""));
   return Number.isFinite(num) ? num : fallback;
-}
-
-export function normalizeId(value: unknown) {
-  return String(value ?? "")
-    .trim()
-    .replace(/\.0$/, "");
 }
 
 export function buildCharges(tenant: TenantRecord, start: Date, end: Date) {

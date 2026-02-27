@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import { normalizeId } from "@/lib/normalizeId";
 
 type UnitCard = {
   id: string;
@@ -143,7 +144,7 @@ function normalizeInvoice(row: any): InvoiceRow {
     id: String(row?.id ?? ""),
     unitId: String(row?.unitId ?? row?.unit_id ?? ""),
     unitLabel: String(unitLabel),
-    tenantId: String(row?.tenantId ?? row?.tenant_id ?? ""),
+    tenantId: normalizeId(row?.tenantId ?? row?.tenant_id ?? ""),
     tenantName: String(tenantName),
     period,
     invoiceDate: invoiceDate ? String(invoiceDate) : undefined,
@@ -600,6 +601,7 @@ export default function BillsPage() {
           unitIds: [draftInvoice.unitId],
           month: draftInvoice.month,
           year: draftInvoice.year,
+          tenant_id: normalizeId(draftInvoice.tenantId),
           lineItems: draftItems.map((item) => ({
             description: item.description,
             qty: Number(item.qty || 0),
