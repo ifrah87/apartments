@@ -23,7 +23,7 @@ export type StatementRow = {
 export type ChargeEntry = {
   date: string;
   amount: number;
-  description: string;
+  description?: string;
   category?: string;
   meta?: Record<string, any>;
 };
