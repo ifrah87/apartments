@@ -7,7 +7,6 @@ import { Search } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import type { PropertySummary } from "@/lib/repos/propertiesRepo";
-import { adminDeleteProperty } from "./actions";
 
 type Props = {
   summaries: PropertySummary[];
@@ -98,7 +97,13 @@ export default function PropertiesClient({ summaries }: Props) {
     setNotice(null);
     startDelete(async () => {
       try {
-        await adminDeleteProperty(summary.id);
+        const res = await fetch(`/api/properties/${summary.id}?force=1`, {
+          method: "DELETE",
+        });
+        const payload = await res.json().catch(() => null);
+        if (!res.ok || payload?.ok === false) {
+          throw new Error(payload?.error || "Failed to delete property.");
+        }
         setItems((prev) => prev.filter((item) => item.id !== summary.id));
         setNotice("Property deleted.");
         router.refresh();

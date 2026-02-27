@@ -279,7 +279,8 @@ export async function POST(req: NextRequest) {
       }));
       const totalCents = lineRows.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
       const invoiceDate = reference;
-      const dueDate = dueDateForMonth(reference, tenant.due_day);
+      const dueDay = tenant.due_day ?? 5;
+      const dueDate = dueDateForMonth(reference, dueDay);
       created.push({
         id,
         tenantId: tenant.id,
