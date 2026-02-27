@@ -263,14 +263,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Tenant not found for this unit." }, { status: 404 });
     }
 
+    const payloadTenantId = payload?.tenant_id ? normalizeId(payload.tenant_id) : null;
+    if (payloadTenantId && !isUuid(payloadTenantId)) {
+      return NextResponse.json(
+        { ok: false, error: `Invalid tenant_id: ${payload.tenant_id}` },
+        { status: 400 },
+      );
+    }
+
     const rawTenantId =
       typeof payload?.tenantId === "string"
         ? payload.tenantId
         : typeof payload?.tenant_id === "string"
           ? payload.tenant_id
           : "";
-    const normalizedTenantId = rawTenantId ? normalizeId(rawTenantId) : "";
-    const tenantUuid = normalizedTenantId && isUuid(normalizedTenantId) ? normalizedTenantId : extractUuid(rawTenantId);
+    const extracted = rawTenantId ? extractUuid(rawTenantId) : null;
+    const normalizedTenantId = extracted
+      ? normalizeId(extracted)
+      : rawTenantId
+        ? normalizeId(rawTenantId)
+        : "";
+    const tenantUuid =
+      normalizedTenantId && isUuid(normalizedTenantId) ? normalizedTenantId : payloadTenantId;
     if (rawTenantId && !tenantUuid) {
       return NextResponse.json(
         { ok: false, error: `Invalid tenant_id: ${rawTenantId}` },

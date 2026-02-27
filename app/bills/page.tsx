@@ -166,7 +166,7 @@ export default function BillsPage() {
   const [generatorYear, setGeneratorYear] = useState("2026");
   const [draftInvoice, setDraftInvoice] = useState<DraftInvoice | null>(null);
   const [draftItems, setDraftItems] = useState<DraftLineItem[]>([]);
-  const [draftSaving, setDraftSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<InvoiceRow | null>(null);
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
   const [meterSnapshot, setMeterSnapshot] = useState<MeterSnapshot | null>(null);
@@ -362,7 +362,7 @@ export default function BillsPage() {
   const closeDraft = () => {
     setDraftInvoice(null);
     setDraftItems([]);
-    setDraftSaving(false);
+    setCreating(false);
   };
 
   const updateLineItem = (id: string, field: keyof InvoiceLineItem, value: string | number) => {
@@ -603,8 +603,8 @@ export default function BillsPage() {
   };
 
   const confirmDraft = async () => {
-    if (!draftInvoice || draftSaving) return;
-    setDraftSaving(true);
+    if (!draftInvoice || creating) return;
+    setCreating(true);
     try {
       const res = await fetch("/api/bills", {
         method: "POST",
@@ -639,7 +639,7 @@ export default function BillsPage() {
       console.error("Failed to create invoice", err);
       alert(err instanceof Error ? err.message : "Failed to create invoice.");
     } finally {
-      setDraftSaving(false);
+      setCreating(false);
     }
   };
 
@@ -1088,10 +1088,10 @@ export default function BillsPage() {
                 <button
                   type="button"
                   onClick={confirmDraft}
-                  disabled={draftSaving}
+                  disabled={creating}
                   className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2 text-xs font-semibold text-slate-900 shadow-[0_10px_20px_rgba(56,189,248,0.25)] hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {draftSaving ? "Creating..." : "Confirm & Create Invoice"}
+                  {creating ? "Creating..." : "Confirm & Create Invoice"}
                 </button>
               </div>
             </div>
