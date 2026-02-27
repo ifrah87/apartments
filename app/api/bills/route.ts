@@ -3,14 +3,30 @@ import crypto from "crypto";
 import { datasetsRepo, tenantsRepo, unitsRepo, type RepoError } from "@/lib/repos";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { opt } from "@/src/lib/utils/normalize";
-import { extractUuid } from "@/src/lib/utils/ids";
 import { query } from "@/lib/db";
 import { createStatement } from "@/lib/reports/tenantStatement";
 import { normalizeId } from "@/lib/normalizeId";
-import { isUuid } from "@/lib/isUuid";
 import { buildInvoiceLineItems } from "@/lib/invoices/lineItems";
 
 export const runtime = "nodejs";
+
+function isUuid(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+}
+
+function normalizeTenantId(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(
+    /([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/i,
+  );
+
+  if (!match) return null;
+
+  return match[1];
+}
 
 type ChargeRow = {
   tenant_id: string;
@@ -381,38 +397,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Tenant not found for this unit." }, { status: 404 });
     }
 
-    const payloadTenantId = payload?.tenant_id ? normalizeId(payload.tenant_id) : null;
-    if (payloadTenantId && !isUuid(payloadTenantId)) {
-      return NextResponse.json(
-        { ok: false, error: `Invalid tenant_id: ${payload.tenant_id}` },
-        { status: 400 },
-      );
+    const tenantIdFromPayload = normalizeTenantId(payload?.tenant_id ?? payload?.tenantId ?? null);
+    if ((payload?.tenant_id || payload?.tenantId) && !tenantIdFromPayload) {
+      return NextResponse.json({ ok: false, error: "Invalid tenant_id format" }, { status: 400 });
     }
-
-    const rawTenantId =
-      typeof payload?.tenantId === "string"
-        ? payload.tenantId
-        : typeof payload?.tenant_id === "string"
-          ? payload.tenant_id
-          : "";
-    const extracted = rawTenantId ? extractUuid(rawTenantId) : null;
-    const normalizedTenantId = extracted
-      ? normalizeId(extracted)
-      : rawTenantId
-        ? normalizeId(rawTenantId)
-        : "";
-    const tenantUuid =
-      normalizedTenantId && isUuid(normalizedTenantId) ? normalizedTenantId : payloadTenantId;
-    if (rawTenantId && !tenantUuid) {
-      return NextResponse.json(
-        { ok: false, error: `Invalid tenant_id: ${rawTenantId}` },
-        { status: 400 },
-      );
-    }
-
-    const tenantId = tenantUuid || normalizeId(tenant.id);
-    if (!isUuid(tenantId)) {
-      return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenant.id}` }, { status: 400 });
+    const tenantId =
+      tenantIdFromPayload ?? normalizeTenantId(tenant.id) ?? normalizeId(tenant.id);
+    if (tenantId && !isUuid(tenantId)) {
+      return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenantId}` }, { status: 400 });
     }
     const { rows, totals } = createStatement({
       tenant: {
