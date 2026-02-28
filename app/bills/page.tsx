@@ -99,6 +99,10 @@ function toCents(value: number) {
   return Math.round(Number(value || 0) * 100);
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 function parseInvoiceDate(value?: string) {
   if (!value) return null;
   const trimmed = value.trim();
@@ -167,6 +171,7 @@ export default function BillsPage() {
   const [draftInvoice, setDraftInvoice] = useState<DraftInvoice | null>(null);
   const [draftItems, setDraftItems] = useState<DraftLineItem[]>([]);
   const [creating, setCreating] = useState(false);
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [editingInvoice, setEditingInvoice] = useState<InvoiceRow | null>(null);
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
   const [meterSnapshot, setMeterSnapshot] = useState<MeterSnapshot | null>(null);
@@ -545,7 +550,7 @@ export default function BillsPage() {
     }
     setGenerating(true);
     try {
-      const res = await fetch("/api/bills?dryRun=1", {
+      const res = await fetch("/api/bills?dryRun=1&debug=1", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -555,6 +560,9 @@ export default function BillsPage() {
         }),
       });
       const payload = await res.json().catch(() => null);
+      if (payload?.debug) {
+        console.info("Bills debug", payload.debug);
+      }
       if (!res.ok || !payload?.ok) {
         alert(payload?.error || "Failed to generate invoice preview.");
         setGenerating(false);
@@ -604,6 +612,16 @@ export default function BillsPage() {
 
   const confirmDraft = async () => {
     if (!draftInvoice || creating) return;
+    const tenantId = draftInvoice.tenantId.trim();
+    if (!tenantId) {
+      setToast({ type: "error", message: "Missing tenant ID. Please refresh the draft and try again." });
+      return;
+    }
+    if (!isUuid(tenantId)) {
+      setToast({ type: "error", message: `Invalid tenant ID: ${tenantId}` });
+      return;
+    }
+    setToast(null);
     setCreating(true);
     try {
       const res = await fetch("/api/bills", {
@@ -613,7 +631,7 @@ export default function BillsPage() {
           unitIds: [draftInvoice.unitId],
           month: draftInvoice.month,
           year: draftInvoice.year,
-          tenant_id: normalizeId(draftInvoice.tenantId),
+          tenant_id: tenantId,
           lineItems: draftItems.map((item) => ({
             description: item.description,
             qty: Number(item.qty || 0),
@@ -673,6 +691,28 @@ export default function BillsPage() {
         title="Bills"
         subtitle="Generate invoices and review the latest billing history."
       />
+
+      {toast ? (
+        <div
+          role="status"
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            toast.type === "success"
+              ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+              : "border-rose-400/30 bg-rose-400/10 text-rose-200"
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span>{toast.message}</span>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              className="text-xs uppercase tracking-[0.18em] text-slate-400 hover:text-slate-200"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-[240px] flex-1 items-center gap-3 rounded-xl border border-white/10 bg-panel-2/60 px-4 py-3 text-sm text-slate-400">

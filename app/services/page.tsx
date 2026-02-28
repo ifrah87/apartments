@@ -20,6 +20,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 type Service = {
   id: string;
   name: string;
+  code?: string;
   type: "metered" | "flat";
   unit: string;
   rate: number;
@@ -30,6 +31,7 @@ type Service = {
 type ServiceFormState = {
   id?: string;
   name: string;
+  code: string;
   type: "metered" | "flat";
   unit: string;
   rate: string;
@@ -85,6 +87,7 @@ export default function ServicesPage() {
   const [services, setServices] = useState<Service[]>(DEFAULT_SERVICES);
   const [editing, setEditing] = useState<ServiceFormState>({
     name: "",
+    code: "",
     type: "metered",
     unit: "",
     rate: "",
@@ -118,7 +121,7 @@ export default function ServicesPage() {
 
   const startCreate = () => {
     setMode("create");
-    setEditing({ name: "", type: "metered", unit: "", rate: "", icon: "water", accent: "cyan" });
+    setEditing({ name: "", code: "", type: "metered", unit: "", rate: "", icon: "water", accent: "cyan" });
     setError(null);
   };
 
@@ -127,6 +130,7 @@ export default function ServicesPage() {
     setEditing({
       id: service.id,
       name: service.name,
+      code: service.code ?? "",
       type: service.type,
       unit: service.unit,
       rate: service.rate.toString(),
@@ -158,9 +162,13 @@ export default function ServicesPage() {
     setSaving(true);
     setError(null);
     try {
+      const trimmedName = editing.name.trim();
+      const trimmedCode = editing.code.trim().toUpperCase();
+      const inferredCode = trimmedCode || (trimmedName.toLowerCase().includes("electric") ? "ELECTRICITY" : "");
       const payload = {
         id: editing.id,
-        name: editing.name.trim(),
+        name: trimmedName,
+        code: inferredCode || undefined,
         type: editing.type,
         unit: editing.unit.trim(),
         rate: Number(editing.rate),
@@ -254,6 +262,9 @@ export default function ServicesPage() {
                         <p className="text-sm font-semibold text-slate-100">{service.name}</p>
                         <Badge variant={badgeVariant}>{service.type === "metered" ? "Metered" : "Flat Rate"}</Badge>
                       </div>
+                      {service.code ? (
+                        <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Code: {service.code}</p>
+                      ) : null}
                       <p className="text-xs text-slate-400">Base Unit: {baseUnit(service)}</p>
                     </div>
                   </div>
@@ -312,9 +323,32 @@ export default function ServicesPage() {
                 type="text"
                 placeholder="e.g. Water Monthly"
                 value={editing?.name ?? ""}
-                onChange={(event) => setEditing((prev) => ({ ...(prev ?? { name: "", type: "metered", unit: "", rate: "", icon: "water", accent: "cyan" }), name: event.target.value }))}
+                onChange={(event) =>
+                  setEditing((prev) => ({
+                    ...(prev ?? { name: "", code: "", type: "metered", unit: "", rate: "", icon: "water", accent: "cyan" }),
+                    name: event.target.value,
+                  }))
+                }
                 className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
               />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Service Code</label>
+              <input
+                type="text"
+                placeholder="ELECTRICITY"
+                value={editing?.code ?? ""}
+                onChange={(event) =>
+                  setEditing((prev) => ({
+                    ...(prev ?? { name: "", code: "", type: "metered", unit: "", rate: "", icon: "water", accent: "cyan" }),
+                    code: event.target.value,
+                  }))
+                }
+                className="w-full rounded-lg border border-white/10 bg-surface/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+              />
+              <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                Use ELECTRICITY for power services.
+              </p>
             </div>
             <div className="space-y-2">
               <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Billing Strategy</label>
@@ -323,7 +357,7 @@ export default function ServicesPage() {
                 onChange={(event) => {
                   const nextType = event.target.value as "metered" | "flat";
                   setEditing((prev) => ({
-                    ...(prev ?? { name: "", type: "metered", unit: "", rate: "", icon: "water", accent: "cyan" }),
+                    ...(prev ?? { name: "", code: "", type: "metered", unit: "", rate: "", icon: "water", accent: "cyan" }),
                     type: nextType,
                     unit: prev?.unit || (nextType === "flat" ? "Month" : ""),
                     accent: inferAccent(nextType),
@@ -343,7 +377,12 @@ export default function ServicesPage() {
                   step="0.01"
                   placeholder="0"
                   value={editing?.rate ?? ""}
-                  onChange={(event) => setEditing((prev) => ({ ...(prev ?? { name: "", type: "metered", unit: "", rate: "", icon: "water", accent: "cyan" }), rate: event.target.value }))}
+                  onChange={(event) =>
+                    setEditing((prev) => ({
+                      ...(prev ?? { name: "", code: "", type: "metered", unit: "", rate: "", icon: "water", accent: "cyan" }),
+                      rate: event.target.value,
+                    }))
+                  }
                   className="h-10 w-full rounded-lg border border-white/10 bg-surface/70 px-3 text-sm text-slate-100"
                 />
               </div>
@@ -353,7 +392,12 @@ export default function ServicesPage() {
                   type="text"
                   placeholder="Month"
                   value={editing?.unit ?? ""}
-                  onChange={(event) => setEditing((prev) => ({ ...(prev ?? { name: "", type: "metered", unit: "", rate: "", icon: "water", accent: "cyan" }), unit: event.target.value }))}
+                  onChange={(event) =>
+                    setEditing((prev) => ({
+                      ...(prev ?? { name: "", code: "", type: "metered", unit: "", rate: "", icon: "water", accent: "cyan" }),
+                      unit: event.target.value,
+                    }))
+                  }
                   className="h-10 w-full rounded-lg border border-white/10 bg-surface/70 px-3 text-sm text-slate-100"
                 />
               </div>

@@ -8,6 +8,16 @@ import { badRequest } from "./errors";
 import { tenantsRepo } from "./tenantsRepo";
 
 const METER_RATE = 0.41;
+const INITIAL_READINGS_DATASET_KEY = "initial-readings";
+
+type InitialReadingRecord = {
+  unit: string;
+  unit_id?: string | null;
+  meter_type: string;
+  reading_value: number;
+  reading_date: string;
+  updated_at: string;
+};
 
 function toPeriodKey(value: string) {
   const date = new Date(value);
@@ -44,6 +54,48 @@ async function resolveUnitId(unit: string, tenantId?: string | null) {
     unit,
   ]);
   return rows[0]?.id ? String(rows[0].id) : null;
+}
+
+async function upsertInitialReadingDataset({
+  unit,
+  unitId,
+  meterType,
+  readingDate,
+  readingValue,
+}: {
+  unit: string;
+  unitId?: string | null;
+  meterType: string;
+  readingDate: string;
+  readingValue: number;
+}) {
+  const entry: InitialReadingRecord = {
+    unit,
+    unit_id: unitId ?? null,
+    meter_type: meterType,
+    reading_value: readingValue,
+    reading_date: readingDate,
+    updated_at: new Date().toISOString(),
+  };
+
+  await datasetsRepo.updateDataset<InitialReadingRecord[]>(
+    INITIAL_READINGS_DATASET_KEY,
+    (current) => {
+      const rows = Array.isArray(current) ? current : [];
+      const filtered = rows.filter((row) => {
+        const rowType = String(row?.meter_type ?? "").toLowerCase();
+        if (rowType !== meterType.toLowerCase()) return true;
+        const rowUnitId = row?.unit_id !== undefined && row?.unit_id !== null ? String(row.unit_id) : "";
+        const rowUnit = row?.unit !== undefined && row?.unit !== null ? String(row.unit) : "";
+        if (unitId && rowUnitId) {
+          return rowUnitId !== unitId;
+        }
+        return rowUnit !== unit;
+      });
+      return [...filtered, entry];
+    },
+    [],
+  );
 }
 
 async function upsertMeterBilling({
@@ -250,6 +302,21 @@ export async function createReading(payload: MeterReadingInput): Promise<MeterRe
   );
 
   const created = rows[0];
+
+  if (isBaseline) {
+    try {
+      const unitId = await resolveUnitId(unit, tenantId);
+      await upsertInitialReadingDataset({
+        unit,
+        unitId,
+        meterType,
+        readingDate,
+        readingValue,
+      });
+    } catch (err) {
+      console.warn("⚠️ failed to store initial reading baseline", err);
+    }
+  }
 
   try {
     await upsertMeterBilling({ unit, tenantId, meterType, readingDate });

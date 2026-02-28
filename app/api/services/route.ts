@@ -6,6 +6,7 @@ const DATASET_KEY = "services";
 type ServiceRecord = {
   id: string;
   name: string;
+  code?: string;
   type: "metered" | "flat";
   unit: string;
   rate: number;
@@ -25,6 +26,11 @@ function toNumber(value: unknown) {
   if (value === undefined || value === null || value === "") return 0;
   const num = typeof value === "number" ? value : Number(String(value).replace(/[^\d.-]/g, ""));
   return Number.isFinite(num) ? num : 0;
+}
+
+function normalizeCode(value: unknown) {
+  if (typeof value !== "string") return "";
+  return value.trim().toUpperCase();
 }
 
 function parseOptionalJson(value: unknown, field: string, serviceId: string) {
@@ -76,9 +82,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Service name is required." }, { status: 400 });
     }
 
+    const codeHint = normalizeCode(payload.code);
+    const inferredCode = codeHint || (payload.name.toLowerCase().includes("electric") ? "ELECTRICITY" : "");
     const entry: ServiceRecord = {
       id: payload.id ?? crypto.randomUUID(),
       name: payload.name,
+      code: inferredCode || undefined,
       type: payload.type === "flat" ? "flat" : "metered",
       unit: payload.unit || "Unit",
       rate: toNumber(payload.rate),
@@ -120,9 +129,13 @@ export async function PUT(req: NextRequest) {
         const next = safeCurrent.map((item) => {
           if (item.id !== payload.id) return item;
           found = true;
+          const nextName = payload.name ?? item.name;
+          const codeHint = payload.code !== undefined ? normalizeCode(payload.code) : undefined;
+          const autoCode = nextName.toLowerCase().includes("electric") ? "ELECTRICITY" : item.code;
           return {
             ...item,
-            name: payload.name ?? item.name,
+            name: nextName,
+            code: codeHint !== undefined ? (codeHint || undefined) : autoCode,
             type: payload.type === "flat" ? "flat" : payload.type === "metered" ? "metered" : item.type,
             unit: payload.unit ?? item.unit,
             rate: payload.rate !== undefined ? toNumber(payload.rate) : item.rate,

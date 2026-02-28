@@ -23,6 +23,7 @@ type PropertyRecord = {
 type ServiceRecord = {
   id: string;
   name: string;
+  code?: string;
   type: "metered" | "flat";
   unit: string;
   rate: number;

@@ -40,6 +40,7 @@ type ChargeRow = {
 type ServiceRecord = {
   id: string;
   name?: string;
+  code?: string;
   rate?: number;
   icon?: string;
 };
@@ -67,6 +68,57 @@ type ReadingSnapshot = {
   usage: number;
 };
 
+type InitialReadingRecord = {
+  unit?: string;
+  unit_id?: string | null;
+  meter_type?: string;
+  reading_value?: number | string;
+  reading_date?: string;
+  updated_at?: string;
+};
+
+type ElectricityLineItem = {
+  description: string;
+  qty: number;
+  unit_cents: number;
+  total_cents: number;
+};
+
+type ElectricityDebug = {
+  unitNumber: string | null;
+  foundElectricService: boolean;
+  rate: number | null;
+  prev: { value: number | null; date: string | null } | null;
+  cur: { value: number | null; date: string | null } | null;
+  usage: number | null;
+  reason?: string;
+};
+
+type ElectricityBuildResult = {
+  lineItem: ElectricityLineItem | null;
+  debug: ElectricityDebug;
+  snapshot: ReadingSnapshot | null;
+};
+
+type ElectricityServiceMatch = {
+  found: boolean;
+  rate: number | null;
+  serviceId?: string;
+};
+
+type ElectricityReading = {
+  value: number;
+  date: string;
+  source: "reading" | "initial";
+};
+
+type ElectricityReadings = {
+  prev: ElectricityReading | null;
+  cur: ElectricityReading | null;
+  usage: number | null;
+  reason?: string;
+};
+
 function normalizeServiceList(value: unknown): ServiceRecord[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as ServiceRecord[];
@@ -82,8 +134,128 @@ function normalizeBuildingServices(value: unknown): BuildingServiceRecord[] {
   return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as BuildingServiceRecord[];
 }
 
-async function buildElectricityLineItem(opts: { unitId: string; periodStart: string; periodEnd: string }) {
+function formatPeriodLabel(periodStart: string) {
+  const date = new Date(`${periodStart}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+function toNumberOrNull(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+async function fetchInitialElectricityReading(
+  unitNumber: string,
+  unitId?: string | null,
+): Promise<ElectricityReading | null> {
+  const raw = await datasetsRepo.getDataset<InitialReadingRecord[]>(INITIAL_READINGS_KEY, []);
+  const rows = Array.isArray(raw) ? raw : [];
+  const matches = rows.filter((row) => {
+    const meterType = String(row?.meter_type ?? "").toLowerCase();
+    if (meterType !== "electricity") return false;
+    const rowUnit = row?.unit !== undefined && row?.unit !== null ? String(row.unit) : "";
+    const rowUnitId = row?.unit_id !== undefined && row?.unit_id !== null ? String(row.unit_id) : "";
+    if (unitId && rowUnitId && rowUnitId === unitId) return true;
+    return rowUnit === unitNumber;
+  });
+  if (!matches.length) return null;
+  const sorted = matches.slice().sort((a, b) => {
+    const aDate = Date.parse(String(a.reading_date || a.updated_at || "")) || 0;
+    const bDate = Date.parse(String(b.reading_date || b.updated_at || "")) || 0;
+    return bDate - aDate;
+  });
+  const pick = sorted[0];
+  const value = toNumberOrNull(pick?.reading_value);
+  if (value === null) return null;
+  return { value, date: "Initial", source: "initial" };
+}
+
+async function resolveElectricityReadings(opts: {
+  unitNumber: string;
+  unitId?: string | null;
+  periodStart: string;
+  periodEnd: string;
+}): Promise<ElectricityReadings> {
+  const { unitNumber, unitId, periodStart, periodEnd } = opts;
+  if (!unitNumber) {
+    return { prev: null, cur: null, usage: null, reason: "missing unit number" };
+  }
+  try {
+    const [prevRes, curRes] = await Promise.all([
+      query(
+        `SELECT reading_value, reading_date
+         FROM public.meter_readings
+         WHERE unit = $1 AND lower(meter_type) = 'electricity' AND reading_date < $2
+         ORDER BY reading_date DESC, created_at DESC
+         LIMIT 1`,
+        [unitNumber, periodStart],
+      ),
+      query(
+        `SELECT reading_value, reading_date
+         FROM public.meter_readings
+         WHERE unit = $1 AND lower(meter_type) = 'electricity' AND reading_date >= $2 AND reading_date < $3
+         ORDER BY reading_date DESC, created_at DESC
+         LIMIT 1`,
+        [unitNumber, periodStart, periodEnd],
+      ),
+    ]);
+
+    const curRow = curRes.rows[0];
+    const curValue = toNumberOrNull(curRow?.reading_value);
+    if (curValue === null) {
+      return { prev: null, cur: null, usage: null, reason: "missing current reading within period" };
+    }
+    const cur: ElectricityReading = {
+      value: curValue,
+      date: String(curRow.reading_date),
+      source: "reading",
+    };
+
+    const prevRow = prevRes.rows[0];
+    const prevValue = toNumberOrNull(prevRow?.reading_value);
+    let prev: ElectricityReading | null =
+      prevValue === null
+        ? null
+        : {
+            value: prevValue,
+            date: String(prevRow.reading_date),
+            source: "reading",
+          };
+
+    if (!prev) {
+      prev = await fetchInitialElectricityReading(unitNumber, unitId);
+    }
+
+    if (!prev) {
+      return { prev: null, cur, usage: null, reason: "missing prev reading" };
+    }
+
+    const usage = Math.max(0, Number((cur.value - prev.value).toFixed(2)));
+    return { prev, cur, usage };
+  } catch (err: any) {
+    const code = err?.code;
+    const message = err instanceof Error ? err.message : String(err);
+    if (code === "42P01" || message.includes('relation "meter_readings" does not exist')) {
+      return { prev: null, cur: null, usage: null, reason: "meter readings table missing" };
+    }
+    throw err;
+  }
+}
+
+async function buildElectricityLineItem(
+  opts: { unitId: string; periodStart: string; periodEnd: string },
+): Promise<ElectricityBuildResult> {
   const { unitId, periodStart, periodEnd } = opts;
+  const debug: ElectricityDebug = {
+    unitNumber: null,
+    foundElectricService: false,
+    rate: null,
+    prev: null,
+    cur: null,
+    usage: null,
+  };
 
   const unitRes = await query(
     `SELECT unit_number, property_id
@@ -93,56 +265,85 @@ async function buildElectricityLineItem(opts: { unitId: string; periodStart: str
     [unitId],
   );
   const unitRow = unitRes.rows[0];
-  const unitNumber = unitRow?.unit_number !== undefined && unitRow?.unit_number !== null ? String(unitRow.unit_number) : "";
+  const unitNumber =
+    unitRow?.unit_number !== undefined && unitRow?.unit_number !== null ? String(unitRow.unit_number) : "";
   const propertyId = unitRow?.property_id ? String(unitRow.property_id) : null;
-  if (!unitNumber) return null;
+  debug.unitNumber = unitNumber || null;
+  if (!unitNumber) {
+    debug.reason = "missing unit number";
+    return { lineItem: null, debug, snapshot: null };
+  }
 
-  const unitRate = await fetchElectricityRate(unitId, propertyId);
-  if (unitRate == null) return null;
-  const rateCents = Math.round(unitRate * 100);
+  const serviceMatch = await fetchElectricityRate(unitId, propertyId);
+  debug.foundElectricService = serviceMatch.found;
+  debug.rate = serviceMatch.rate;
+  if (!serviceMatch.found) {
+    debug.reason = "electricity service not assigned";
+    return { lineItem: null, debug, snapshot: null };
+  }
+  if (serviceMatch.rate === null) {
+    debug.reason = "missing electricity rate";
+    return { lineItem: null, debug, snapshot: null };
+  }
 
-  const prevRes = await query(
-    `SELECT reading_value
-     FROM meter_readings
-     WHERE unit = $1
-       AND lower(meter_type) = 'electricity'
-       AND reading_date < $2
-     ORDER BY reading_date DESC
-     LIMIT 1`,
-    [unitNumber, periodStart],
-  );
+  const readings = await resolveElectricityReadings({
+    unitNumber,
+    unitId,
+    periodStart,
+    periodEnd,
+  });
+  debug.prev = readings.prev ? { value: readings.prev.value, date: readings.prev.date } : null;
+  debug.cur = readings.cur ? { value: readings.cur.value, date: readings.cur.date } : null;
+  debug.usage = readings.usage ?? null;
+  if (readings.reason) {
+    debug.reason = readings.reason;
+  }
 
-  const curRes = await query(
-    `SELECT reading_value
-     FROM meter_readings
-     WHERE unit = $1
-       AND lower(meter_type) = 'electricity'
-       AND reading_date >= $2
-       AND reading_date < $3
-     ORDER BY reading_date DESC
-     LIMIT 1`,
-    [unitNumber, periodStart, periodEnd],
-  );
+  if (!readings.cur) {
+    console.warn("⚠️ missing current electricity reading within period", { unitNumber, periodStart, periodEnd });
+    return { lineItem: null, debug, snapshot: null };
+  }
 
-  const prev = prevRes.rows[0]?.reading_value;
-  const cur = curRes.rows[0]?.reading_value;
-  if (prev == null || cur == null) return null;
+  const rateCents = Math.round(serviceMatch.rate * 100);
+  const periodLabel = formatPeriodLabel(periodStart);
 
-  const prevNum = Number(prev);
-  const curNum = Number(cur);
-  const usage = curNum - prevNum;
-  if (!Number.isFinite(usage) || usage <= 0) return null;
+  if (!readings.prev) {
+    console.warn("⚠️ missing previous electricity reading", { unitNumber, periodStart });
+    return {
+      lineItem: {
+        description: `Electricity (${periodLabel}) — Missing prev reading`,
+        qty: 0,
+        unit_cents: rateCents,
+        total_cents: 0,
+      },
+      debug,
+      snapshot: null,
+    };
+  }
 
+  const usage = readings.usage ?? Math.max(0, Number((readings.cur.value - readings.prev.value).toFixed(2)));
   const totalCents = Math.round(usage * rateCents);
+  const prevLabel = readings.prev.date || "Initial";
+  const curLabel = readings.cur.date || "";
   return {
-    description: `Electricity (Prev: ${prevNum}, Cur: ${curNum})`,
-    qty: usage,
-    unit_cents: rateCents,
-    total_cents: totalCents,
+    lineItem: {
+      description: `Electricity (${periodLabel}) — Prev: ${readings.prev.value} (${prevLabel}), Cur: ${readings.cur.value} (${curLabel})`,
+      qty: usage,
+      unit_cents: rateCents,
+      total_cents: totalCents,
+    },
+    debug: { ...debug, usage },
+    snapshot: {
+      prevReading: readings.prev.value,
+      prevDate: prevLabel,
+      currReading: readings.cur.value,
+      currDate: curLabel,
+      usage,
+    },
   };
 }
 
-async function fetchElectricityRate(unitId: string, propertyId?: string | null): Promise<number | null> {
+async function fetchElectricityRate(unitId: string, propertyId?: string | null): Promise<ElectricityServiceMatch> {
   const [rawServices, rawUnitServices, rawBuildingServices] = await Promise.all([
     datasetsRepo.getDataset<ServiceRecord[]>("services", []),
     datasetsRepo.getDataset<UnitServiceRecord[]>("unit_services", []),
@@ -156,6 +357,8 @@ async function fetchElectricityRate(unitId: string, propertyId?: string | null):
   const electricityServiceIds = new Set(
     services
       .filter((service) => {
+        const code = String(service.code ?? "").trim().toUpperCase();
+        if (code === "ELECTRICITY") return true;
         const name = String(service.name ?? "").toLowerCase();
         const icon = String(service.icon ?? "").toLowerCase();
         return name.includes("electric") || icon === "electricity";
@@ -163,7 +366,9 @@ async function fetchElectricityRate(unitId: string, propertyId?: string | null):
       .map((service) => String(service.id)),
   );
 
-  if (!electricityServiceIds.size) return null;
+  if (!electricityServiceIds.size) {
+    return { found: false, rate: null };
+  }
 
   const unitService = unitServices.find(
     (entry) => entry.unitId === unitId && electricityServiceIds.has(String(entry.serviceId)),
@@ -175,60 +380,16 @@ async function fetchElectricityRate(unitId: string, propertyId?: string | null):
     : undefined;
 
   const serviceId = unitService?.serviceId ?? buildingService?.serviceId;
-  if (!serviceId) return null;
+  if (!serviceId) {
+    return { found: false, rate: null };
+  }
 
   const service = services.find((entry) => String(entry.id) === String(serviceId));
-  const rate = service?.rate !== undefined ? Number(service.rate) : 0;
-  return Number.isFinite(rate) && rate > 0 ? rate : null;
-}
-
-async function fetchElectricitySnapshot(
-  unitNumber: string,
-  monthStart: string,
-  monthEndExclusive: string,
-): Promise<ReadingSnapshot | null> {
-  if (!unitNumber) return null;
-  try {
-    const [prevRes, curRes] = await Promise.all([
-      query(
-        `SELECT reading_value, reading_date
-         FROM public.meter_readings
-         WHERE unit = $1 AND lower(meter_type) = 'electricity' AND reading_date < $2
-         ORDER BY reading_date DESC, created_at DESC
-         LIMIT 1`,
-        [unitNumber, monthStart],
-      ),
-      query(
-        `SELECT reading_value, reading_date
-         FROM public.meter_readings
-         WHERE unit = $1 AND lower(meter_type) = 'electricity' AND reading_date >= $2 AND reading_date < $3
-         ORDER BY reading_date DESC, created_at DESC
-         LIMIT 1`,
-        [unitNumber, monthStart, monthEndExclusive],
-      ),
-    ]);
-
-    const prevRow = prevRes.rows[0];
-    const curRow = curRes.rows[0];
-    if (!prevRow || !curRow) return null;
-    const prevReading = Number(prevRow.reading_value || 0);
-    const currReading = Number(curRow.reading_value || 0);
-    const usage = Math.max(0, Number((currReading - prevReading).toFixed(2)));
-    return {
-      prevReading,
-      prevDate: String(prevRow.reading_date),
-      currReading,
-      currDate: String(curRow.reading_date),
-      usage,
-    };
-  } catch (err: any) {
-    const code = err?.code;
-    const message = err instanceof Error ? err.message : String(err);
-    if (code === "42P01" || message.includes('relation "meter_readings" does not exist')) {
-      return null;
-    }
-    throw err;
+  const rate = service?.rate !== undefined ? Number(service.rate) : null;
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return { found: true, rate: null, serviceId: String(serviceId) };
   }
+  return { found: true, rate, serviceId: String(serviceId) };
 }
 
 type StoredInvoice = {
@@ -246,6 +407,7 @@ type StoredInvoice = {
 };
 
 const INVOICES_KEY = "billing_invoices";
+const INITIAL_READINGS_KEY = "initial-readings";
 const MONTHS = [
   "January",
   "February",
@@ -333,6 +495,7 @@ export async function POST(req: NextRequest) {
 
     const url = new URL(req.url);
     const dryRun = url.searchParams.get("dryRun") === "1";
+    const debugEnabled = url.searchParams.get("debug") === "1";
     const payload = (await req.json().catch(() => ({}))) as BillsPayload;
     const unitIds = Array.isArray(payload?.unitIds) ? payload.unitIds.filter(Boolean) : [];
     if (!unitIds.length) {
@@ -447,11 +610,12 @@ export async function POST(req: NextRequest) {
     const periodEnd = monthEndKey;
     const lineItemsForInvoice = [...defaultLineItems];
 
-    const electricity = await buildElectricityLineItem({
+    const electricityResult = await buildElectricityLineItem({
       unitId: unit.id,
       periodStart,
       periodEnd,
     });
+    const electricity = electricityResult.lineItem;
     if (electricity) {
       lineItemsForInvoice.push(electricity);
     }
@@ -467,21 +631,18 @@ export async function POST(req: NextRequest) {
       unitLabel: string;
     } | null = null;
 
-    if (electricity) {
-      const electricitySnapshot = await fetchElectricitySnapshot(unit.unit, periodStart, periodEnd);
-      if (electricitySnapshot) {
-        const rate = electricity.unit_cents / 100;
-        meterSnapshot = {
-          prevDate: electricitySnapshot.prevDate,
-          prevReading: electricitySnapshot.prevReading,
-          currDate: electricitySnapshot.currDate,
-          currReading: electricitySnapshot.currReading,
-          usage: electricitySnapshot.usage,
-          rate,
-          amount: Number((electricitySnapshot.usage * rate).toFixed(2)),
-          unitLabel: "kWh",
-        };
-      }
+    if (electricityResult.snapshot && electricity) {
+      const rate = electricity.unit_cents / 100;
+      meterSnapshot = {
+        prevDate: electricityResult.snapshot.prevDate,
+        prevReading: electricityResult.snapshot.prevReading,
+        currDate: electricityResult.snapshot.currDate,
+        currReading: electricityResult.snapshot.currReading,
+        usage: electricityResult.snapshot.usage,
+        rate,
+        amount: Number((electricityResult.snapshot.usage * rate).toFixed(2)),
+        unitLabel: "kWh",
+      };
     }
 
     const invoiceDate = reference;
@@ -499,7 +660,12 @@ export async function POST(req: NextRequest) {
     };
 
     if (dryRun) {
-      return NextResponse.json({ ok: true, mode: "preview", draft });
+      const response: Record<string, unknown> = { ok: true, mode: "preview", draft };
+      if (debugEnabled) {
+        response.debug = electricityResult.debug;
+        response.lineItems = lineItemsForInvoice;
+      }
+      return NextResponse.json(response);
     }
 
     const inputLineItems = Array.isArray(payload?.lineItems) ? payload.lineItems : draft.lineItems;
@@ -541,7 +707,7 @@ export async function POST(req: NextRequest) {
            period = EXCLUDED.period`,
         [
           id,
-          tenant.id,
+          tenantId,
           unit.id,
           invoiceDate,
           dueDate,
@@ -583,7 +749,7 @@ export async function POST(req: NextRequest) {
 
     const created: StoredInvoice = {
       id,
-      tenantId: tenant.id,
+      tenantId,
       tenantName: tenant.name,
       unitId: unit.id,
       unitLabel: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
@@ -607,7 +773,12 @@ export async function POST(req: NextRequest) {
       [],
     );
 
-    return NextResponse.json({ ok: true, invoiceId: id, data: updated, created: [created] });
+    const response: Record<string, unknown> = { ok: true, invoiceId: id, data: updated, created: [created] };
+    if (debugEnabled) {
+      response.debug = electricityResult.debug;
+      response.lineItems = lineItemsForInvoice;
+    }
+    return NextResponse.json(response);
   } catch (err) {
     console.error("❌ failed to generate bills", err);
     return handleError(err);
