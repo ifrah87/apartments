@@ -355,17 +355,14 @@ async function fetchElectricityRate(unitId: string, propertyId?: string | null):
   const unitServices = normalizeUnitServices(rawUnitServices);
   const buildingServices = normalizeBuildingServices(rawBuildingServices);
 
-  const electricityServiceIds = new Set(
-    services
-      .filter((service) => {
-        const code = String(service.code ?? "").trim().toUpperCase();
-        if (code === "ELECTRICITY") return true;
-        const name = String(service.name ?? "").toLowerCase();
-        const icon = String(service.icon ?? "").toLowerCase();
-        return name.includes("electric") || icon === "electricity";
-      })
-      .map((service) => String(service.id)),
+  const codedServices = services.filter(
+    (service) => String(service.code ?? "").trim().toUpperCase() === "ELECTRICITY",
   );
+  const namedServices = services.filter((service) =>
+    String(service.name ?? "").toLowerCase().includes("electric"),
+  );
+  const electricityServices = codedServices.length ? codedServices : namedServices;
+  const electricityServiceIds = new Set(electricityServices.map((service) => String(service.id)));
 
   if (!electricityServiceIds.size) {
     return { found: false, rate: null };
