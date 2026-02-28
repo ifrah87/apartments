@@ -281,7 +281,8 @@ async function buildElectricityLineItem(
     debug.reason = "electricity service not assigned";
     return { lineItem: null, debug, snapshot: null };
   }
-  if (serviceMatch.rate === null) {
+  const rate = serviceMatch.rate;
+  if (rate === null) {
     debug.reason = "missing electricity rate";
     return { lineItem: null, debug, snapshot: null };
   }
@@ -304,7 +305,7 @@ async function buildElectricityLineItem(
     return { lineItem: null, debug, snapshot: null };
   }
 
-  const rateCents = Math.round(serviceMatch.rate * 100);
+  const rateCents = Math.round(rate * 100);
   const periodLabel = formatPeriodLabel(periodStart);
 
   if (!readings.prev) {
@@ -386,7 +387,7 @@ async function fetchElectricityRate(unitId: string, propertyId?: string | null):
 
   const service = services.find((entry) => String(entry.id) === String(serviceId));
   const rate = service?.rate !== undefined ? Number(service.rate) : null;
-  if (!Number.isFinite(rate) || rate <= 0) {
+  if (rate === null || !Number.isFinite(rate) || rate <= 0) {
     return { found: true, rate: null, serviceId: String(serviceId) };
   }
   return { found: true, rate, serviceId: String(serviceId) };
