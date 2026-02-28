@@ -7,6 +7,7 @@ import { query } from "@/lib/db";
 import { createStatement } from "@/lib/reports/tenantStatement";
 import { normalizeId } from "@/lib/normalizeId";
 import { buildInvoiceLineItems } from "@/lib/invoices/lineItems";
+import type { LeaseAgreement } from "@/lib/leases";
 
 export const runtime = "nodejs";
 
@@ -465,6 +466,28 @@ function buildTenantIndex(tenants: TenantRecord[]) {
   return map;
 }
 
+function buildLeaseIndex(leases: LeaseAgreement[]) {
+  const map = new Map<string, LeaseAgreement>();
+  leases.forEach((lease) => {
+    if (String(lease?.status || "").toLowerCase() !== "active") return;
+    const unit = String(lease?.unit || "").trim();
+    if (!unit) return;
+    const property = String(lease?.property || "").trim().toLowerCase();
+    const start = lease?.startDate ? new Date(lease.startDate).getTime() : 0;
+    const key = `${property}::${unit}`.toLowerCase();
+    const fallbackKey = `::${unit}`.toLowerCase();
+    const existing = map.get(key);
+    if (!existing || start >= (existing.startDate ? new Date(existing.startDate).getTime() : 0)) {
+      map.set(key, lease);
+    }
+    const existingFallback = map.get(fallbackKey);
+    if (!existingFallback || start >= (existingFallback.startDate ? new Date(existingFallback.startDate).getTime() : 0)) {
+      map.set(fallbackKey, lease);
+    }
+  });
+  return map;
+}
+
 export async function GET() {
   try {
     const data = await datasetsRepo.getDataset<StoredInvoice[]>(INVOICES_KEY, []);
@@ -516,11 +539,14 @@ export async function POST(req: NextRequest) {
     const monthStartKey = start.toISOString().slice(0, 10);
     const monthEndExclusive = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 1));
     const monthEndKey = monthEndExclusive.toISOString().slice(0, 10);
+    const periodStart = start;
+    const periodEnd = monthEndExclusive;
 
-    const [units, tenants, charges] = await Promise.all([
+    const [units, tenants, charges, leasesData] = await Promise.all([
       unitsRepo.listUnits(),
       tenantsRepo.listTenants(),
       datasetsRepo.getDataset<ChargeRow[]>("tenant_charges", []),
+      datasetsRepo.getDataset<LeaseAgreement[]>("lease_agreements", []),
     ]);
 
     const tenantIndex = buildTenantIndex(tenants);
@@ -557,6 +583,10 @@ export async function POST(req: NextRequest) {
     if (!tenant) {
       return NextResponse.json({ ok: false, error: "Tenant not found for this unit." }, { status: 404 });
     }
+    const leaseIndex = buildLeaseIndex(Array.isArray(leasesData) ? leasesData : []);
+    const lease =
+      leaseIndex.get(`${propertyKey}::${unit.unit}`.toLowerCase()) ||
+      leaseIndex.get(`::${unit.unit}`.toLowerCase());
 
     const tenantIdFromPayload = normalizeTenantId(payload?.tenant_id ?? payload?.tenantId ?? null);
     if ((payload?.tenant_id || payload?.tenantId) && !tenantIdFromPayload) {
@@ -586,7 +616,25 @@ export async function POST(req: NextRequest) {
 
     if (!totals.charges) {
       return NextResponse.json(
-        { ok: false, error: "No charges found for this tenant." },
+        {
+          ok: false,
+          error: "No charges found (rent not generated).",
+          debug: {
+            unit_id: unitId,
+            tenant_id: tenantId,
+            lease_id: lease?.id ?? null,
+            rent_amount:
+              (lease as any)?.rent_amount ??
+              (lease as any)?.monthly_rent ??
+              lease?.rent ??
+              null,
+            periodStart: periodStart?.toISOString?.() ?? null,
+            periodEnd: periodEnd?.toISOString?.() ?? null,
+            lease_start: (lease as any)?.start_date ?? lease?.startDate ?? null,
+            lease_end: (lease as any)?.end_date ?? lease?.endDate ?? null,
+            lease_status: (lease as any)?.status ?? lease?.status ?? null
+          }
+        },
         { status: 400 },
       );
     }
@@ -604,14 +652,14 @@ export async function POST(req: NextRequest) {
     });
 
     // --- ELECTRICITY AUTO CALCULATION ---
-    const periodStart = monthStartKey;
-    const periodEnd = monthEndKey;
+    const periodStartKey = monthStartKey;
+    const periodEndKey = monthEndKey;
     const lineItemsForInvoice = [...defaultLineItems];
 
     const electricityResult = await buildElectricityLineItem({
       unitId: unit.id,
-      periodStart,
-      periodEnd,
+      periodStart: periodStartKey,
+      periodEnd: periodEndKey,
     });
     const electricity = electricityResult.lineItem;
     const electricityDebugPayload = {
