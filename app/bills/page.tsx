@@ -100,10 +100,6 @@ function toCents(value: number) {
   return Math.round(Number(value || 0) * 100);
 }
 
-function isUuid(value: string) {
-  return /^[0-9a-fA-F-]{36}$/.test(value);
-}
-
 function formatQuantity(value: number) {
   return Number(value || 0).toFixed(2);
 }
@@ -111,7 +107,7 @@ function formatQuantity(value: number) {
 function buildElectricityDescription(snapshot: MeterSnapshot) {
   const prevLabel = snapshot.prevDate ? `${snapshot.prevReading} (${snapshot.prevDate})` : `${snapshot.prevReading}`;
   const curLabel = snapshot.currDate ? `${snapshot.currReading} (${snapshot.currDate})` : `${snapshot.currReading}`;
-  return `Electricity — Prev: ${prevLabel} | Cur: ${curLabel} | Usage: ${formatQuantity(snapshot.usage)}`;
+  return `Electricity — Prev: ${prevLabel}, Cur: ${curLabel} | Usage: ${formatQuantity(snapshot.usage)}`;
 }
 
 function parseInvoiceDate(value?: string) {
@@ -650,10 +646,6 @@ export default function BillsPage() {
     const tenantId = draftInvoice.tenantId.trim();
     if (!tenantId) {
       setToast({ type: "error", message: "Missing tenant ID. Please refresh the draft and try again." });
-      return;
-    }
-    if (!isUuid(tenantId)) {
-      setToast({ type: "error", message: `Invalid tenant ID: ${tenantId}` });
       return;
     }
     setToast(null);

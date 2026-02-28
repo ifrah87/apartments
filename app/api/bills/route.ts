@@ -5,29 +5,11 @@ import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { opt } from "@/src/lib/utils/normalize";
 import { query } from "@/lib/db";
 import { createStatement } from "@/lib/reports/tenantStatement";
-import { normalizeId } from "@/lib/normalizeId";
 import { buildInvoiceLineItems } from "@/lib/invoices/lineItems";
 import type { LeaseAgreement } from "@/lib/leases";
 
 export const runtime = "nodejs";
 
-function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
-}
-
-function normalizeTenantId(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-
-  const match = trimmed.match(
-    /([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/i,
-  );
-
-  if (!match) return null;
-
-  return match[1];
-}
 
 type ChargeRow = {
   tenant_id: string;
@@ -134,12 +116,6 @@ function normalizeUnitServices(value: unknown): UnitServiceRecord[] {
 function normalizeBuildingServices(value: unknown): BuildingServiceRecord[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as BuildingServiceRecord[];
-}
-
-function formatPeriodLabel(periodStart: string) {
-  const date = new Date(`${periodStart}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
 function toNumberOrNull(value: unknown) {
@@ -308,14 +284,13 @@ async function buildElectricityLineItem(
   }
 
   const rateCents = Math.round(rate * 100);
-  const periodLabel = formatPeriodLabel(periodStart);
 
   if (!readings.prev) {
     console.warn("⚠️ missing previous electricity reading", { unitNumber, periodStart });
     const curValue = readings.cur.value;
     return {
       lineItem: {
-        description: `Electricity (${periodLabel}) — Prev: missing | Cur: ${curValue} | Usage: 0 (Missing prev reading)`,
+        description: `Electricity — Prev: missing, Cur: ${curValue} | Usage: 0 (Missing prev reading)`,
         qty: 0,
         unit_cents: rateCents,
         total_cents: 0,
@@ -342,7 +317,7 @@ async function buildElectricityLineItem(
   const sourcePrev = readings.prev.source === "initial" ? "baseline" : "reading";
   return {
     lineItem: {
-      description: `Electricity (${periodLabel}) — Prev: ${readings.prev.value} (${prevLabel}) | Cur: ${readings.cur.value} (${curLabel}) | Usage: ${usage}`,
+      description: `Electricity — Prev: ${readings.prev.value} (${prevLabel}), Cur: ${readings.cur.value} (${curLabel}) | Usage: ${usage}`,
       qty: usage,
       unit_cents: rateCents,
       total_cents: totalCents,
@@ -543,6 +518,21 @@ export async function POST(req: NextRequest) {
     const debugEnabled = url.searchParams.get("debug") === "1";
     const payload = (await req.json().catch(() => ({}))) as BillsPayload;
     const unitIds = Array.isArray(payload?.unitIds) ? payload.unitIds.filter(Boolean) : [];
+    const monthValue = payload?.month || "";
+    const monthIndex = toMonthIndex(monthValue);
+    const year = Number(payload?.year);
+    const periodPreview =
+      monthIndex !== null && Number.isFinite(year)
+        ? `${year}-${String(monthIndex + 1).padStart(2, "0")}`
+        : null;
+    console.info("Bills generate request", {
+      tenant_id: payload?.tenant_id ?? payload?.tenantId ?? null,
+      unit_id: unitIds[0] ?? null,
+      period: periodPreview,
+      line_items: Array.isArray(payload?.lineItems) ? payload.lineItems.length : 0,
+      month: payload?.month ?? null,
+      year: payload?.year ?? null,
+    });
     if (!unitIds.length) {
       return NextResponse.json({ ok: false, error: "Select at least one unit." }, { status: 400 });
     }
@@ -550,9 +540,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Select a single unit to generate an invoice." }, { status: 400 });
     }
 
-    const monthValue = payload?.month || "";
-    const monthIndex = toMonthIndex(monthValue);
-    const year = Number(payload?.year);
     if (monthIndex === null || !Number.isFinite(year)) {
       return NextResponse.json({ ok: false, error: "Invalid month or year." }, { status: 400 });
     }
@@ -579,7 +566,7 @@ export async function POST(req: NextRequest) {
       Array<{ date: string; amount: number; description?: string; category?: string; meta?: Record<string, unknown> }>
     >();
     charges.forEach((row) => {
-      const tenantId = normalizeId(row.tenant_id);
+      const tenantId = String((row as any)?.tenant_id ?? "").trim();
       if (!tenantId) return;
       if (row.category === "utilities" || row.meter_reading_id) return;
       const entry = {
@@ -608,35 +595,79 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Tenant not found for this unit." }, { status: 404 });
     }
     const leaseIndex = buildLeaseIndex(Array.isArray(leasesData) ? leasesData : []);
+    let dbLease: any | null = null;
+    try {
+      const dbLeaseRes = await query(
+        `SELECT id, tenant_id, rent, start_date, end_date, status
+         FROM public.leases
+         WHERE unit_id = $1 AND status = 'active'
+         ORDER BY start_date DESC
+         LIMIT 1`,
+        [unit.id],
+      );
+      dbLease = dbLeaseRes.rows[0] ?? null;
+    } catch (err) {
+      console.warn("⚠️ failed to load lease from db", err);
+    }
     const lease =
+      dbLease ||
       leaseIndex.get(`${propertyKey}::${unit.unit}`.toLowerCase()) ||
       leaseIndex.get(`::${unit.unit}`.toLowerCase());
 
-    const tenantIdFromPayload = normalizeTenantId(payload?.tenant_id ?? payload?.tenantId ?? null);
-    if ((payload?.tenant_id || payload?.tenantId) && !tenantIdFromPayload) {
-      return NextResponse.json({ ok: false, error: "Invalid tenant_id format" }, { status: 400 });
+    const leaseTenantId = String((dbLease as any)?.tenant_id ?? "").trim();
+    const tenantId = String(payload?.tenant_id ?? payload?.tenantId ?? leaseTenantId ?? tenant.id ?? "").trim();
+    if (!tenantId) {
+      return NextResponse.json({ ok: false, error: "Missing tenant_id." }, { status: 400 });
     }
-    const tenantId =
-      tenantIdFromPayload ?? normalizeTenantId(tenant.id) ?? normalizeId(tenant.id);
-    if (tenantId && !isUuid(tenantId)) {
-      return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenantId}` }, { status: 400 });
-    }
-    const { rows, totals } = createStatement({
-      tenant: {
-        id: tenant.id,
-        name: tenant.name,
-        property_id: opt(tenant.property_id),
-        building: opt(tenant.building),
-        unit: opt(tenant.unit),
-        reference: opt(tenant.reference),
-        monthly_rent: opt(tenant.monthly_rent),
-        due_day: opt(tenant.due_day),
-      },
+    const leaseRent = toNumberOrNull(
+      (lease as any)?.rent_amount ?? (lease as any)?.monthly_rent ?? (lease as any)?.rent,
+    );
+    const leaseStartRaw = (lease as any)?.start_date ?? (lease as any)?.startDate ?? null;
+    const leaseEndRaw = (lease as any)?.end_date ?? (lease as any)?.endDate ?? null;
+    const leaseStart = leaseStartRaw ? new Date(String(leaseStartRaw)) : null;
+    const leaseEnd = leaseEndRaw ? new Date(String(leaseEndRaw)) : null;
+    const leaseActiveForPeriod =
+      !!lease &&
+      String((lease as any)?.status ?? lease?.status ?? "").toLowerCase() === "active" &&
+      (!leaseStart || leaseStart < periodEnd) &&
+      (!leaseEnd || leaseEnd >= periodStart);
+    const tenantMonthlyRent = toNumberOrNull((tenant as any)?.monthly_rent);
+    const effectiveRent = tenantMonthlyRent ?? (leaseActiveForPeriod ? leaseRent : null);
+
+    const statementTenant = {
+      id: tenant.id,
+      name: tenant.name,
+      property_id: opt(tenant.property_id),
+      building: opt(tenant.building),
+      unit: opt(tenant.unit),
+      reference: opt(tenant.reference),
+      monthly_rent: effectiveRent ?? opt(tenant.monthly_rent),
+      due_day: opt(tenant.due_day),
+    };
+
+    let { rows, totals } = createStatement({
+      tenant: statementTenant,
       start,
       end,
       payments: [],
       additionalCharges: chargeIndex.get(tenantId) || [],
     });
+
+    if (!totals.charges && effectiveRent && leaseActiveForPeriod) {
+      const rentLabel = `Rent for ${reference.toLocaleString("en", { month: "long", year: "numeric", timeZone: "UTC" })}`;
+      rows = [
+        {
+          date: start.toISOString().slice(0, 10),
+          description: rentLabel,
+          charge: effectiveRent,
+          payment: 0,
+          balance: Number(effectiveRent.toFixed(2)),
+          entryType: "charge",
+          source: "rent",
+        },
+      ];
+      totals = { charges: effectiveRent, payments: 0, balance: effectiveRent };
+    }
 
     if (!totals.charges) {
       return NextResponse.json(
@@ -708,27 +739,28 @@ export async function POST(req: NextRequest) {
     }
 
     let meterSnapshot: {
-      prevDate: string;
-      prevReading: number;
-      currDate: string;
-      currReading: number;
+      service: "ELECTRICITY";
+      unit: string;
+      prev_reading: number | null;
+      cur_reading: number | null;
       usage: number;
       rate: number;
-      amount: number;
-      unitLabel: string;
     } | null = null;
 
-    if (electricityResult.snapshot && electricity) {
+    if (electricity) {
       const rate = electricity.unit_cents / 100;
+      const meta = electricity.meta && typeof electricity.meta === "object" ? electricity.meta : null;
+      const prevValue = electricityResult.snapshot?.prevReading ?? toNumberOrNull((meta as any)?.prev);
+      const curValue = electricityResult.snapshot?.currReading ?? toNumberOrNull((meta as any)?.cur);
+      const usageValue = electricityResult.snapshot?.usage ?? toNumberOrNull((meta as any)?.usage) ?? 0;
+      const usage = Number.isFinite(Number(usageValue)) ? Number(usageValue) : 0;
       meterSnapshot = {
-        prevDate: electricityResult.snapshot.prevDate,
-        prevReading: electricityResult.snapshot.prevReading,
-        currDate: electricityResult.snapshot.currDate,
-        currReading: electricityResult.snapshot.currReading,
-        usage: electricityResult.snapshot.usage,
+        service: "ELECTRICITY",
+        unit: electricityResult.debug.unitNumber || unit.unit || "",
+        prev_reading: prevValue ?? null,
+        cur_reading: curValue ?? null,
+        usage,
         rate,
-        amount: Number((electricityResult.snapshot.usage * rate).toFixed(2)),
-        unitLabel: "kWh",
       };
     }
 
@@ -774,24 +806,25 @@ export async function POST(req: NextRequest) {
       .filter((item) => item.description);
 
     const totalCents = normalizedLineItems.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
-    const existingInvoiceRes = await query(
-      `SELECT id
-       FROM public.invoices
-       WHERE unit_id = $1 AND period = $2
-       LIMIT 1`,
-      [unit.id, periodKey],
-    );
-    const existingInvoiceId = existingInvoiceRes.rows[0]?.id ? String(existingInvoiceRes.rows[0].id) : null;
-    const id = existingInvoiceId ?? stableUuid(`inv-${unit.id}-${periodKey}`);
+    const lineItemsJson = normalizedLineItems.map((item, index) => ({
+      id: `line-${index + 1}`,
+      description: item.description,
+      qty: Number(item.qty || 0),
+      rate: Number(((item.unit_cents || 0) / 100).toFixed(2)),
+      amount: Number(((item.total_cents || 0) / 100).toFixed(2)),
+      meta: item.meta ?? undefined,
+    }));
+    const id = stableUuid(`inv-${unit.id}-${periodKey}`);
+    let savedInvoiceId = id;
 
     try {
       await query("BEGIN");
-      await query(
-        `INSERT INTO public.invoices (id, tenant_id, unit_id, invoice_date, due_date, status, currency, subtotal_cents, tax_cents, total_cents, notes, meta, period)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-         ON CONFLICT (id) DO UPDATE SET
+      const meta = meterSnapshot ? { meter_snapshot: meterSnapshot } : null;
+      const invoiceRes = await query(
+        `INSERT INTO public.invoices (id, tenant_id, unit_id, invoice_date, due_date, status, currency, subtotal_cents, tax_cents, total_cents, notes, meta, period, line_items, meter_snapshot, total_amount)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         ON CONFLICT (unit_id, period) DO UPDATE SET
            tenant_id = EXCLUDED.tenant_id,
-           unit_id = EXCLUDED.unit_id,
            invoice_date = EXCLUDED.invoice_date,
            due_date = EXCLUDED.due_date,
            status = EXCLUDED.status,
@@ -801,7 +834,10 @@ export async function POST(req: NextRequest) {
            total_cents = EXCLUDED.total_cents,
            notes = EXCLUDED.notes,
            meta = EXCLUDED.meta,
-           period = EXCLUDED.period`,
+           line_items = EXCLUDED.line_items,
+           meter_snapshot = EXCLUDED.meter_snapshot,
+           total_amount = EXCLUDED.total_amount
+         RETURNING id, invoice_number`,
         [
           id,
           tenantId,
@@ -814,22 +850,35 @@ export async function POST(req: NextRequest) {
           0,
           totalCents,
           null,
-          meterSnapshot ? { meterSnapshot } : null,
+          meta,
           periodKey,
+          lineItemsJson,
+          meterSnapshot,
+          Number((totalCents / 100).toFixed(2)),
         ],
       );
-      await query(`DELETE FROM public.invoice_lines WHERE invoice_id = $1`, [id]);
+      const invoiceId = String(invoiceRes.rows[0]?.id ?? id);
+      const invoiceNumber = invoiceRes.rows[0]?.invoice_number ?? null;
+      savedInvoiceId = invoiceId;
+      console.info("Bills invoice upsert", {
+        invoice_id: invoiceId,
+        invoice_number: invoiceNumber,
+        unit_id: unit.id,
+        tenant_id: tenantId,
+        period: periodKey,
+      });
+      await query(`DELETE FROM public.invoice_lines WHERE invoice_id = $1`, [invoiceId]);
       if (normalizedLineItems.length) {
         const values: any[] = [];
         const placeholders = normalizedLineItems
           .map((row, idx) => {
             const offset = idx * 7;
-            values.push(id, idx, row.description, row.qty, row.unit_cents, row.total_cents, row.meta);
+            values.push(invoiceId, idx, row.description, row.qty, row.unit_cents, row.total_cents, row.meta);
             return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7})`;
           })
           .join(",");
         await query(
-          `INSERT INTO public.invoice_lines (invoice_id, sort_order, description, qty, unit_cents, total_cents, meta)
+          `INSERT INTO public.invoice_lines (invoice_id, line_index, description, quantity, unit_price_cents, total_cents, meta)
            VALUES ${placeholders}`,
           values,
         );
@@ -845,7 +894,7 @@ export async function POST(req: NextRequest) {
     }
 
     const created: StoredInvoice = {
-      id,
+      id: savedInvoiceId,
       tenantId,
       tenantName: tenant.name,
       unitId: unit.id,
@@ -870,14 +919,16 @@ export async function POST(req: NextRequest) {
       [],
     );
 
-    const response: Record<string, unknown> = { ok: true, invoiceId: id, data: updated, created: [created] };
+    const response: Record<string, unknown> = { ok: true, invoiceId: savedInvoiceId, data: updated, created: [created] };
     if (debugEnabled) {
       response.debug = electricityDebugPayload;
       response.lineItems = lineItemsForInvoice;
     }
     return NextResponse.json(response);
   } catch (err) {
-    console.error("❌ failed to generate bills", err);
+    const code = (err as any)?.code;
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("❌ failed to generate bills", { message, code });
     return handleError(err);
   }
 }

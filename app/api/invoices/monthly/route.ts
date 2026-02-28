@@ -38,6 +38,8 @@ type InvoiceHeaderRow = {
   currency: string | null;
   notes: string | null;
   meta: Record<string, any> | null;
+  line_items?: InvoiceLineItem[] | null;
+  meter_snapshot?: Record<string, any> | null;
 };
 
 type InvoiceLineRow = {
@@ -100,14 +102,37 @@ function dueDateForMonth(reference: Date, dueDayRaw: string | number | null | un
   return new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), Math.min(dueDay, dim)));
 }
 
-function mapLineItems(rows: InvoiceLineRow[]): InvoiceLineItem[] {
-  return rows.map((row) => ({
-    id: String(row.id),
-    description: String(row.description || ""),
-    qty: Number(row.qty || 0),
-    rate: fromCents(row.unit_cents),
-    amount: fromCents(row.total_cents),
-  }));
+function mapLineItems(rows: InvoiceLineItem[]): InvoiceLineItem[] {
+  return rows
+    .map((row, idx) => ({
+      id: String((row as any)?.id ?? `line-${idx + 1}`),
+      description: String((row as any)?.description ?? ""),
+      qty: Number((row as any)?.qty ?? 0),
+      rate: Number((row as any)?.rate ?? 0),
+      amount: Number((row as any)?.amount ?? 0),
+      meta: (row as any)?.meta && typeof (row as any).meta === "object" ? (row as any).meta : undefined,
+    }))
+    .filter((row) => row.description);
+}
+
+function normalizeMeterSnapshot(input: unknown): MeterSnapshot | null {
+  if (!input || typeof input !== "object") return null;
+  const snap = input as any;
+  const prevReading = Number(snap.prevReading ?? snap.prev ?? snap.prev_reading ?? 0);
+  const currReading = Number(snap.currReading ?? snap.cur ?? snap.cur_reading ?? 0);
+  const usage = Number(Math.max(currReading - prevReading, 0).toFixed(2));
+  const rate = Number(snap.rate ?? snap.unit_rate ?? 0.41);
+  const amount = Number((usage * rate).toFixed(2));
+  return {
+    prevDate: String(snap.prevDate ?? ""),
+    prevReading,
+    currDate: String(snap.currDate ?? ""),
+    currReading,
+    usage,
+    rate,
+    amount,
+    unitLabel: snap.unitLabel ? String(snap.unitLabel) : "kWh",
+  };
 }
 
 function extractMeterSnapshot(rows: InvoiceLineRow[]): MeterSnapshot | null {
@@ -452,7 +477,7 @@ export async function GET(req: NextRequest) {
     if (!normalizedTenantId || scopedTenantIds.length) {
       if (scopedTenantIds.length) {
         const res = await query(
-          `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta
+          `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, line_items, meter_snapshot
            FROM public.invoices
            WHERE invoice_date >= $1 AND invoice_date <= $2
              AND tenant_id = ANY($3)
@@ -462,7 +487,7 @@ export async function GET(req: NextRequest) {
         invoiceRows = res.rows as InvoiceHeaderRow[];
       } else {
         const res = await query(
-          `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta
+          `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, line_items, meter_snapshot
            FROM public.invoices
            WHERE invoice_date >= $1 AND invoice_date <= $2
            ORDER BY invoice_date ASC, id ASC`,
@@ -472,28 +497,6 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const invoiceIds = invoiceRows.map((row) => String(row.id));
-    let lineRows: InvoiceLineRow[] = [];
-    if (invoiceIds.length) {
-      const lineRes = await query(
-        `SELECT id, invoice_id, sort_order, description, qty, unit_cents, total_cents, created_at
-         FROM public.invoice_lines
-         WHERE invoice_id = ANY($1)
-         ORDER BY invoice_id ASC, sort_order ASC, created_at ASC`,
-        [invoiceIds],
-      );
-      lineRows = lineRes.rows as InvoiceLineRow[];
-    }
-
-    const linesByInvoice = new Map<string, InvoiceLineRow[]>();
-    lineRows.forEach((row) => {
-      const key = String(row.invoice_id);
-      if (!linesByInvoice.has(key)) {
-        linesByInvoice.set(key, []);
-      }
-      linesByInvoice.get(key)!.push(row);
-    });
-
     const invoicePayloads = invoiceRows.map((invoice) => {
       const tenant =
         tenantIndex.get(String(invoice.tenant_id)) ||
@@ -501,11 +504,12 @@ export async function GET(req: NextRequest) {
           id: String(invoice.tenant_id || ""),
           name: "Tenant",
         } as TenantRecord);
-      const lines = linesByInvoice.get(String(invoice.id)) || [];
-      const lineItems = mapLineItems(lines);
-      const totalCents = lines.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
-      const totalAmount = fromCents(totalCents);
-      const meterSnapshot = (invoice.meta?.meterSnapshot ?? null) as MeterSnapshot | null;
+      const storedLines = Array.isArray(invoice.line_items) ? invoice.line_items : [];
+      const lineItems = mapLineItems(storedLines);
+      const totalAmount = lineItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const meterSnapshot = normalizeMeterSnapshot(
+        invoice.meter_snapshot ?? invoice.meta?.meter_snapshot ?? invoice.meta?.meterSnapshot ?? null,
+      );
       const issueDate = invoice.invoice_date ? new Date(invoice.invoice_date) : reference;
       const dueDate = invoice.due_date
         ? new Date(invoice.due_date)

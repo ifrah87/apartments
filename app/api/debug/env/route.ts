@@ -1,16 +1,27 @@
-export async function GET() {
-  const url = process.env.DATABASE_URL || "";
-  const ca = process.env.DATABASE_SSL_CA || "";
+import { NextResponse } from "next/server";
 
-  return Response.json({
+function maskDatabaseUrl(raw: string) {
+  if (!raw) return { masked: "", host: "", dbName: "" };
+  try {
+    const url = new URL(raw);
+    const host = url.hostname;
+    const dbName = url.pathname.replace(/^\//, "");
+    if (url.password) {
+      url.password = "*****";
+    }
+    return { masked: url.toString(), host, dbName };
+  } catch {
+    return { masked: raw.replace(/:\/\/.*@/, "://*****@"), host: "", dbName: "" };
+  }
+}
+
+export async function GET() {
+  const raw = process.env.DATABASE_URL || "";
+  const { masked, host, dbName } = maskDatabaseUrl(raw);
+  return NextResponse.json({
     ok: true,
-    hasDatabaseUrl: !!url,
-    databaseUrlHost: url ? url.split("@")[1]?.split("/")[0] : null,
-    hasDatabaseCa: !!ca,
-    databaseCaLength: ca.length,
-    databaseCaHasBegin: ca.includes("BEGIN CERTIFICATE"),
-    databaseCaHasEnd: ca.includes("END CERTIFICATE"),
-    databaseCaHasEscapedNewlines: ca.includes("\\n"),
-    nodeVersion: process.version
+    dbHost: host || null,
+    dbName: dbName || null,
+    maskedUrl: masked || null,
   });
 }
