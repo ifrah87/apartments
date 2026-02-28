@@ -617,6 +617,22 @@ export async function POST(req: NextRequest) {
       periodEnd,
     });
     const electricity = electricityResult.lineItem;
+    const electricityDebugPayload = {
+      unitNumber: electricityResult.debug.unitNumber,
+      rate: electricityResult.debug.rate,
+      prev: electricityResult.debug.prev,
+      cur: electricityResult.debug.cur,
+      usage: electricityResult.debug.usage,
+    };
+    if (!electricity) {
+      console.log("ELECTRICITY DEBUG", {
+        unitNumber: electricityResult.debug.unitNumber,
+        foundService: electricityResult.debug.foundElectricService,
+        rate: electricityResult.debug.rate,
+        prev: electricityResult.debug.prev,
+        cur: electricityResult.debug.cur,
+      });
+    }
     if (electricity) {
       lineItemsForInvoice.push(electricity);
     }
@@ -663,7 +679,7 @@ export async function POST(req: NextRequest) {
     if (dryRun) {
       const response: Record<string, unknown> = { ok: true, mode: "preview", draft };
       if (debugEnabled) {
-        response.debug = electricityResult.debug;
+        response.debug = electricityDebugPayload;
         response.lineItems = lineItemsForInvoice;
       }
       return NextResponse.json(response);
@@ -776,7 +792,7 @@ export async function POST(req: NextRequest) {
 
     const response: Record<string, unknown> = { ok: true, invoiceId: id, data: updated, created: [created] };
     if (debugEnabled) {
-      response.debug = electricityResult.debug;
+      response.debug = electricityDebugPayload;
       response.lineItems = lineItemsForInvoice;
     }
     return NextResponse.json(response);
