@@ -49,6 +49,7 @@ type DraftLineItem = {
   qty: number;
   unitCents: number;
   totalCents: number;
+  meta?: Record<string, unknown>;
 };
 
 type DraftInvoice = {
@@ -101,6 +102,16 @@ function toCents(value: number) {
 
 function isUuid(value: string) {
   return /^[0-9a-fA-F-]{36}$/.test(value);
+}
+
+function formatQuantity(value: number) {
+  return Number(value || 0).toFixed(2);
+}
+
+function buildElectricityDescription(snapshot: MeterSnapshot) {
+  const prevLabel = snapshot.prevDate ? `${snapshot.prevReading} (${snapshot.prevDate})` : `${snapshot.prevReading}`;
+  const curLabel = snapshot.currDate ? `${snapshot.currReading} (${snapshot.currDate})` : `${snapshot.currReading}`;
+  return `Electricity — Prev: ${prevLabel} | Cur: ${curLabel} | Usage: ${formatQuantity(snapshot.usage)}`;
 }
 
 function parseInvoiceDate(value?: string) {
@@ -284,6 +295,7 @@ export default function BillsPage() {
     qty: overrides?.qty ?? 1,
     rate: overrides?.rate ?? 0,
     amount: overrides?.amount ?? 0,
+    meta: overrides?.meta,
   });
 
   const createDraftLineItem = (overrides?: Partial<DraftLineItem>): DraftLineItem => {
@@ -295,6 +307,7 @@ export default function BillsPage() {
       qty,
       unitCents,
       totalCents: Number(overrides?.totalCents ?? Math.round(qty * unitCents)),
+      meta: overrides?.meta,
     };
   };
 
@@ -315,13 +328,27 @@ export default function BillsPage() {
   const syncElectricityLine = (items: InvoiceLineItem[], snapshot: MeterSnapshot | null) => {
     if (!snapshot) return items;
     const next = [...items];
-    const idx = next.findIndex((item) => item.description.toLowerCase().includes("electric"));
+    const idx = next.findIndex(
+      (item) =>
+        item.meta?.kind === "METER_ELECTRICITY" ||
+        item.description.toLowerCase().includes("electric"),
+    );
+    const existing = idx >= 0 ? next[idx] : undefined;
+    const electricityMeta = {
+      ...(existing?.meta && typeof existing.meta === "object" ? existing.meta : {}),
+      kind: "METER_ELECTRICITY",
+      prev: snapshot.prevReading,
+      cur: snapshot.currReading,
+      usage: snapshot.usage,
+      unit_rate: snapshot.rate,
+    };
     const electricity = createLineItem({
-      id: idx >= 0 ? next[idx].id : undefined,
-      description: "Electricity",
+      id: existing?.id,
+      description: buildElectricityDescription(snapshot),
       qty: snapshot.usage,
       rate: snapshot.rate,
       amount: snapshot.amount,
+      meta: electricityMeta,
     });
     if (idx >= 0) next[idx] = electricity;
     else next.push(electricity);
@@ -440,15 +467,22 @@ export default function BillsPage() {
       if (!res.ok || payload?.ok === false) {
         throw new Error(payload?.error || "Failed to save invoice.");
       }
-      const totalAmount = payload?.data?.total_amount ?? computeTotal(lineItems);
+      const reload = await fetch(`/api/invoices/${editingInvoice.id}`, { cache: "no-store" });
+      const reloadPayload = await reload.json().catch(() => null);
+      const reloadData = reloadPayload?.ok ? reloadPayload.data : reloadPayload;
+      const refreshedItems = Array.isArray(reloadData?.line_items) ? reloadData.line_items : [];
+      const refreshedSnapshot = normalizeSnapshot(reloadData?.meter_snapshot ?? null);
+      setMeterSnapshot(refreshedSnapshot);
+      setLineItems(syncElectricityLine(refreshedItems, refreshedSnapshot));
+      const totalAmount = Number(reloadData?.total_amount ?? payload?.data?.total_amount ?? computeTotal(lineItems));
       setInvoices((prev) =>
         prev.map((row) =>
           row.id === editingInvoice.id
-            ? { ...row, total: Number(totalAmount), outstanding: Number(totalAmount) }
+            ? { ...row, total: totalAmount, outstanding: totalAmount }
             : row,
         ),
       );
-      closeEditor();
+      setToast({ type: "success", message: "Saved" });
     } catch (err) {
       console.error(err);
       alert(err instanceof Error ? err.message : "Failed to save invoice.");
@@ -583,6 +617,7 @@ export default function BillsPage() {
               qty: Number(item?.qty ?? 0),
               unitCents: Number(item?.unit_cents ?? 0),
               totalCents: Number(item?.total_cents ?? 0),
+              meta: item?.meta && typeof item.meta === "object" ? item.meta : undefined,
             }),
           )
         : [];
@@ -637,6 +672,7 @@ export default function BillsPage() {
             qty: Number(item.qty || 0),
             unit_cents: Number(item.unitCents || 0),
             total_cents: Number(item.totalCents || 0),
+            meta: item.meta ?? undefined,
           })),
         }),
       });

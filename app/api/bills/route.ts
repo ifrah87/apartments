@@ -83,6 +83,7 @@ type ElectricityLineItem = {
   qty: number;
   unit_cents: number;
   total_cents: number;
+  meta: Record<string, unknown> | null;
 };
 
 type ElectricityDebug = {
@@ -311,12 +312,23 @@ async function buildElectricityLineItem(
 
   if (!readings.prev) {
     console.warn("⚠️ missing previous electricity reading", { unitNumber, periodStart });
+    const curValue = readings.cur.value;
     return {
       lineItem: {
-        description: `Electricity (${periodLabel}) — Missing prev reading`,
+        description: `Electricity (${periodLabel}) — Prev: missing | Cur: ${curValue} | Usage: 0 (Missing prev reading)`,
         qty: 0,
         unit_cents: rateCents,
         total_cents: 0,
+        meta: {
+          kind: "METER_ELECTRICITY",
+          prev: null,
+          cur: curValue,
+          usage: 0,
+          unit_rate: rate,
+          periodStart,
+          periodEnd,
+          sourcePrev: "missing",
+        },
       },
       debug,
       snapshot: null,
@@ -327,12 +339,23 @@ async function buildElectricityLineItem(
   const totalCents = Math.round(usage * rateCents);
   const prevLabel = readings.prev.date || "Initial";
   const curLabel = readings.cur.date || "";
+  const sourcePrev = readings.prev.source === "initial" ? "baseline" : "reading";
   return {
     lineItem: {
-      description: `Electricity (${periodLabel}) — Prev: ${readings.prev.value} (${prevLabel}), Cur: ${readings.cur.value} (${curLabel})`,
+      description: `Electricity (${periodLabel}) — Prev: ${readings.prev.value} (${prevLabel}) | Cur: ${readings.cur.value} (${curLabel}) | Usage: ${usage}`,
       qty: usage,
       unit_cents: rateCents,
       total_cents: totalCents,
+      meta: {
+        kind: "METER_ELECTRICITY",
+        prev: readings.prev.value,
+        cur: readings.cur.value,
+        usage,
+        unit_rate: rate,
+        periodStart,
+        periodEnd,
+        sourcePrev,
+      },
     },
     debug: { ...debug, usage },
     snapshot: {
@@ -511,6 +534,7 @@ export async function POST(req: NextRequest) {
         qty?: number;
         unit_cents?: number;
         total_cents?: number;
+        meta?: Record<string, unknown>;
       }[];
     };
 
@@ -648,6 +672,7 @@ export async function POST(req: NextRequest) {
         qty,
         unit_cents: unitCents,
         total_cents: Math.round(qty * unitCents),
+        meta: item.meta && typeof item.meta === "object" ? item.meta : null,
       };
     });
 
@@ -737,17 +762,27 @@ export async function POST(req: NextRequest) {
         const qty = Number(item?.qty ?? 0);
         const unitCents = Math.round(Number(item?.unit_cents ?? 0));
         const totalCents = Math.round(Number(item?.total_cents ?? qty * unitCents));
+        const meta = item?.meta && typeof item.meta === "object" ? item.meta : null;
         return {
           description,
           qty,
           unit_cents: unitCents,
           total_cents: totalCents,
+          meta,
         };
       })
       .filter((item) => item.description);
 
     const totalCents = normalizedLineItems.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
-    const id = stableUuid(`inv-${tenantId}-${periodKey}`);
+    const existingInvoiceRes = await query(
+      `SELECT id
+       FROM public.invoices
+       WHERE unit_id = $1 AND period = $2
+       LIMIT 1`,
+      [unit.id, periodKey],
+    );
+    const existingInvoiceId = existingInvoiceRes.rows[0]?.id ? String(existingInvoiceRes.rows[0].id) : null;
+    const id = existingInvoiceId ?? stableUuid(`inv-${unit.id}-${periodKey}`);
 
     try {
       await query("BEGIN");
@@ -788,13 +823,13 @@ export async function POST(req: NextRequest) {
         const values: any[] = [];
         const placeholders = normalizedLineItems
           .map((row, idx) => {
-            const offset = idx * 6;
-            values.push(id, idx, row.description, row.qty, row.unit_cents, row.total_cents);
-            return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`;
+            const offset = idx * 7;
+            values.push(id, idx, row.description, row.qty, row.unit_cents, row.total_cents, row.meta);
+            return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7})`;
           })
           .join(",");
         await query(
-          `INSERT INTO public.invoice_lines (invoice_id, sort_order, description, qty, unit_cents, total_cents)
+          `INSERT INTO public.invoice_lines (invoice_id, sort_order, description, qty, unit_cents, total_cents, meta)
            VALUES ${placeholders}`,
           values,
         );

@@ -29,6 +29,7 @@ type InvoiceLineRow = {
   qty: number;
   unit_cents: number;
   total_cents: number;
+  meta?: Record<string, unknown> | null;
   created_at?: string;
 };
 
@@ -81,6 +82,7 @@ function mapInvoiceLines(rows: InvoiceLineRow[]): InvoiceLineItem[] {
     qty: Number(row.qty || 0),
     rate: fromCents(row.unit_cents),
     amount: fromCents(row.total_cents),
+    meta: row.meta ?? undefined,
   }));
 }
 
@@ -97,7 +99,7 @@ export async function GET(_req: NextRequest, context: { params: ParamsMaybePromi
   }
   const invoiceMeta = (invoiceRes.rows[0]?.meta ?? null) as Record<string, any> | null;
   const lineRes = await query(
-    `SELECT id, invoice_id, sort_order, description, qty, unit_cents, total_cents, created_at
+    `SELECT id, invoice_id, sort_order, description, qty, unit_cents, total_cents, meta, created_at
      FROM public.invoice_lines
      WHERE invoice_id = $1
      ORDER BY sort_order ASC, created_at ASC`,
@@ -132,6 +134,7 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
       qty: Number(item.qty || 0),
       unit_cents: toCents(item.rate),
       total_cents: toCents(item.amount),
+      meta: item.meta && typeof item.meta === "object" ? item.meta : null,
     }));
     const totalCents = lineRows.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
     const totalAmount = fromCents(totalCents);
@@ -142,13 +145,13 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
       const values: any[] = [];
       const placeholders = lineRows
         .map((row, idx) => {
-          const offset = idx * 6;
-          values.push(id, row.sort_order, row.description, row.qty, row.unit_cents, row.total_cents);
-          return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`;
+          const offset = idx * 7;
+          values.push(id, row.sort_order, row.description, row.qty, row.unit_cents, row.total_cents, row.meta);
+          return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7})`;
         })
         .join(",");
       await query(
-        `INSERT INTO public.invoice_lines (invoice_id, sort_order, description, qty, unit_cents, total_cents)
+        `INSERT INTO public.invoice_lines (invoice_id, sort_order, description, qty, unit_cents, total_cents, meta)
          VALUES ${placeholders}`,
         values,
       );
@@ -159,7 +162,7 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
            tax_cents = $2,
            total_cents = $3,
            meta = $4,
-           updated_at = now()
+           status = 'draft'
        WHERE id = $5`,
       [totalCents, 0, totalCents, meterSnapshot ? { meterSnapshot } : null, id],
     );
@@ -176,9 +179,24 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
       [],
     );
 
+    const refreshedLines = await query(
+      `SELECT id, invoice_id, sort_order, description, qty, unit_cents, total_cents, meta, created_at
+       FROM public.invoice_lines
+       WHERE invoice_id = $1
+       ORDER BY sort_order ASC, created_at ASC`,
+      [id],
+    );
+    const refreshedItems = mapInvoiceLines(refreshedLines.rows as InvoiceLineRow[]);
+
     return NextResponse.json({
       ok: true,
-      data: { id, line_items: lineItems, meter_snapshot: meterSnapshot, total_amount: totalAmount, total_cents: totalCents },
+      data: {
+        id,
+        line_items: refreshedItems,
+        meter_snapshot: meterSnapshot,
+        total_amount: totalAmount,
+        total_cents: totalCents,
+      },
     });
   } catch (err: any) {
     try {

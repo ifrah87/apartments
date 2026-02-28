@@ -152,24 +152,24 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
       y += 56;
     }
 
-    doc.fillColor("#0f172a").font("Inter-Bold").fontSize(20).text("INVOICE", left, y);
+    doc.fillColor("#000000").font("Inter-Bold").fontSize(20).text("INVOICE", left, y);
     y += 22;
-    doc.fillColor("#64748b").font("Inter").fontSize(10).text(`Billing period: ${monthLabel(payload.issueDate)}`, left, y);
+    doc.fillColor("#000000").font("Inter").fontSize(10).text(`Billing period: ${monthLabel(payload.issueDate)}`, left, y);
 
     const metaX = right - 220;
     const metaTop = doc.page.margins.top;
-    doc.fillColor("#475569").font("Inter").fontSize(9).text("Invoice #", metaX, metaTop, { width: 220, align: "right" });
-    doc.fillColor("#0f172a").font("Inter-Bold").fontSize(10).text(payload.invoiceNumber, metaX, metaTop + 12, {
+    doc.fillColor("#000000").font("Inter").fontSize(9).text("Invoice #", metaX, metaTop, { width: 220, align: "right" });
+    doc.fillColor("#000000").font("Inter-Bold").fontSize(10).text(payload.invoiceNumber, metaX, metaTop + 12, {
       width: 220,
       align: "right",
     });
-    doc.fillColor("#475569").font("Inter").fontSize(9).text("Issue date", metaX, metaTop + 30, { width: 220, align: "right" });
-    doc.fillColor("#0f172a").font("Inter").fontSize(10).text(formatUkDate(payload.issueDate), metaX, metaTop + 42, {
+    doc.fillColor("#000000").font("Inter").fontSize(9).text("Issue date", metaX, metaTop + 30, { width: 220, align: "right" });
+    doc.fillColor("#000000").font("Inter").fontSize(10).text(formatUkDate(payload.issueDate), metaX, metaTop + 42, {
       width: 220,
       align: "right",
     });
-    doc.fillColor("#475569").font("Inter").fontSize(9).text("Due date", metaX, metaTop + 60, { width: 220, align: "right" });
-    doc.fillColor("#0f172a").font("Inter").fontSize(10).text(formatUkDate(payload.dueDate), metaX, metaTop + 72, {
+    doc.fillColor("#000000").font("Inter").fontSize(9).text("Due date", metaX, metaTop + 60, { width: 220, align: "right" });
+    doc.fillColor("#000000").font("Inter").fontSize(10).text(formatUkDate(payload.dueDate), metaX, metaTop + 72, {
       width: 220,
       align: "right",
     });
@@ -179,15 +179,15 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     const billToX = left;
     const fromX = doc.page.width / 2 + 12;
     const sectionY = y + 12;
-    doc.fillColor("#64748b").font("Inter").fontSize(9).text("BILL TO", billToX, sectionY);
-    doc.fillColor("#0f172a").font("Inter-Bold").fontSize(12).text(payload.tenant.name, billToX, sectionY + 14);
-    doc.fillColor("#0f172a").font("Inter").fontSize(10);
+    doc.fillColor("#000000").font("Inter").fontSize(9).text("BILL TO", billToX, sectionY);
+    doc.fillColor("#000000").font("Inter-Bold").fontSize(12).text(payload.tenant.name, billToX, sectionY + 14);
+    doc.fillColor("#000000").font("Inter").fontSize(10);
     doc.text(payload.tenant.building || payload.tenant.property_id || "—", billToX, sectionY + 30);
     doc.text(payload.tenant.unit ? `Unit ${payload.tenant.unit}` : "Unit —", billToX, sectionY + 44);
 
-    doc.fillColor("#64748b").font("Inter").fontSize(9).text("FROM", fromX, sectionY);
-    doc.fillColor("#0f172a").font("Inter-Bold").fontSize(12).text(company.name, fromX, sectionY + 14);
-    doc.fillColor("#0f172a").font("Inter").fontSize(10);
+    doc.fillColor("#000000").font("Inter").fontSize(9).text("FROM", fromX, sectionY);
+    doc.fillColor("#000000").font("Inter-Bold").fontSize(12).text(company.name, fromX, sectionY + 14);
+    doc.fillColor("#000000").font("Inter").fontSize(10);
     const fromLines = [company.address, company.phone].filter(Boolean);
     fromLines.forEach((line, idx) => {
       doc.text(line || "", fromX, sectionY + 30 + idx * 14);
@@ -200,7 +200,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     const colQty = left + 260;
     const colRate = left + 340;
     const colAmount = right - 100;
-    doc.fillColor("#64748b").font("Inter-Bold").fontSize(9);
+    doc.fillColor("#000000").font("Inter-Bold").fontSize(9);
     doc.text("DESCRIPTION", colDesc, tableTop);
     doc.text("QTY", colQty, tableTop, { width: 60, align: "right" });
     doc.text("RATE", colRate, tableTop, { width: 80, align: "right" });
@@ -210,7 +210,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     doc.moveTo(left, y).lineTo(right, y).strokeColor("#e2e8f0").stroke();
     y += 8;
 
-    doc.font("Inter").fontSize(10).fillColor("#0f172a");
+    doc.font("Inter").fontSize(10).fillColor("#000000");
     const lineItems = payload.line_items || [];
     lineItems.forEach((item) => {
       const descWidth = colQty - colDesc - 12;
@@ -237,9 +237,9 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     if (payload.meter_snapshot) {
       const snap = payload.meter_snapshot;
       y += 24;
-      doc.font("Inter-Bold").fontSize(10).fillColor("#0f172a").text("Electricity Reading", colDesc, y);
+      doc.font("Inter-Bold").fontSize(10).fillColor("#000000").text("Electricity Reading", colDesc, y);
       y += 14;
-      doc.font("Inter").fontSize(9).fillColor("#475569");
+      doc.font("Inter").fontSize(9).fillColor("#000000");
       if (snap.prevDate) {
         doc.text(`Previous Reading (${formatUkDate(snap.prevDate)}) ${formatQuantity(snap.prevReading)} ${snap.unitLabel || "kWh"}`, colDesc, y);
         y += 12;
@@ -257,7 +257,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
   };
 
   if (!invoices.length) {
-    doc.fillColor("#0f172a").font("Inter-Bold").fontSize(18).text("No charges found", doc.page.margins.left, doc.page.margins.top);
+    doc.fillColor("#000000").font("Inter-Bold").fontSize(18).text("No charges found", doc.page.margins.left, doc.page.margins.top);
   } else {
     invoices.forEach(addInvoicePage);
   }
@@ -533,9 +533,16 @@ export async function GET(req: NextRequest) {
 
     if (wantsPdf) {
       const pdf = await renderInvoicesPdf(invoicePayloads, reference, company);
-      const filename = normalizedTenantId
-        ? `tenant-invoice-${normalizedTenantId}-${toISO(reference).slice(0, 7)}.pdf`
-        : `tenant-invoices-${toISO(reference).slice(0, 7)}.pdf`;
+      const periodLabel = toISO(reference).slice(0, 7);
+      const sanitize = (value: string) => value.replace(/[^a-zA-Z0-9-_]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+      let filename = `Invoices-${periodLabel}.pdf`;
+      if (invoicePayloads.length === 1) {
+        const single = invoicePayloads[0];
+        const invoiceNumber = sanitize(String(single.invoiceNumber || single.invoiceId || "invoice"));
+        const tenantLabel = single.tenant.unit ? `Unit-${single.tenant.unit}` : single.tenant.name || "Tenant";
+        const tenantSafe = sanitize(String(tenantLabel));
+        filename = `Invoice-${invoiceNumber}-${tenantSafe}-${periodLabel}.pdf`;
+      }
       const disposition = mode === "download" ? "attachment" : "inline";
       return new NextResponse(new Uint8Array(pdf), {
         headers: {
@@ -568,13 +575,13 @@ export async function GET(req: NextRequest) {
     const themeOverride = isView
       ? `
       body { background: #0b1220; color: #e2e8f0; }
-      .invoice { background: #0f172a; box-shadow: 0 16px 32px rgba(2, 6, 23, 0.6); }
+      .invoice { background: #000000; box-shadow: 0 16px 32px rgba(2, 6, 23, 0.6); }
       h2, .muted, .invoice-meta span, th, .note { color: #94a3b8; }
       .invoice-meta { color: #cbd5f5; }
       th, td { border-bottom: 1px solid #1f2937; }
       .meter-block { background: #0b1220; border-color: #1f2937; }
       .meter-block p { color: #94a3b8; }
-      .empty { background: #0f172a; color: #94a3b8; }
+      .empty { background: #000000; color: #94a3b8; }
       `
       : "";
 
@@ -584,23 +591,23 @@ export async function GET(req: NextRequest) {
     <meta charset="utf-8" />
     <title>Monthly Invoices</title>
     <style>
-      body { margin: 0; font-family: "Helvetica Neue", Arial, sans-serif; background: #f2f4f8; color: #0f172a; }
+      body { margin: 0; font-family: "Helvetica Neue", Arial, sans-serif; background: #f2f4f8; color: #000000; }
       .invoice { background: #fff; margin: 32px auto; padding: 48px; max-width: 860px; border-radius: 16px; box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08); }
       .invoice:last-child { page-break-after: auto; }
       .invoice { page-break-after: always; }
       .invoice-top { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
       .logo { height: 52px; width: auto; display: block; margin-bottom: 12px; }
       h1 { margin: 8px 0 4px; font-size: 28px; letter-spacing: 0.05em; text-transform: uppercase; }
-      h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; color: #64748b; }
+      h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; color: #000000; }
       .tag { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #9f1239; font-weight: 700; }
-      .muted { color: #64748b; font-size: 12px; margin: 0; }
-      .invoice-meta { text-align: right; font-size: 12px; color: #475569; }
+      .muted { color: #000000; font-size: 12px; margin: 0; }
+      .invoice-meta { text-align: right; font-size: 12px; color: #000000; }
       .invoice-meta span { display: block; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: #94a3b8; margin-bottom: 2px; }
       .invoice-meta div { margin-bottom: 6px; }
       .invoice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 32px 0; }
       .name { font-weight: 700; font-size: 16px; margin: 0 0 6px; }
       table { width: 100%; border-collapse: collapse; font-size: 14px; }
-      th { text-align: left; font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #e2e8f0; padding: 12px 0; }
+      th { text-align: left; font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: #000000; border-bottom: 1px solid #e2e8f0; padding: 12px 0; }
       td { padding: 12px 0; border-bottom: 1px solid #e2e8f0; }
       .qty { text-align: right; width: 70px; }
       .amount { text-align: right; }
@@ -608,10 +615,10 @@ export async function GET(req: NextRequest) {
       .total-label { text-align: right; font-weight: 600; }
       .total { font-size: 18px; font-weight: 700; }
       .meter-block { margin-top: 20px; padding: 16px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; }
-      .meter-block h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: #64748b; }
-      .meter-block p { margin: 4px 0; font-size: 12px; color: #475569; }
-      .note { margin-top: 16px; font-size: 12px; color: #64748b; }
-      .empty { margin: 48px auto; padding: 32px; max-width: 720px; border-radius: 16px; background: #fff; text-align: center; color: #64748b; }
+      .meter-block h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: #000000; }
+      .meter-block p { margin: 4px 0; font-size: 12px; color: #000000; }
+      .note { margin-top: 16px; font-size: 12px; color: #000000; }
+      .empty { margin: 48px auto; padding: 32px; max-width: 720px; border-radius: 16px; background: #fff; text-align: center; color: #000000; }
       ${themeOverride}
       @media print {
         body { background: #fff; }
