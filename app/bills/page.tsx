@@ -658,7 +658,6 @@ export default function BillsPage() {
           unitIds: [draftInvoice.unitId],
           month: draftInvoice.month,
           year: draftInvoice.year,
-          tenant_id: tenantId,
           lineItems: draftItems.map((item) => ({
             description: item.description,
             qty: Number(item.qty || 0),

@@ -103,6 +103,15 @@ type ElectricityReadings = {
   reason?: string;
 };
 
+type LeaseRow = {
+  id: string;
+  tenant_id: string;
+  rent: number | null;
+  start_date: string;
+  end_date: string | null;
+  status: string;
+};
+
 function normalizeServiceList(value: unknown): ServiceRecord[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as ServiceRecord[];
@@ -452,6 +461,19 @@ function stableUuid(seed: string) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+function parsePeriod(period?: string) {
+  if (!period) return null;
+  const trimmed = String(period).trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(\d{4})-(\d{2})/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
+  const reference = new Date(Date.UTC(year, month - 1, 1));
+  return { reference, periodKey: `${year}-${String(month).padStart(2, "0")}` };
+}
+
 function buildTenantIndex(tenants: TenantRecord[]) {
   const map = new Map<string, TenantRecord>();
   tenants.forEach((tenant) => {
@@ -502,8 +524,10 @@ export async function POST(req: NextRequest) {
       tenantId?: string;
       tenant_id?: string;
       unitIds?: string[];
+      unit_ids?: string[];
       month?: string;
       year?: string;
+      period?: string;
       lineItems?: {
         description?: string;
         qty?: number;
@@ -517,10 +541,17 @@ export async function POST(req: NextRequest) {
     const dryRun = url.searchParams.get("dryRun") === "1";
     const debugEnabled = url.searchParams.get("debug") === "1";
     const payload = (await req.json().catch(() => ({}))) as BillsPayload;
-    const unitIds = Array.isArray(payload?.unitIds) ? payload.unitIds.filter(Boolean) : [];
+    const unitIds =
+      Array.isArray(payload?.unit_ids) && payload.unit_ids.length
+        ? payload.unit_ids.filter(Boolean)
+        : Array.isArray(payload?.unitIds)
+          ? payload.unitIds.filter(Boolean)
+          : [];
+
+    const parsedPeriod = parsePeriod(payload?.period);
     const monthValue = payload?.month || "";
-    const monthIndex = toMonthIndex(monthValue);
-    const year = Number(payload?.year);
+    const monthIndex = parsedPeriod ? parsedPeriod.reference.getUTCMonth() : toMonthIndex(monthValue);
+    const year = parsedPeriod ? parsedPeriod.reference.getUTCFullYear() : Number(payload?.year);
     const periodPreview =
       monthIndex !== null && Number.isFinite(year)
         ? `${year}-${String(monthIndex + 1).padStart(2, "0")}`
@@ -544,8 +575,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Invalid month or year." }, { status: 400 });
     }
 
-    const reference = new Date(Date.UTC(year, monthIndex, 1));
-    const periodKey = `${reference.getUTCFullYear()}-${String(reference.getUTCMonth() + 1).padStart(2, "0")}`;
+    const reference = parsedPeriod?.reference ?? new Date(Date.UTC(year, monthIndex, 1));
+    const periodKey = parsedPeriod?.periodKey ?? `${reference.getUTCFullYear()}-${String(reference.getUTCMonth() + 1).padStart(2, "0")}`;
     const { start, end } = monthRange(reference);
     const monthStartKey = start.toISOString().slice(0, 10);
     const monthEndExclusive = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 1));
@@ -560,7 +591,6 @@ export async function POST(req: NextRequest) {
       datasetsRepo.getDataset<LeaseAgreement[]>("lease_agreements", []),
     ]);
 
-    const tenantIndex = buildTenantIndex(tenants);
     const chargeIndex = new Map<
       string,
       Array<{ date: string; amount: number; description?: string; category?: string; meta?: Record<string, unknown> }>
@@ -588,16 +618,10 @@ export async function POST(req: NextRequest) {
     if (!unit) {
       return NextResponse.json({ ok: false, error: "Unit not found." }, { status: 404 });
     }
-    const propertyKey = (unit.property_id || "").toLowerCase();
-    const unitKey = `${propertyKey}::${unit.unit}`.toLowerCase();
-    const tenant = tenantIndex.get(unitKey) || tenantIndex.get(`::${unit.unit}`.toLowerCase());
-    if (!tenant) {
-      return NextResponse.json({ ok: false, error: "Tenant not found for this unit." }, { status: 404 });
-    }
-    const leaseIndex = buildLeaseIndex(Array.isArray(leasesData) ? leasesData : []);
-    let dbLease: any | null = null;
+
+    let lease: LeaseRow | null = null;
     try {
-      const dbLeaseRes = await query(
+      const leaseRes = await query(
         `SELECT id, tenant_id, rent, start_date, end_date, status
          FROM public.leases
          WHERE unit_id = $1 AND status = 'active'
@@ -605,97 +629,67 @@ export async function POST(req: NextRequest) {
          LIMIT 1`,
         [unit.id],
       );
-      dbLease = dbLeaseRes.rows[0] ?? null;
+      lease = (leaseRes.rows[0] as LeaseRow | undefined) ?? null;
     } catch (err) {
       console.warn("⚠️ failed to load lease from db", err);
     }
-    const lease =
-      dbLease ||
-      leaseIndex.get(`${propertyKey}::${unit.unit}`.toLowerCase()) ||
-      leaseIndex.get(`::${unit.unit}`.toLowerCase());
 
-    const leaseTenantId = String((dbLease as any)?.tenant_id ?? "").trim();
-    const tenantId = String(payload?.tenant_id ?? payload?.tenantId ?? leaseTenantId ?? tenant.id ?? "").trim();
-    if (!tenantId) {
-      return NextResponse.json({ ok: false, error: "Missing tenant_id." }, { status: 400 });
+    if (!lease) {
+      const response: Record<string, unknown> = {
+        ok: false,
+        error: "Unit is not ready: no active lease.",
+        unit: { id: unit.id, unit: unit.unit },
+        reason: "no active lease",
+      };
+      if (debugEnabled) {
+        console.info("Bills debug", response);
+        return NextResponse.json({ ...response, debug: { lease: null } }, { status: 400 });
+      }
+      return NextResponse.json(response, { status: 400 });
     }
-    const leaseRent = toNumberOrNull(
-      (lease as any)?.rent_amount ?? (lease as any)?.monthly_rent ?? (lease as any)?.rent,
-    );
-    const leaseStartRaw = (lease as any)?.start_date ?? (lease as any)?.startDate ?? null;
-    const leaseEndRaw = (lease as any)?.end_date ?? (lease as any)?.endDate ?? null;
-    const leaseStart = leaseStartRaw ? new Date(String(leaseStartRaw)) : null;
-    const leaseEnd = leaseEndRaw ? new Date(String(leaseEndRaw)) : null;
-    const leaseActiveForPeriod =
-      !!lease &&
-      String((lease as any)?.status ?? lease?.status ?? "").toLowerCase() === "active" &&
-      (!leaseStart || leaseStart < periodEnd) &&
-      (!leaseEnd || leaseEnd >= periodStart);
-    const tenantMonthlyRent = toNumberOrNull((tenant as any)?.monthly_rent);
-    const effectiveRent = tenantMonthlyRent ?? (leaseActiveForPeriod ? leaseRent : null);
 
-    const statementTenant = {
-      id: tenant.id,
-      name: tenant.name,
-      property_id: opt(tenant.property_id),
-      building: opt(tenant.building),
-      unit: opt(tenant.unit),
-      reference: opt(tenant.reference),
-      monthly_rent: effectiveRent ?? opt(tenant.monthly_rent),
-      due_day: opt(tenant.due_day),
-    };
+    const tenantId = String(lease.tenant_id ?? "").trim();
+    if (!tenantId) {
+      return NextResponse.json({ ok: false, error: "Missing tenant_id on active lease." }, { status: 400 });
+    }
 
-    let { rows, totals } = createStatement({
-      tenant: statementTenant,
+    const tenant = tenants.find((row) => String(row.id) === tenantId);
+    if (!tenant) {
+      return NextResponse.json({ ok: false, error: "Tenant not found for active lease." }, { status: 404 });
+    }
+
+    const rentValue = toNumberOrNull(lease.rent) ?? toNumberOrNull((tenant as any)?.monthly_rent) ?? 0;
+    const rentCents = Math.round(rentValue * 100);
+    const rentLabel = `Monthly Rent (${reference.toLocaleString("en", { month: "short", year: "numeric", timeZone: "UTC" })})`;
+
+    const { rows } = createStatement({
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        property_id: opt(tenant.property_id),
+        building: opt(tenant.building),
+        unit: opt(tenant.unit),
+        reference: opt(tenant.reference),
+        monthly_rent: opt(tenant.monthly_rent),
+        due_day: opt(tenant.due_day),
+      },
       start,
       end,
       payments: [],
       additionalCharges: chargeIndex.get(tenantId) || [],
+      includeRentCharges: false,
     });
 
-    if (!totals.charges && effectiveRent && leaseActiveForPeriod) {
-      const rentLabel = `Rent for ${reference.toLocaleString("en", { month: "long", year: "numeric", timeZone: "UTC" })}`;
-      rows = [
-        {
-          date: start.toISOString().slice(0, 10),
-          description: rentLabel,
-          charge: effectiveRent,
-          payment: 0,
-          balance: Number(effectiveRent.toFixed(2)),
-          entryType: "charge",
-          source: "rent",
-        },
-      ];
-      totals = { charges: effectiveRent, payments: 0, balance: effectiveRent };
-    }
-
-    if (!totals.charges) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "No charges found (rent not generated).",
-          debug: {
-            unit_id: unitId,
-            tenant_id: tenantId,
-            lease_id: lease?.id ?? null,
-            rent_amount:
-              (lease as any)?.rent_amount ??
-              (lease as any)?.monthly_rent ??
-              lease?.rent ??
-              null,
-            periodStart: periodStart?.toISOString?.() ?? null,
-            periodEnd: periodEnd?.toISOString?.() ?? null,
-            lease_start: (lease as any)?.start_date ?? lease?.startDate ?? null,
-            lease_end: (lease as any)?.end_date ?? lease?.endDate ?? null,
-            lease_status: (lease as any)?.status ?? lease?.status ?? null
-          }
-        },
-        { status: 400 },
-      );
-    }
+    const rentLineItem: ElectricityLineItem = {
+      description: rentLabel,
+      qty: 1,
+      unit_cents: rentCents,
+      total_cents: rentCents,
+      meta: { kind: "RENT" },
+    };
 
     const { lineItems } = buildInvoiceLineItems(rows, reference);
-    const defaultLineItems = lineItems.map((item) => {
+    const extraLineItems = lineItems.map((item) => {
       const unitCents = toCents(item.rate);
       const qty = Number(item.qty || 0);
       return {
@@ -710,7 +704,7 @@ export async function POST(req: NextRequest) {
     // --- ELECTRICITY AUTO CALCULATION ---
     const periodStartKey = monthStartKey;
     const periodEndKey = monthEndKey;
-    const lineItemsForInvoice = [...defaultLineItems];
+    const lineItemsForInvoice = [rentLineItem, ...extraLineItems];
 
     const electricityResult = await buildElectricityLineItem({
       unitId: unit.id,
@@ -781,8 +775,24 @@ export async function POST(req: NextRequest) {
     if (dryRun) {
       const response: Record<string, unknown> = { ok: true, mode: "preview", draft };
       if (debugEnabled) {
-        response.debug = electricityDebugPayload;
+        response.debug = {
+          lease: {
+            id: lease.id,
+            tenant_id: tenantId,
+            rent: rentValue,
+          },
+          meter: electricityDebugPayload,
+          invoice: {
+            tenant_id: tenantId,
+            unit_id: unit.id,
+            period: periodKey,
+            total_cents: lineItemsForInvoice.reduce((sum, row) => sum + Number(row.total_cents || 0), 0),
+            line_items: lineItemsForInvoice,
+            meter_snapshot: meterSnapshot,
+          },
+        };
         response.lineItems = lineItemsForInvoice;
+        console.info("Bills debug", response.debug);
       }
       return NextResponse.json(response);
     }
@@ -816,10 +826,27 @@ export async function POST(req: NextRequest) {
     }));
     const id = stableUuid(`inv-${unit.id}-${periodKey}`);
     let savedInvoiceId = id;
+    const invoicePayload = {
+      id,
+      tenant_id: tenantId,
+      unit_id: unit.id,
+      invoice_date: invoiceDate.toISOString().slice(0, 10),
+      due_date: dueDate.toISOString().slice(0, 10),
+      status: "draft",
+      currency: "USD",
+      subtotal_cents: totalCents,
+      tax_cents: 0,
+      total_cents: totalCents,
+      notes: null,
+      meta: meterSnapshot ? { meter_snapshot: meterSnapshot } : null,
+      period: periodKey,
+      line_items: lineItemsJson,
+      meter_snapshot: meterSnapshot,
+      total_amount: Number((totalCents / 100).toFixed(2)),
+    };
 
     try {
       await query("BEGIN");
-      const meta = meterSnapshot ? { meter_snapshot: meterSnapshot } : null;
       const invoiceRes = await query(
         `INSERT INTO public.invoices (id, tenant_id, unit_id, invoice_date, due_date, status, currency, subtotal_cents, tax_cents, total_cents, notes, meta, period, line_items, meter_snapshot, total_amount)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
@@ -839,22 +866,22 @@ export async function POST(req: NextRequest) {
            total_amount = EXCLUDED.total_amount
          RETURNING id, invoice_number`,
         [
-          id,
-          tenantId,
-          unit.id,
+          invoicePayload.id,
+          invoicePayload.tenant_id,
+          invoicePayload.unit_id,
           invoiceDate,
           dueDate,
-          "draft",
-          "USD",
-          totalCents,
-          0,
-          totalCents,
-          null,
-          meta,
-          periodKey,
-          lineItemsJson,
-          meterSnapshot,
-          Number((totalCents / 100).toFixed(2)),
+          invoicePayload.status,
+          invoicePayload.currency,
+          invoicePayload.subtotal_cents,
+          invoicePayload.tax_cents,
+          invoicePayload.total_cents,
+          invoicePayload.notes,
+          invoicePayload.meta,
+          invoicePayload.period,
+          invoicePayload.line_items,
+          invoicePayload.meter_snapshot,
+          invoicePayload.total_amount,
         ],
       );
       const invoiceId = String(invoiceRes.rows[0]?.id ?? id);
@@ -884,6 +911,13 @@ export async function POST(req: NextRequest) {
         );
       }
       await query("COMMIT");
+      if (debugEnabled) {
+        console.info("Bills debug", {
+          lease: { id: lease.id, tenant_id: tenantId, rent: rentValue },
+          meter: electricityDebugPayload,
+          invoice: invoicePayload,
+        });
+      }
     } catch (err) {
       try {
         await query("ROLLBACK");
@@ -921,7 +955,11 @@ export async function POST(req: NextRequest) {
 
     const response: Record<string, unknown> = { ok: true, invoiceId: savedInvoiceId, data: updated, created: [created] };
     if (debugEnabled) {
-      response.debug = electricityDebugPayload;
+      response.debug = {
+        lease: { id: lease.id, tenant_id: tenantId, rent: rentValue },
+        meter: electricityDebugPayload,
+        invoice: invoicePayload,
+      };
       response.lineItems = lineItemsForInvoice;
     }
     return NextResponse.json(response);
