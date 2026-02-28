@@ -16,6 +16,7 @@ type InitialReadingRecord = {
   meter_type: string;
   reading_value: number;
   reading_date: string;
+  baseline?: boolean;
   updated_at: string;
 };
 
@@ -75,6 +76,7 @@ async function upsertInitialReadingDataset({
     meter_type: meterType,
     reading_value: readingValue,
     reading_date: readingDate,
+    baseline: true,
     updated_at: new Date().toISOString(),
   };
 
