@@ -102,7 +102,7 @@ export default async function DepositsReportPage({ searchParams }: { searchParam
                     {row.lastActivity ? (
                       <div>
                         <div className="font-medium capitalize">{row.lastActivityType}</div>
-                        <div className="text-xs">{new Date(row.lastActivity).toLocaleDateString()}</div>
+                        <div className="text-xs">{new Date(row.lastActivity).toLocaleDateString("en-GB")}</div>
                       </div>
                     ) : (
                       "—"
@@ -142,7 +142,7 @@ export default async function DepositsReportPage({ searchParams }: { searchParam
             <tbody>
               {report.transactions.map((txn) => (
                 <tr key={`${txn.tenantId}-${txn.date}-${txn.type}-${txn.amount}`} className="border-t border-slate-100">
-                  <td className="px-4 py-2 text-slate-600">{new Date(txn.date).toLocaleDateString()}</td>
+                  <td className="px-4 py-2 text-slate-600">{new Date(txn.date).toLocaleDateString("en-GB")}</td>
                   <td className="px-4 py-2 text-slate-900">
                     <div className="font-semibold">{txn.tenantName}</div>
                     <div className="text-xs text-slate-500">{txn.propertyName}</div>

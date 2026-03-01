@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
+import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import type { PropertySummary } from "@/lib/repos/propertiesRepo";
@@ -20,6 +21,7 @@ function formatMoney(value: number) {
 
 export default function PropertiesClient({ summaries }: Props) {
   const router = useRouter();
+  const confirm = useConfirm();
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<PropertySummary[]>(summaries);
   const [showModal, setShowModal] = useState(false);
@@ -92,7 +94,13 @@ export default function PropertiesClient({ summaries }: Props) {
 
   const handleDelete = async (summary: PropertySummary) => {
     const message = `Delete ${summary.name}? This will remove all units and related leases/payments.`;
-    if (!confirm(message)) return;
+    const confirmed = await confirm({
+      title: "Delete Property",
+      message,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setError(null);
     setNotice(null);
     startDelete(async () => {

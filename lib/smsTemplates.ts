@@ -39,7 +39,7 @@ export function buildRentReminderBody({
   name,
   monthlyRent,
   dueDay,
-  locale = "en-US",
+  locale = "en-GB",
   referenceDate = new Date(),
 }: RentReminderInput) {
   const tenantName = name?.trim() || "tenant";

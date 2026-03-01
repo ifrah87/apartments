@@ -73,7 +73,7 @@ export default async function JournalEntriesPage({ searchParams }: { searchParam
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">{entry.entryId}</h2>
                 <p className="text-sm text-slate-500">
-                  {new Date(entry.date).toLocaleDateString()} · {entry.propertyId}
+                  {new Date(entry.date).toLocaleDateString("en-GB")} · {entry.propertyId}
                 </p>
               </div>
               <div className="text-xs uppercase tracking-wide text-slate-500">{entry.lines.length} lines</div>

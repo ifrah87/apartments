@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Save, Shield, Trash2, UserRound, X } from "lucide-react";
+import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
 
 type UserRow = {
@@ -15,6 +16,7 @@ type UserRow = {
 };
 
 export default function AdminSettingsPage() {
+  const confirm = useConfirm();
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -124,7 +126,13 @@ export default function AdminSettingsPage() {
       setError("Only admins can delete team members.");
       return;
     }
-    if (!confirm("Delete this team member?")) return;
+    const confirmed = await confirm({
+      title: "Delete Team Member",
+      message: "Delete this team member? This cannot be undone.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setError("");
     try {
       const res = await fetch("/api/admin/users", {

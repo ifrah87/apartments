@@ -104,7 +104,7 @@ export default async function GeneralLedgerPage({ searchParams }: { searchParams
             <tbody>
               {ledger.map((row) => (
                 <tr key={`${row.entryId}-${row.accountId}-${row.date}`} className="border-t border-slate-100">
-                  <td className="px-4 py-2 text-slate-600">{new Date(row.date).toLocaleDateString()}</td>
+                  <td className="px-4 py-2 text-slate-600">{new Date(row.date).toLocaleDateString("en-GB")}</td>
                   <td className="px-4 py-2 text-slate-900">{row.entryId}</td>
                   <td className="px-4 py-2 text-slate-700">{row.accountName}</td>
                   <td className="px-4 py-2 text-slate-600">{row.description || "—"}</td>

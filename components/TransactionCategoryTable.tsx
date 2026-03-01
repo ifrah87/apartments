@@ -20,7 +20,7 @@ type CategoryMap = Record<string, string>;
 function formatDate(date: string) {
   const d = new Date(date);
   if (Number.isNaN(d.getTime())) return date;
-  return d.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString("en-GB", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function formatMoney(amount: number) {

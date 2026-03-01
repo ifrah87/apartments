@@ -88,7 +88,7 @@ function ReconciliationTable({ title, rows, empty }: { title: string; rows: { da
         <tbody>
           {rows.map((row) => (
             <tr key={`${row.date}-${row.description}`} className="border-t border-slate-100">
-              <td className="px-4 py-2 text-slate-600">{new Date(row.date).toLocaleDateString()}</td>
+              <td className="px-4 py-2 text-slate-600">{new Date(row.date).toLocaleDateString("en-GB")}</td>
               <td className="px-4 py-2 text-slate-900">{row.description}</td>
               <td className="px-4 py-2 text-right font-semibold text-slate-900">{row.amount}</td>
             </tr>

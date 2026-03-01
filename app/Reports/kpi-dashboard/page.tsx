@@ -54,7 +54,7 @@ export default async function KPIDashboardPage() {
             <tbody>
               {rows.map((row) => (
                 <tr key={row.date} className="border-t border-slate-100">
-                  <td className="px-4 py-2 text-slate-900">{new Date(row.date).toLocaleDateString()}</td>
+                  <td className="px-4 py-2 text-slate-900">{new Date(row.date).toLocaleDateString("en-GB")}</td>
                   <td className="px-4 py-2 text-slate-600">{row.occupancyRate}%</td>
                   <td className="px-4 py-2 text-rose-600">{currency.format(row.arrearsTotal)}</td>
                   <td className="px-4 py-2 text-emerald-600">{currency.format(row.rentCollected)}</td>

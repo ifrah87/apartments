@@ -627,7 +627,7 @@ function formatCellValue(value: unknown, valueType?: string) {
     case "percent":
       return `${percentFormat.format(toNumber(value))}%`;
     case "date":
-      return new Date(value as string).toLocaleDateString();
+      return new Date(value as string).toLocaleDateString("en-GB");
     default:
       return String(value);
   }

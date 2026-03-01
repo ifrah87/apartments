@@ -10,7 +10,7 @@ type PropertyOption = { id: string; name?: string };
 
 function formatDate(date: string | undefined) {
   if (!date) return "—";
-  return new Intl.DateTimeFormat("en", { day: "2-digit", month: "short", year: "numeric" }).format(
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(
     new Date(date),
   );
 }

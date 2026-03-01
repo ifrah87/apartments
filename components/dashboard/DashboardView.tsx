@@ -57,7 +57,7 @@ export default function DashboardView({
   const { t, language } = useTranslations();
   const [tenants, setTenants] = useState<TenantWithPhone[]>([]);
   const [smsSendingKey, setSmsSendingKey] = useState<string | null>(null);
-  const locale = language === "so" ? "so-SO" : "en-US";
+  const locale = language === "so" ? "so-SO" : "en-GB";
   const lastUpdatedText = bank.lastUpdatedISO
     ? new Date(bank.lastUpdatedISO).toLocaleString(locale, {
         month: "short",

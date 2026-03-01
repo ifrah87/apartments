@@ -99,7 +99,7 @@ export function buildCharges(tenant: TenantRecord, start: Date, end: Date) {
       entries.push({
         date: toISO(chargeDate),
         amount: rent,
-        description: `Rent for ${chargeDate.toLocaleString("en", { month: "long", year: "numeric" })}`,
+        description: `Rent for ${chargeDate.toLocaleString("en-GB", { month: "long", year: "numeric" })}`,
       });
     }
     cursor.setUTCMonth(cursor.getUTCMonth() + 1);

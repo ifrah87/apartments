@@ -118,7 +118,7 @@ export default async function MaintenanceReportPage({ searchParams }: { searchPa
                       {row.status}
                     </span>
                   </td>
-                  <td className="px-4 py-2 text-slate-600">{row.openedAt ? new Date(row.openedAt).toLocaleDateString() : "—"}</td>
+                  <td className="px-4 py-2 text-slate-600">{row.openedAt ? new Date(row.openedAt).toLocaleDateString("en-GB") : "—"}</td>
                   <td className="px-4 py-2 text-slate-600">{row.vendor || "—"}</td>
                   <td className="px-4 py-2 text-right text-slate-900">{currency.format(row.cost)}</td>
                   <td className="px-4 py-2 text-slate-600">{row.description || "—"}</td>

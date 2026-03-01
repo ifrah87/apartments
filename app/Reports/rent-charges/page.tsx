@@ -23,7 +23,7 @@ function defaultEffectiveDate() {
 
 function formatDate(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" });
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-GB", { month: "short", day: "numeric", year: "numeric" });
 }
 
 export const runtime = "nodejs";

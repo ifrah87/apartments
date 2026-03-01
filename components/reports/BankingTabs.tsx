@@ -373,5 +373,5 @@ function formatNumber(value: number) {
 
 function formatDisplayDate(date: string) {
   const d = new Date(date);
-  return d.toLocaleDateString("en", { day: "numeric", month: "short", year: "numeric" });
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }

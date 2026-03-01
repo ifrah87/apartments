@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
 import SectionCard from "@/components/ui/SectionCard";
@@ -119,6 +120,7 @@ function buildDefaultForm(): LeaseFormState {
 }
 
 export default function LeasesClient() {
+  const confirm = useConfirm();
   const [leases, setLeases] = useState<LeaseAgreement[]>([]);
   const [search, setSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("All Months");
@@ -670,7 +672,13 @@ export default function LeasesClient() {
   };
 
   const handleDeleteLease = async (lease: LeaseAgreement) => {
-    if (!confirm(`Delete lease for Unit ${lease.unit}?`)) return;
+    const confirmed = await confirm({
+      title: "Delete Lease",
+      message: `Delete lease for Unit ${lease.unit}? This cannot be undone.`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setNotice(null);
     try {
       const res = await fetch("/api/lease-agreements", {

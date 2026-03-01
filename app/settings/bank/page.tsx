@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Plus, Pencil, Trash2 } from "lucide-react";
+import { useConfirm } from "@/components/ConfirmProvider";
 import SettingsShell from "@/components/settings/SettingsShell";
 import SettingsTable from "@/components/settings/SettingsTable";
 import SettingsDrawer from "@/components/settings/SettingsDrawer";
@@ -23,6 +24,7 @@ const EMPTY_ACCOUNT: BankAccount = {
 };
 
 export default function BankSettingsPage() {
+  const confirm = useConfirm();
   const [form, setForm] = useState<BankSettings>(DEFAULT_BANK);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -87,8 +89,14 @@ export default function BankSettingsPage() {
     setDrawerOpen(false);
   };
 
-  const deleteAccount = (accountId: string) => {
-    if (!confirm("Delete this bank account?")) return;
+  const deleteAccount = async (accountId: string) => {
+    const confirmed = await confirm({
+      title: "Delete Bank Account",
+      message: "Delete this bank account?",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setForm((prev) => {
       const remaining = prev.accounts.filter((acct) => acct.id !== accountId);
       if (!remaining.length) return { ...prev, accounts: [] };

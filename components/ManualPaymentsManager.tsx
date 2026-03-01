@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useConfirm } from "@/components/ConfirmProvider";
 
 type ManualPayment = {
   id: string;
@@ -25,6 +26,7 @@ const defaultForm = (): FormState => ({
 });
 
 export default function ManualPaymentsManager({ initialPayments }: { initialPayments: ManualPayment[] }) {
+  const confirm = useConfirm();
   const [payments, setPayments] = useState(initialPayments);
   const [form, setForm] = useState<FormState>(defaultForm());
   const [saving, setSaving] = useState(false);
@@ -59,7 +61,12 @@ export default function ManualPaymentsManager({ initialPayments }: { initialPaym
   }
 
   async function handleDelete(id: string) {
-    const confirmed = window.confirm("Remove this manual payment?");
+    const confirmed = await confirm({
+      title: "Delete Manual Payment",
+      message: "Remove this manual payment?",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
     if (!confirmed) return;
     try {
       const res = await fetch(`/api/manual-payments?id=${id}`, { method: "DELETE" });
@@ -173,5 +180,5 @@ export default function ManualPaymentsManager({ initialPayments }: { initialPaym
 function formatDate(value: string) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString("en-GB", { month: "short", day: "numeric", year: "numeric" });
 }

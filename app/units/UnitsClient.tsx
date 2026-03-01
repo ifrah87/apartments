@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { FileText, X } from "lucide-react";
+import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { resolveCurrentPropertyId, setCurrentPropertyId } from "@/lib/currentProperty";
@@ -71,6 +72,7 @@ type UnitFormState = {
 const EMPTY_FORM: UnitFormState = { unit: "", type: "", propertyId: "" };
 
 export default function UnitsClient() {
+  const confirm = useConfirm();
   const [units, setUnits] = useState<UnitRecord[]>([]);
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
   const [leases, setLeases] = useState<LeaseAgreement[]>([]);
@@ -395,12 +397,23 @@ export default function UnitsClient() {
   };
 
   const deleteUnit = async (unit: UnitRecord, occupied: boolean) => {
-    const forceDelete = occupied
-      ? confirm(
-          `Unit ${unit.unit} has an active lease/tenant. Delete anyway? This will remove related tenants, leases, deposits, and charges.`,
-        )
-      : confirm(`Delete unit ${unit.unit}?`);
-    if (!forceDelete) return;
+    const confirmed = await confirm(
+      occupied
+        ? {
+            title: "Force Delete Unit",
+            message:
+              `Unit ${unit.unit} has an active lease or tenant. Delete anyway? This will remove related tenants, leases, deposits, and charges.`,
+            confirmLabel: "Delete",
+            tone: "danger",
+          }
+        : {
+            title: "Delete Unit",
+            message: `Delete unit ${unit.unit}?`,
+            confirmLabel: "Delete",
+            tone: "danger",
+          },
+    );
+    if (!confirmed) return;
     setDeletingId(unit.id);
     setError(null);
     try {

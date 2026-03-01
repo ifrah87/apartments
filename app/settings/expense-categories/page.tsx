@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Plus, Pencil, Trash2 } from "lucide-react";
+import { useConfirm } from "@/components/ConfirmProvider";
 import SettingsShell from "@/components/settings/SettingsShell";
 import SettingsTable from "@/components/settings/SettingsTable";
 import SettingsDrawer from "@/components/settings/SettingsDrawer";
@@ -33,6 +34,7 @@ const TAX_RATES = [
 ];
 
 export default function ExpenseCategoriesPage() {
+  const confirm = useConfirm();
   const [form, setForm] = useState<ExpenseCategoriesSettings>(DEFAULT_EXPENSE_CATEGORIES);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -89,8 +91,14 @@ export default function ExpenseCategoriesPage() {
     setDrawerOpen(false);
   };
 
-  const deleteCategory = (id: string) => {
-    if (!confirm("Delete this expense category?")) return;
+  const deleteCategory = async (id: string) => {
+    const confirmed = await confirm({
+      title: "Delete Expense Category",
+      message: "Delete this expense category?",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setForm((prev) => ({ ...prev, categories: prev.categories.filter((item) => item.id !== id) }));
   };
 

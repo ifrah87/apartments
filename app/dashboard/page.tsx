@@ -55,7 +55,7 @@ export default async function DashboardPage({
 
   const lastUpdated = bank.lastUpdatedISO ? new Date(bank.lastUpdatedISO) : null;
   const lastUpdatedText = lastUpdated
-    ? `${lastUpdated.toLocaleDateString("en", { month: "short", day: "numeric" })} · ${lastUpdated.toLocaleTimeString(
+    ? `${lastUpdated.toLocaleDateString("en-GB", { month: "short", day: "numeric" })} · ${lastUpdated.toLocaleTimeString(
         "en",
         { hour: "numeric", minute: "2-digit" },
       )}`
@@ -199,7 +199,7 @@ function buildMonthlyCashflow(transactions: Txn[]): CashflowPoint[] {
     const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
     buckets.push({
       key: date.toISOString(),
-      label: date.toLocaleString("en", { month: "short" }),
+      label: date.toLocaleString("en-GB", { month: "short" }),
       inflow: 0,
       outflow: 0,
       monthIndex: date.getMonth(),
@@ -208,7 +208,7 @@ function buildMonthlyCashflow(transactions: Txn[]): CashflowPoint[] {
 
   transactions.forEach((txn) => {
     const date = new Date(txn.date);
-    const label = date.toLocaleString("en", { month: "short" });
+    const label = date.toLocaleString("en-GB", { month: "short" });
     const bucket = buckets.find((b) => b.label === label);
     if (!bucket) return;
     if (txn.amount >= 0) {
@@ -224,14 +224,14 @@ function buildMonthlyCashflow(transactions: Txn[]): CashflowPoint[] {
 function formatCurrency(value: number) {
   const safe = Number.isFinite(value) ? value : 0;
   const abs = Math.abs(safe);
-  const formatted = abs.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const formatted = abs.toLocaleString("en-GB", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   return safe < 0 ? `-${formatted}` : formatted;
 }
 
 function formatDate(value: string) {
   const date = toDate(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return date.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
 }
 
 function toDate(value: string) {

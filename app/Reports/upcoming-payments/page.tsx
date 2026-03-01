@@ -96,7 +96,7 @@ export default async function UpcomingPaymentsPage({ searchParams }: { searchPar
       <div className="grid gap-4 sm:grid-cols-3">
         <SummaryCard label="Upcoming total" value={currency.format(totalAmount)} emphasize />
         <SummaryCard label="Payments due" value={filteredRows.length.toString()} />
-        <SummaryCard label="Reference date" value={referenceDate.toLocaleDateString("en-US")} />
+        <SummaryCard label="Reference date" value={referenceDate.toLocaleDateString("en-GB")} />
       </div>
 
       <SectionCard className="overflow-hidden">
@@ -167,7 +167,7 @@ async function fetchJson<T>(path: string): Promise<T> {
 
 function formatDate(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-GB", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function deriveReferenceDate(payments: PaymentRecord[]): Date {

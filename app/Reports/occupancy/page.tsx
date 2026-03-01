@@ -146,8 +146,8 @@ export default async function OccupancyReportPage({ searchParams }: { searchPara
                     </span>
                   </td>
                   <td className="px-4 py-2 text-right text-slate-700">{row.daysVacant}</td>
-                  <td className="px-4 py-2 text-slate-600">{row.lastMoveIn ? new Date(row.lastMoveIn).toLocaleDateString() : "—"}</td>
-                  <td className="px-4 py-2 text-slate-600">{row.lastMoveOut ? new Date(row.lastMoveOut).toLocaleDateString() : "—"}</td>
+                  <td className="px-4 py-2 text-slate-600">{row.lastMoveIn ? new Date(row.lastMoveIn).toLocaleDateString("en-GB") : "—"}</td>
+                  <td className="px-4 py-2 text-slate-600">{row.lastMoveOut ? new Date(row.lastMoveOut).toLocaleDateString("en-GB") : "—"}</td>
                   <td className="px-4 py-2 text-slate-600">{row.notes || "—"}</td>
                 </tr>
               ))}

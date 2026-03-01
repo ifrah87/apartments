@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useConfirm } from "@/components/ConfirmProvider";
 import StatusChip from "@/components/ui/StatusChip";
 import type { LeaseCommercial, OnboardingCheckpointsCommercial, TenantOrg } from "@/lib/commercial";
 
@@ -13,6 +14,7 @@ type OrgRow = {
 };
 
 export default function TenantOrgsPage() {
+  const confirm = useConfirm();
   const [rows, setRows] = useState<OrgRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -27,7 +29,13 @@ export default function TenantOrgsPage() {
 
   const deleteOnboarding = async (orgId: string) => {
     if (deletingId) return;
-    if (!window.confirm("Delete this onboarding record? This cannot be undone.")) return;
+    const confirmed = await confirm({
+      title: "Delete Onboarding Record",
+      message: "Delete this onboarding record? This cannot be undone.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setDeletingId(orgId);
     const res = await fetch(`/api/admin/tenant-orgs/${orgId}/onboarding`, { method: "DELETE" });
     const response = await res.json().catch(() => ({}));

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useConfirm } from "@/components/ConfirmProvider";
 import ChecklistItem from "@/components/ui/ChecklistItem";
 import ProgressBar from "@/components/ui/ProgressBar";
 import StatusChip from "@/components/ui/StatusChip";
@@ -23,6 +24,7 @@ type OnboardingResponse = {
 export default function OnboardingWizardPage() {
   const params = useParams();
   const router = useRouter();
+  const confirm = useConfirm();
   const orgId = params?.tenantId as string;
   const [data, setData] = useState<OnboardingResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -132,7 +134,13 @@ export default function OnboardingWizardPage() {
 
   const deleteOnboarding = async () => {
     if (!orgId || deleting) return;
-    if (!window.confirm("Delete this onboarding record? This cannot be undone.")) return;
+    const confirmed = await confirm({
+      title: "Delete Onboarding Record",
+      message: "Delete this onboarding record? This cannot be undone.",
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     setDeleting(true);
     setMessage(null);
     const res = await fetch(`/api/admin/tenant-orgs/${orgId}/onboarding`, { method: "DELETE" });

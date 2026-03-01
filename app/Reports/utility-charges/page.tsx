@@ -119,7 +119,7 @@ export default async function UtilityChargesPage({ searchParams }: { searchParam
             <tbody>
               {report.rows.map((row) => (
                 <tr key={`${row.tenantName}-${row.date}-${row.description}`} className="border-t border-slate-100">
-                  <td className="px-4 py-2 text-slate-600">{new Date(row.date).toLocaleDateString()}</td>
+                  <td className="px-4 py-2 text-slate-600">{new Date(row.date).toLocaleDateString("en-GB")}</td>
                   <td className="px-4 py-2 text-slate-900">
                     <div className="font-semibold">{row.tenantName}</div>
                     <div className="text-xs text-slate-500">{row.propertyName || "—"}</div>

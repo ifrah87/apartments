@@ -81,7 +81,7 @@ export default function InitialReadingsPage() {
 
   const baselinePeriod = useMemo(() => {
     if (!readingDate) return "—";
-    return new Date(readingDate).toLocaleString("en", { month: "long", year: "numeric" });
+    return new Date(readingDate).toLocaleString("en-GB", { month: "long", year: "numeric" });
   }, [readingDate]);
 
   const handleSave = async () => {

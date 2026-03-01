@@ -25,7 +25,7 @@ function formatMoney(amount: number) {
 function formatDate(date: string) {
   const d = new Date(date);
   if (Number.isNaN(d.getTime())) return date;
-  return d.toLocaleDateString("en", { day: "numeric", month: "short", year: "numeric" });
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 export default function UnreconciledTable({ rows, initialCategories }: { rows: Row[]; initialCategories: CategoryMap }) {

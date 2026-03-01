@@ -66,7 +66,7 @@ export default async function BankImportSummaryPage({ searchParams }: { searchPa
           <tbody>
             {report.rows.map((row) => (
               <tr key={row.date} className="border-t border-slate-100">
-                <td className="px-4 py-2 text-slate-900">{new Date(row.date).toLocaleDateString()}</td>
+                <td className="px-4 py-2 text-slate-900">{new Date(row.date).toLocaleDateString("en-GB")}</td>
                 <td className="px-4 py-2 text-right">{number.format(row.totalLines)}</td>
                 <td className="px-4 py-2 text-right text-emerald-600">{number.format(row.matched)}</td>
                 <td className="px-4 py-2 text-right text-rose-600">{number.format(row.unmatched)}</td>

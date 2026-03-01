@@ -108,7 +108,7 @@ function buildSummaryHtml(rows: LeaseAgreement[]) {
     </head>
     <body>
       <h1>Lease Statements</h1>
-      <p>${new Date().toLocaleDateString()}</p>
+      <p>${new Date().toLocaleDateString("en-GB")}</p>
       <table>
         <thead>
           <tr>

@@ -13,6 +13,7 @@ import {
   DollarSign,
 } from "lucide-react";
 import type { ComponentType } from "react";
+import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
 import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -84,6 +85,7 @@ function inferAccent(type: Service["type"]): ServiceFormState["accent"] {
 }
 
 export default function ServicesPage() {
+  const confirm = useConfirm();
   const [services, setServices] = useState<Service[]>(DEFAULT_SERVICES);
   const [editing, setEditing] = useState<ServiceFormState>({
     name: "",
@@ -207,7 +209,13 @@ export default function ServicesPage() {
   };
 
   const deleteService = async (serviceId: string, serviceName: string) => {
-    if (!confirm("Delete this service?")) return;
+    const confirmed = await confirm({
+      title: "Delete Service",
+      message: `Delete ${serviceName || "this service"}?`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch("/api/services", {
         method: "DELETE",
