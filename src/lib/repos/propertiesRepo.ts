@@ -82,8 +82,9 @@ export async function listPropertySummaries(): Promise<PropertySummary[]> {
          COUNT(*) FILTER (WHERE lower(status) = 'occupied') as occupied_units,
          COUNT(*) FILTER (WHERE lower(status) = 'vacant') as vacant_units
        FROM units
-       GROUP BY property_id
+        GROUP BY property_id
      ) u ON u.property_id = p.id
+     WHERE p.status <> 'archived'
      ORDER BY p.created_at DESC`,
   );
 

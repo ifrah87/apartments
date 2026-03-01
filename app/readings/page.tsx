@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createTranslator } from "@/lib/i18n";
+import { useSearchParams } from "next/navigation";
+import { useTranslations } from "@/components/LanguageProvider";
 import { BarChart2, Calendar, Plus, X } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { getCurrentPropertyId } from "@/lib/currentProperty";
 
 type ApiReading = {
   id: string;
@@ -47,8 +49,16 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function formatDateUK(value: string | null | undefined) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(d);
+}
+
 export default function ReadingsPage() {
-  const t = createTranslator("en");
+  const { t } = useTranslations();
+  const searchParams = useSearchParams();
   const [rows, setRows] = useState<ApiReading[]>([]);
   const [units, setUnits] = useState<UnitOption[]>([]);
   const [unitsLoading, setUnitsLoading] = useState(true);
@@ -64,6 +74,10 @@ export default function ReadingsPage() {
   const [unitPropertyId, setUnitPropertyId] = useState<string | null>(null);
   const [readingDate, setReadingDate] = useState(() => todayISO());
   const [showForm, setShowForm] = useState(false);
+  const selectedPropertyId = useMemo(() => {
+    const fromUrl = searchParams.get("propertyId")?.trim();
+    return fromUrl || getCurrentPropertyId() || "";
+  }, [searchParams]);
 
   const loadReadings = async () => {
     setLoadingRows(true);
@@ -88,14 +102,18 @@ export default function ReadingsPage() {
 
   useEffect(() => {
     setUnitsLoading(true);
-    fetch(`/api/units?ts=${Date.now()}`, { cache: "no-store" })
+    const params = new URLSearchParams({ ts: String(Date.now()) });
+    if (selectedPropertyId) {
+      params.set("propertyId", selectedPropertyId);
+    }
+    fetch(`/api/units?${params.toString()}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((payload) =>
         setUnits(payload?.ok === false ? [] : (payload?.ok ? payload.data : payload) || []),
       )
       .catch(() => setUnits([]))
       .finally(() => setUnitsLoading(false));
-  }, []);
+  }, [selectedPropertyId]);
 
   useEffect(() => {
     setTenantsLoading(true);
@@ -139,10 +157,11 @@ export default function ReadingsPage() {
   }, [leases]);
 
   const unitOptions = useMemo<UnitOption[]>(() => {
+    const hasScopedProperty = Boolean(selectedPropertyId);
     const map = new Map<string, UnitOption>();
     units.forEach((unit) => {
       if (!unit.unit) return;
-      const key = `${unit.unit}||${unit.property_id ?? ""}`;
+      const key = hasScopedProperty ? unit.unit : `${unit.unit}||${unit.property_id ?? ""}`;
       map.set(key, {
         id: unit.id,
         unit: unit.unit,
@@ -151,13 +170,15 @@ export default function ReadingsPage() {
     });
     tenants.forEach((tenant) => {
       if (!tenant.unit) return;
+      if (hasScopedProperty && tenant.property_id && tenant.property_id !== selectedPropertyId) return;
       const propertyId = tenant.property_id ?? tenant.building ?? null;
-      const key = `${tenant.unit}||${propertyId ?? ""}`;
+      const key = hasScopedProperty ? tenant.unit : `${tenant.unit}||${propertyId ?? ""}`;
       const existing = map.get(key);
+      if (hasScopedProperty && !existing) return;
       map.set(key, {
         id: existing?.id ?? `tenant-${tenant.id}`,
         unit: tenant.unit,
-        property_id: propertyId,
+        property_id: existing?.property_id ?? propertyId,
         name: tenant.name ?? existing?.name ?? null,
       });
     });
@@ -172,7 +193,7 @@ export default function ReadingsPage() {
     });
     const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
     return enriched.sort((a, b) => collator.compare(a.unit, b.unit));
-  }, [tenants, units, leaseNameByKey]);
+  }, [selectedPropertyId, tenants, units, leaseNameByKey]);
 
   const selectedTenantId = useMemo(() => {
     if (!unit.trim()) return null;
@@ -255,20 +276,6 @@ export default function ReadingsPage() {
     }
   };
 
-  const totalWater = useMemo(
-    () =>
-      rows
-        .filter((row) => (row.description || "").toLowerCase().includes("water"))
-        .reduce((sum, row) => sum + Number(row.usage || 0), 0),
-    [rows],
-  );
-  const totalElectric = useMemo(
-    () =>
-      rows
-        .filter((row) => (row.description || "").toLowerCase().includes("electricity"))
-        .reduce((sum, row) => sum + Number(row.usage || 0), 0),
-    [rows],
-  );
 
   const { initialRows, historyRows } = useMemo(() => {
     if (!rows.length) return { initialRows: [] as ApiReading[], historyRows: [] as ApiReading[] };
@@ -501,7 +508,7 @@ export default function ReadingsPage() {
                       <tr key={row.id} className="hover:bg-white/5">
                         <td className="px-4 py-3 font-semibold text-slate-100">{row.unit}</td>
                         <td className="px-4 py-3 capitalize">{row.meter_type || "—"}</td>
-                        <td className="px-4 py-3">{row.reading_date || "—"}</td>
+                        <td className="px-4 py-3">{formatDateUK(row.reading_date)}</td>
                         <td className="px-4 py-3">{row.reading_value.toFixed(2)}</td>
                         <td className="px-4 py-3 text-right">
                           <button
@@ -589,25 +596,6 @@ export default function ReadingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard className="p-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-accent">
-                  Yearly Consumption Summary
-                </p>
-                <p className="text-xs text-slate-400">Fiscal year {new Date().getFullYear()} · All units</p>
-              </div>
-              <div className="text-right text-xs text-slate-400">
-                <div>Total water billing</div>
-                <div className="text-sm font-semibold text-slate-100">{totalWater.toFixed(2)} m³</div>
-              </div>
-              <div className="text-right text-xs text-slate-400">
-                <div>Total electricity billing</div>
-                <div className="text-sm font-semibold text-slate-100">{totalElectric.toFixed(2)} kWh</div>
-              </div>
-            </div>
-            <div className="mt-6 h-48 rounded-2xl border border-dashed border-white/10 bg-white/5" />
-          </SectionCard>
       </div>
     </div>
   );

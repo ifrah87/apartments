@@ -14,6 +14,7 @@ import {
   X,
   PencilLine,
   Plus,
+  AlertCircle,
 } from "lucide-react";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
@@ -22,8 +23,10 @@ import { normalizeId } from "@/lib/normalizeId";
 type UnitCard = {
   id: string;
   unit: string;
+  unitNumber: string;
   tenant: string;
   hasTenant: boolean;
+  propertyKey?: string;
 };
 
 type BillingUnit = UnitCard & {
@@ -39,6 +42,7 @@ type InvoiceRow = {
   period: string;
   invoiceDate?: string;
   total: number;
+  rentAmount: number;
   outstanding: number;
   status: "Unpaid" | "Partially Paid" | "Paid";
 };
@@ -61,6 +65,7 @@ type DraftInvoice = {
   invoiceDate: string;
   dueDate: string;
   lineItems: DraftLineItem[];
+  meterSnapshot?: MeterSnapshot | null;
   month: string;
   year: string;
 };
@@ -69,6 +74,29 @@ type UnitRecord = {
   id: string;
   unit: string;
   property_id: string | null;
+};
+
+type ServiceRecord = {
+  id: string;
+  name?: string;
+  code?: string;
+};
+
+type UnitServiceRecord = {
+  unitId: string;
+  propertyId?: string;
+  serviceId: string;
+};
+
+type BuildingServiceRecord = {
+  propertyId: string;
+  serviceId: string;
+};
+
+type MeterReadingRecord = {
+  unit: string;
+  meter_type?: string | null;
+  reading_date?: string | null;
 };
 
 type LeaseRecord = {
@@ -104,10 +132,58 @@ function formatQuantity(value: number) {
   return Number(value || 0).toFixed(2);
 }
 
+function normalizeUnitValue(value: string) {
+  return value.replace(/^unit\s+/i, "").trim().toLowerCase();
+}
+
+function buildUnitIdentityKey(input: Pick<UnitCard, "unit" | "unitNumber" | "tenant">) {
+  const unitKey = normalizeUnitValue(input.unitNumber || input.unit);
+  const tenantKey = String(input.tenant || "").trim().replace(/\s+/g, " ").toLowerCase();
+  return `${unitKey}::${tenantKey}`;
+}
+
+function monthBounds(month: string, year: string) {
+  const monthIndex = new Date(`${month} 1, ${year}`).getMonth();
+  if (!Number.isFinite(monthIndex)) return null;
+  const numericYear = Number(year);
+  if (!Number.isFinite(numericYear)) return null;
+  const start = new Date(Date.UTC(numericYear, monthIndex, 1));
+  const end = new Date(Date.UTC(numericYear, monthIndex + 1, 1));
+  return { start, end };
+}
+
+function formatSnapshotDate(value?: string) {
+  if (!value) return "";
+  if (value === "Initial") return "Initial";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return trimmed.length >= 10 ? trimmed.slice(0, 10) : trimmed;
+}
+
 function buildElectricityDescription(snapshot: MeterSnapshot) {
-  const prevLabel = snapshot.prevDate ? `${snapshot.prevReading} (${snapshot.prevDate})` : `${snapshot.prevReading}`;
-  const curLabel = snapshot.currDate ? `${snapshot.currReading} (${snapshot.currDate})` : `${snapshot.currReading}`;
-  return `Electricity — Prev: ${prevLabel}, Cur: ${curLabel} | Usage: ${formatQuantity(snapshot.usage)}`;
+  const prevDate = formatSnapshotDate(snapshot.prevDate);
+  const curDate = formatSnapshotDate(snapshot.currDate);
+  const prevLabel = prevDate ? `${formatQuantity(snapshot.prevReading)} (${prevDate})` : `${formatQuantity(snapshot.prevReading)}`;
+  const curLabel = curDate ? `${formatQuantity(snapshot.currReading)} (${curDate})` : `${formatQuantity(snapshot.currReading)}`;
+  return `Electricity | Initial reading: ${prevLabel} | Current reading: ${curLabel} | Usage: ${formatQuantity(snapshot.usage)} | Rate: ${formatCurrency(snapshot.rate)} | Total: ${formatCurrency(snapshot.amount)}`;
+}
+
+function normalizeDraftMeterSnapshot(input: any): MeterSnapshot | null {
+  if (!input || typeof input !== "object") return null;
+  const prevReading = Number(input.prevReading ?? input.prev_reading ?? input.prev ?? 0);
+  const currReading = Number(input.currReading ?? input.cur_reading ?? input.cur ?? 0);
+  const usage = Number(input.usage ?? Math.max(currReading - prevReading, 0));
+  const rate = Number(input.rate ?? input.unit_rate ?? 0.41);
+  return {
+    prevDate: formatSnapshotDate(input.prevDate ?? input.prev_date ?? "Initial"),
+    prevReading,
+    currDate: formatSnapshotDate(input.currDate ?? input.cur_date ?? ""),
+    currReading,
+    usage,
+    rate,
+    amount: Number(input.amount ?? usage * rate),
+    unitLabel: String(input.unitLabel ?? input.unit_label ?? "kWh"),
+  };
 }
 
 function parseInvoiceDate(value?: string) {
@@ -160,6 +236,7 @@ function normalizeInvoice(row: any): InvoiceRow {
     period,
     invoiceDate: invoiceDate ? String(invoiceDate) : undefined,
     total: Number(row?.total ?? 0),
+    rentAmount: Number(row?.rentAmount ?? 0),
     outstanding: Number(row?.outstanding ?? row?.total ?? 0),
     status: normalizedStatus,
   };
@@ -182,27 +259,56 @@ export default function BillsPage() {
   const [editingInvoice, setEditingInvoice] = useState<InvoiceRow | null>(null);
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
   const [meterSnapshot, setMeterSnapshot] = useState<MeterSnapshot | null>(null);
+  const [services, setServices] = useState<ServiceRecord[]>([]);
+  const [unitServices, setUnitServices] = useState<UnitServiceRecord[]>([]);
+  const [buildingServices, setBuildingServices] = useState<BuildingServiceRecord[]>([]);
+  const [meterReadings, setMeterReadings] = useState<MeterReadingRecord[]>([]);
   const [editingLoading, setEditingLoading] = useState(false);
   const [editingSaving, setEditingSaving] = useState(false);
   const draftInitRef = useRef<string | null>(null);
+  const [rentTarget, setRentTarget] = useState<number>(37350);
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [unitsRes, tenantsRes, invoicesRes] = await Promise.all([
+        const [
+          unitsRes,
+          tenantsRes,
+          invoicesRes,
+          rentTargetRes,
+          servicesRes,
+          unitServicesRes,
+          buildingServicesRes,
+          meterReadingsRes,
+        ] = await Promise.all([
           fetch("/api/units", { cache: "no-store" }),
           fetch("/api/tenants", { cache: "no-store" }),
           fetch("/api/bills", { cache: "no-store" }),
+          fetch("/api/rent-target", { cache: "no-store" }),
+          fetch("/api/services", { cache: "no-store" }),
+          fetch("/api/unit-services", { cache: "no-store" }),
+          fetch("/api/building-services", { cache: "no-store" }),
+          fetch("/api/meter-readings?meterType=electricity", { cache: "no-store" }),
         ]);
         const leasesRes = await fetch("/api/lease-agreements", { cache: "no-store" });
         const unitsPayload = await unitsRes.json().catch(() => null);
         const tenantsPayload = await tenantsRes.json().catch(() => null);
         const invoicesPayload = await invoicesRes.json().catch(() => null);
         const leasesPayload = await leasesRes.json().catch(() => null);
+        const rentTargetPayload = await rentTargetRes.json().catch(() => null);
+        const servicesPayload = await servicesRes.json().catch(() => null);
+        const unitServicesPayload = await unitServicesRes.json().catch(() => null);
+        const buildingServicesPayload = await buildingServicesRes.json().catch(() => null);
+        const meterReadingsPayload = await meterReadingsRes.json().catch(() => null);
+        if (typeof rentTargetPayload?.target === "number") setRentTarget(rentTargetPayload.target);
         const unitsData = unitsPayload?.ok ? unitsPayload.data : unitsPayload;
         const tenantsData = tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload;
         const invoicesData = invoicesPayload?.ok ? invoicesPayload.data : invoicesPayload;
         const leasesData = leasesPayload?.ok ? leasesPayload.data : leasesPayload;
+        const servicesData = servicesPayload?.ok ? servicesPayload.data : servicesPayload;
+        const unitServicesData = unitServicesPayload?.ok ? unitServicesPayload.data : unitServicesPayload;
+        const buildingServicesData = buildingServicesPayload?.ok ? buildingServicesPayload.data : buildingServicesPayload;
+        const meterReadingsData = meterReadingsPayload?.ok ? meterReadingsPayload.data : meterReadingsPayload;
 
         const tenantIndex = new Map<string, TenantRecord>();
         if (Array.isArray(tenantsData)) {
@@ -252,19 +358,48 @@ export default function BillsPage() {
                 {
                   id: unit.id,
                   unit: unitLabel,
+                  unitNumber: String(unit.unit || ""),
                   tenant,
                   hasTenant: true,
+                  propertyKey: propertyId,
                 },
               ];
             })
           : [];
 
-        setUnits(nextUnits);
+        const dedupedUnits = Array.from(
+          nextUnits.reduce((map, unit) => {
+            const key = buildUnitIdentityKey(unit);
+            const existing = map.get(key);
+            if (!existing) {
+              map.set(key, unit);
+              return map;
+            }
+            map.set(key, {
+              ...existing,
+              id: existing.id || unit.id,
+              unitNumber: existing.unitNumber || unit.unitNumber,
+              propertyKey: existing.propertyKey || unit.propertyKey,
+              hasTenant: existing.hasTenant || unit.hasTenant,
+            });
+            return map;
+          }, new Map<string, UnitCard>()).values(),
+        );
+
+        setUnits(dedupedUnits);
         setInvoices(Array.isArray(invoicesData) ? invoicesData.map(normalizeInvoice) : []);
+        setServices(Array.isArray(servicesData) ? servicesData : []);
+        setUnitServices(Array.isArray(unitServicesData) ? unitServicesData : []);
+        setBuildingServices(Array.isArray(buildingServicesData) ? buildingServicesData : []);
+        setMeterReadings(Array.isArray(meterReadingsData) ? meterReadingsData : []);
       } catch (err) {
         console.error("Failed to load units for billing", err);
         setUnits([]);
         setInvoices([]);
+        setServices([]);
+        setUnitServices([]);
+        setBuildingServices([]);
+        setMeterReadings([]);
       }
     };
 
@@ -493,14 +628,80 @@ export default function BillsPage() {
   );
 
   const billingUnits = useMemo<BillingUnit[]>(() => {
-    const billedUnitIds = new Set(
-      invoices.filter((invoice) => getInvoicePeriodLabel(invoice) === billingPeriod).map((invoice) => invoice.unitId),
+    const billedInvoices = invoices.filter((invoice) => getInvoicePeriodLabel(invoice) === billingPeriod);
+    const billedUnitIds = new Set(billedInvoices.map((invoice) => invoice.unitId));
+    const billedUnitKeys = new Set(
+      billedInvoices.map((invoice) => buildUnitIdentityKey({ unit: invoice.unitLabel, unitNumber: invoice.unitLabel, tenant: invoice.tenantName })),
     );
-    return units.map((unit) => ({
-      ...unit,
-      status: unit.hasTenant ? (billedUnitIds.has(unit.id) ? "billed" : "ready") : "waiting",
-    }));
-  }, [units, invoices, billingPeriod]);
+    const bounds = monthBounds(generatorMonth, generatorYear);
+    const electricServiceIds = new Set(
+      services
+        .filter((service) => {
+          const code = String(service.code || "").trim().toUpperCase();
+          if (code === "ELECTRICITY") return true;
+          return String(service.name || "").toLowerCase().includes("electric");
+        })
+        .map((service) => String(service.id)),
+    );
+    const readyMeterUnits = new Set(
+      meterReadings
+        .filter((reading) => {
+          if (String(reading.meter_type || "").toLowerCase() !== "electricity") return false;
+          if (!bounds || !reading.reading_date) return false;
+          const readingDate = new Date(reading.reading_date);
+          if (Number.isNaN(readingDate.getTime())) return false;
+          return readingDate >= bounds.start && readingDate < bounds.end;
+        })
+        .map((reading) => normalizeUnitValue(String(reading.unit || ""))),
+    );
+    return Array.from(
+      units.reduce((map, unit) => {
+        const key = buildUnitIdentityKey(unit);
+        const hasUnitElectricity = unitServices.some(
+          (entry) => entry.unitId === unit.id && electricServiceIds.has(String(entry.serviceId)),
+        );
+        const hasBuildingElectricity =
+          !!unit.propertyKey &&
+          buildingServices.some(
+            (entry) =>
+              String(entry.propertyId || "").toLowerCase() === String(unit.propertyKey || "").toLowerCase() &&
+              electricServiceIds.has(String(entry.serviceId)),
+          );
+        const needsMeter = hasUnitElectricity || hasBuildingElectricity;
+        const hasCurrentMeterReading = readyMeterUnits.has(normalizeUnitValue(unit.unitNumber || unit.unit));
+        const nextStatus: BillingUnit["status"] = !unit.hasTenant
+          ? "waiting"
+          : billedUnitIds.has(unit.id) || billedUnitKeys.has(key)
+            ? "billed"
+            : needsMeter && !hasCurrentMeterReading
+              ? "waiting"
+              : "ready";
+        const nextUnit: BillingUnit = {
+          ...unit,
+          status: nextStatus,
+        };
+        const existing = map.get(key);
+        if (!existing) {
+          map.set(key, nextUnit);
+          return map;
+        }
+        const rank = { billed: 3, ready: 2, waiting: 1 };
+        map.set(key, rank[nextUnit.status] > rank[existing.status] ? nextUnit : existing);
+        return map;
+      }, new Map<string, BillingUnit>()).values(),
+    );
+  }, [units, invoices, billingPeriod, generatorMonth, generatorYear, services, unitServices, buildingServices, meterReadings]);
+
+  const rentBilled = useMemo(
+    () =>
+      Number(
+        invoices
+          .filter((inv) => getInvoicePeriodLabel(inv) === billingPeriod)
+          .reduce((sum, inv) => sum + (inv.rentAmount ?? 0), 0)
+          .toFixed(2),
+      ),
+    [invoices, billingPeriod],
+  );
 
   const visibleInvoices = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -617,6 +818,7 @@ export default function BillsPage() {
             }),
           )
         : [];
+      const draftSnapshot = normalizeDraftMeterSnapshot(draft.meterSnapshot ?? draft.meter_snapshot ?? null);
 
       setDraftInvoice({
         tenantId: String(draft.tenantId || ""),
@@ -627,6 +829,7 @@ export default function BillsPage() {
         invoiceDate: String(draft.invoiceDate || ""),
         dueDate: String(draft.dueDate || ""),
         lineItems: draftItems,
+        meterSnapshot: draftSnapshot,
         month: generatorMonth,
         year: generatorYear,
       });
@@ -643,11 +846,6 @@ export default function BillsPage() {
 
   const confirmDraft = async () => {
     if (!draftInvoice || creating) return;
-    const tenantId = draftInvoice.tenantId.trim();
-    if (!tenantId) {
-      setToast({ type: "error", message: "Missing tenant ID. Please refresh the draft and try again." });
-      return;
-    }
     setToast(null);
     setCreating(true);
     try {
@@ -690,7 +888,7 @@ export default function BillsPage() {
 
   const buildInvoiceUrl = (invoice: InvoiceRow, mode: "pdf" | "download") => {
     const { month, year } = getInvoiceMonthYear(invoice);
-    const params = new URLSearchParams({ mode });
+    const params = new URLSearchParams({ mode, invoiceId: invoice.id });
     if (invoice.tenantId) params.set("tenantId", invoice.tenantId);
     if (month) params.set("month", month);
     if (year) params.set("year", year);
@@ -759,6 +957,23 @@ export default function BillsPage() {
           <FileDown className="h-4 w-4" />
           Generate Invoices
         </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+          <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">Monthly Rent Target</p>
+          <p className="text-xl font-semibold text-slate-100">{formatCurrency(rentTarget)}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+          <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">Rent Billed</p>
+          <p className="text-xl font-semibold text-slate-100">{formatCurrency(rentBilled)}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+          <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">Difference</p>
+          <p className={`text-xl font-semibold ${rentBilled >= rentTarget ? "text-emerald-400" : "text-rose-400"}`}>
+            {rentBilled >= rentTarget ? "+" : ""}{formatCurrency(rentBilled - rentTarget)}
+          </p>
+        </div>
       </div>
 
       <SectionCard className="p-0 overflow-hidden">
@@ -853,7 +1068,7 @@ export default function BillsPage() {
                       </button>
                       <button
                         onClick={() => handleDeleteInvoice(invoice)}
-                        className="rounded-full bg-rose-500/15 p-2 text-rose-200"
+                        className="rounded-lg border border-rose-400/30 bg-rose-500/10 p-2 text-rose-200 hover:border-rose-400/60"
                       >
                         <Trash2 className="h-3 w-3" />
                       </button>
@@ -947,7 +1162,7 @@ export default function BillsPage() {
                 const selected = selectedUnits.includes(unit.id);
                 const statusLabel =
                   unit.status === "waiting"
-                    ? "Missing Meter Reading"
+                    ? "Waiting for Meter Reading"
                     : unit.status === "billed"
                       ? "Already Billed"
                       : "Ready";
@@ -981,7 +1196,11 @@ export default function BillsPage() {
                         selected ? "border-accent bg-accent/20 text-accent" : "border-white/10 text-slate-400"
                       }`}
                     >
-                      {selected ? <CheckSquare2 className="h-3 w-3" /> : null}
+                      {unit.status === "waiting" ? (
+                        <AlertCircle className="h-3.5 w-3.5 text-rose-300" />
+                      ) : selected ? (
+                        <CheckSquare2 className="h-3 w-3" />
+                      ) : null}
                     </span>
                   </button>
                 );
@@ -1063,6 +1282,47 @@ export default function BillsPage() {
                 </div>
               </div>
 
+              {draftInvoice.meterSnapshot ? (
+                <div className="rounded-xl border border-white/10 bg-panel/70 p-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-100">Electricity Meter Snapshot</h3>
+                    <p className="text-xs text-slate-400">Pulled from readings for this billing period.</p>
+                  </div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Initial Date</p>
+                      <p className="mt-1 text-sm text-slate-100">{draftInvoice.meterSnapshot.prevDate || "Initial"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Initial Reading</p>
+                      <p className="mt-1 text-sm text-slate-100">
+                        {formatQuantity(draftInvoice.meterSnapshot.prevReading)} {draftInvoice.meterSnapshot.unitLabel || "kWh"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Current Date</p>
+                      <p className="mt-1 text-sm text-slate-100">{draftInvoice.meterSnapshot.currDate || "-"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Current Reading</p>
+                      <p className="mt-1 text-sm text-slate-100">
+                        {formatQuantity(draftInvoice.meterSnapshot.currReading)} {draftInvoice.meterSnapshot.unitLabel || "kWh"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Usage</p>
+                      <p className="mt-1 text-sm text-slate-100">
+                        {formatQuantity(draftInvoice.meterSnapshot.usage)} {draftInvoice.meterSnapshot.unitLabel || "kWh"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Rate</p>
+                      <p className="mt-1 text-sm text-slate-100">{formatCurrency(draftInvoice.meterSnapshot.rate)}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="rounded-xl border border-white/10 bg-panel/70 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -1126,7 +1386,7 @@ export default function BillsPage() {
                             <button
                               type="button"
                               onClick={() => removeDraftItem(item.id)}
-                              className="rounded-full bg-rose-500/15 px-3 py-1 text-xs font-semibold text-rose-200"
+                              className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-200 hover:border-rose-400/60"
                             >
                               Remove
                             </button>
@@ -1256,7 +1516,7 @@ export default function BillsPage() {
                               <button
                                 type="button"
                                 onClick={() => removeLineItem(item.id)}
-                                className="rounded-full bg-rose-500/15 px-3 py-1 text-xs font-semibold text-rose-200"
+                                className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-200 hover:border-rose-400/60"
                               >
                                 Remove
                               </button>

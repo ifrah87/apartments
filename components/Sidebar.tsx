@@ -4,63 +4,60 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LayoutGrid, Building2, Home, Gauge, Receipt, BarChart3, Wrench, FileText, Settings } from "lucide-react";
 import { SidebarBrand } from "./SidebarBrand";
+import { useTranslations } from "@/components/LanguageProvider";
 
 type NavItem = {
   href: string;
-  label: string;
+  labelKey: string;
   icon: typeof LayoutGrid;
   indent?: boolean;
 };
 
 const NAV: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutGrid },
-  { href: "/properties", label: "Properties", icon: Building2 },
-  { href: "/units", label: "Units", icon: Home },
+  { href: "/dashboard", labelKey: "sidebar.nav.dashboard", icon: LayoutGrid },
+  { href: "/properties", labelKey: "sidebar.nav.properties", icon: Building2 },
+  { href: "/units", labelKey: "sidebar.nav.units", icon: Home },
   // Tenants/Onboarding removed from main nav
-  { href: "/readings", label: "Readings", icon: Gauge },
-  { href: "/bills", label: "Bills", icon: Receipt },
-  { href: "/leases", label: "Leases", icon: FileText },
-  { href: "/services", label: "Services", icon: Wrench },
-  { href: "/reports", label: "Reports & Analytics", icon: BarChart3 },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/readings", labelKey: "sidebar.nav.readings", icon: Gauge },
+  { href: "/bills", labelKey: "sidebar.nav.bills", icon: Receipt },
+  { href: "/leases", labelKey: "sidebar.nav.leases", icon: FileText },
+  { href: "/services", labelKey: "sidebar.nav.services", icon: Wrench },
+  { href: "/reports", labelKey: "sidebar.nav.reports", icon: BarChart3 },
+  { href: "/settings", labelKey: "sidebar.nav.settings", icon: Settings },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { t } = useTranslations();
 
   return (
-    <aside className="sticky top-12 z-40 flex h-[calc(100vh-3rem)] w-96 shrink-0 flex-col border-r border-white/10 bg-app-surface pt-2 text-slate-200 shadow-[0_10px_40px_rgba(2,6,23,0.45)]">
+    <aside className="sticky top-0 z-40 flex h-screen w-64 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 lg:w-72">
       <div className="pt-0">
         <SidebarBrand />
         <div className="mx-5 mt-1 h-px bg-white/5" />
       </div>
-      <nav className="mt-6 flex flex-1 flex-col justify-start gap-2 overflow-y-auto px-5 pb-6 pt-4" aria-label="Primary">
-        {NAV.map(({ href, label, icon: Icon, indent }) => {
+      <nav className="mt-2 flex flex-1 flex-col justify-evenly overflow-y-auto px-4 pb-4 pt-1" aria-label="Primary">
+        {NAV.map(({ href, labelKey, icon: Icon, indent }) => {
           const active = pathname === href || (href !== "/" && pathname?.startsWith(href));
-          const paddingClass = indent ? "pl-11" : "pl-9";
+          const paddingClass = indent ? "pl-10" : "pl-3";
           return (
             <Link
               key={href}
               href={href}
-              className={`group relative flex items-center gap-3 rounded-full px-4 py-3.5 ${paddingClass} text-2xl font-semibold transition ${
+              className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 ${paddingClass} text-base font-medium transition ${
                 active
-                  ? "bg-accent/15 text-white shadow-card-glow"
-                  : "text-slate-300 hover:bg-white/5 hover:text-white"
+                  ? "bg-accent/15 text-white"
+                  : "text-slate-400 hover:bg-white/5 hover:text-white"
               }`}
             >
               <span
-                className={`absolute left-3 top-1/2 h-2.5 w-1.5 -translate-y-1/2 rounded-full ${
-                  active ? "bg-accent shadow-[0_0_12px_rgba(56,189,248,0.45)]" : "bg-transparent"
-                }`}
-              />
-              <span
-                className={`grid h-12 w-12 place-items-center rounded-full ${
-                  active ? "bg-accent/15 text-accent" : "bg-white/5 text-slate-300 group-hover:text-slate-100"
+                className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
+                  active ? "bg-accent/20 text-accent" : "text-slate-400 group-hover:text-slate-200"
                 }`}
               >
-                <Icon className="h-8 w-8" />
+                <Icon className="h-5 w-5" />
               </span>
-              <span className="truncate">{label}</span>
+              <span className="truncate">{t(labelKey)}</span>
             </Link>
           );
         })}

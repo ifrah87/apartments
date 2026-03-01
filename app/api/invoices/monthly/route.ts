@@ -3,7 +3,7 @@ import path from "path";
 import PDFDocument from "pdfkit";
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { tenantsRepo } from "@/lib/repos";
+import { datasetsRepo, tenantsRepo } from "@/lib/repos";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
 import { normalizeId } from "@/lib/reports/tenantStatement";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
@@ -27,6 +27,13 @@ const MONTHS = [
   "December",
 ];
 
+const FALLBACK_COMPANY: CompanyProfile = {
+  name: "Orfane Tower",
+  address: "",
+  phone: "",
+  logoPath: "/branding/Logo.png",
+};
+
 type InvoiceHeaderRow = {
   id: string;
   tenant_id: string | null;
@@ -38,6 +45,7 @@ type InvoiceHeaderRow = {
   currency: string | null;
   notes: string | null;
   meta: Record<string, any> | null;
+  period?: string | null;
   line_items?: InvoiceLineItem[] | null;
   meter_snapshot?: Record<string, any> | null;
 };
@@ -45,12 +53,29 @@ type InvoiceHeaderRow = {
 type InvoiceLineRow = {
   id: string;
   invoice_id: string;
-  sort_order: number;
+  line_index: number;
   description: string;
-  qty: number;
-  unit_cents: number;
+  quantity: number;
+  unit_price_cents: number;
   total_cents: number;
+  meta?: Record<string, unknown> | null;
   created_at?: string;
+};
+
+type UnitLookupRow = {
+  id: string;
+  property_id: string | null;
+  unit_number: string | number | null;
+};
+
+type InitialReadingRecord = {
+  unit?: string;
+  unit_id?: string | null;
+  meter_type?: string;
+  reading_value?: number | string;
+  reading_date?: string;
+  updated_at?: string;
+  baseline?: boolean;
 };
 
 function toISO(date: Date): string {
@@ -76,10 +101,24 @@ function formatUkDate(value: string | Date) {
   }).format(date);
 }
 
+function normalizeSnapshotDate(value: unknown) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (raw === "Initial") return "Initial";
+  return raw.length >= 10 ? raw.slice(0, 10) : raw;
+}
+
 function monthRange(reference: Date) {
   const start = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), 1));
   const end = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 0));
   return { start, end };
+}
+
+function monthStartExclusiveRange(reference: Date) {
+  const start = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), 1));
+  const nextStart = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 1));
+  return { start, nextStart };
 }
 
 function monthLabel(reference: Date) {
@@ -102,6 +141,12 @@ function dueDateForMonth(reference: Date, dueDayRaw: string | number | null | un
   return new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), Math.min(dueDay, dim)));
 }
 
+function toNumberOrNull(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
 function mapLineItems(rows: InvoiceLineItem[]): InvoiceLineItem[] {
   return rows
     .map((row, idx) => ({
@@ -115,6 +160,23 @@ function mapLineItems(rows: InvoiceLineItem[]): InvoiceLineItem[] {
     .filter((row) => row.description);
 }
 
+function mapStoredLineItems(input: unknown): InvoiceLineItem[] {
+  return Array.isArray(input) ? mapLineItems(input as InvoiceLineItem[]) : [];
+}
+
+function mapInvoiceLineRows(rows: InvoiceLineRow[]): InvoiceLineItem[] {
+  return rows
+    .map((row, idx) => ({
+      id: String(row.id || `line-${idx + 1}`),
+      description: String(row.description || ""),
+      qty: Number(row.quantity || 0),
+      rate: fromCents(row.unit_price_cents),
+      amount: fromCents(row.total_cents),
+      meta: row.meta && typeof row.meta === "object" ? row.meta : undefined,
+    }))
+    .filter((row) => row.description);
+}
+
 function normalizeMeterSnapshot(input: unknown): MeterSnapshot | null {
   if (!input || typeof input !== "object") return null;
   const snap = input as any;
@@ -124,14 +186,14 @@ function normalizeMeterSnapshot(input: unknown): MeterSnapshot | null {
   const rate = Number(snap.rate ?? snap.unit_rate ?? 0.41);
   const amount = Number((usage * rate).toFixed(2));
   return {
-    prevDate: String(snap.prevDate ?? ""),
+    prevDate: normalizeSnapshotDate(snap.prevDate ?? snap.prev_date),
     prevReading,
-    currDate: String(snap.currDate ?? ""),
+    currDate: normalizeSnapshotDate(snap.currDate ?? snap.cur_date),
     currReading,
     usage,
     rate,
     amount,
-    unitLabel: snap.unitLabel ? String(snap.unitLabel) : "kWh",
+    unitLabel: snap.unitLabel ? String(snap.unitLabel) : snap.unit_label ? String(snap.unit_label) : "kWh",
   };
 }
 
@@ -150,6 +212,344 @@ type InvoicePayload = {
   issueDate: Date;
   dueDate: Date;
 };
+
+type InvoiceLineDisplay = {
+  title: string;
+  subtitle: string;
+};
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatTemplateDate(value: string | Date | null | undefined) {
+  if (!value) return "";
+  if (value === "Initial") return "Initial";
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+function describeLineItem(item: InvoiceLineItem): InvoiceLineDisplay {
+  const description = String(item.description || "").trim();
+  if (!description) {
+    return { title: "", subtitle: "" };
+  }
+
+  const meterMeta = item.meta && typeof item.meta === "object" ? item.meta : null;
+  if (meterMeta?.kind === "METER_ELECTRICITY") {
+    const prev = meterMeta.prev ?? null;
+    const cur = meterMeta.cur ?? null;
+    const usage = Number(meterMeta.usage ?? item.qty ?? 0);
+    const unitRate = Number(meterMeta.unit_rate ?? item.rate ?? 0);
+    const prevText = prev === null ? "Initial missing" : `${formatQuantity(Number(prev))} kWh`;
+    const curText = cur === null ? "Current missing" : `${formatQuantity(Number(cur))} kWh`;
+    return {
+      title: "Electricity",
+      subtitle: `${formatQuantity(usage)} kWh × ${toMoney(unitRate)} — from meter readings`,
+    };
+  }
+
+  const rentMatch = description.match(/^Monthly Rent \((.+)\)$/i);
+  if (rentMatch) {
+    return {
+      title: "Monthly Rent",
+      subtitle: rentMatch[1],
+    };
+  }
+
+  const parts = description.split("|").map((part) => part.trim()).filter(Boolean);
+  if (!parts.length) {
+    return { title: description, subtitle: "" };
+  }
+  return {
+    title: parts[0],
+    subtitle: parts.slice(1).join(" | "),
+  };
+}
+
+function extractBillingPeriodSubtitle(issueDate: Date) {
+  return monthLabel(issueDate);
+}
+
+function summarizeLineItems(lineItems: InvoiceLineItem[]) {
+  let rent = 0;
+  let electricity = 0;
+  lineItems.forEach((item) => {
+    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+    if (meta?.kind === "RENT" || /^Monthly Rent/i.test(String(item.description || ""))) {
+      rent += Number(item.amount || 0);
+      return;
+    }
+    if (meta?.kind === "METER_ELECTRICITY" || /electric/i.test(String(item.description || ""))) {
+      electricity += Number(item.amount || 0);
+    }
+  });
+  return { rent: Number(rent.toFixed(2)), electricity: Number(electricity.toFixed(2)) };
+}
+
+function deriveMeterSnapshotFromLineItems(lineItems: InvoiceLineItem[], existing: MeterSnapshot | null) {
+  if (existing) return existing;
+  const electricityItem = lineItems.find((item) => {
+    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+    return meta?.kind === "METER_ELECTRICITY" || /electric/i.test(String(item.description || ""));
+  });
+  if (!electricityItem) return null;
+  const meta = electricityItem.meta && typeof electricityItem.meta === "object" ? electricityItem.meta : {};
+  const prevReading = Number((meta as any).prev ?? 0);
+  const currReading = Number((meta as any).cur ?? 0);
+  const usage = Number((meta as any).usage ?? electricityItem.qty ?? Math.max(currReading - prevReading, 0));
+  const rate = Number((meta as any).unit_rate ?? electricityItem.rate ?? 0.41);
+  return {
+    prevDate: normalizeSnapshotDate((meta as any).prev_date ?? ((meta as any).sourcePrev === "baseline" ? "Initial" : "")),
+    prevReading,
+    currDate: normalizeSnapshotDate((meta as any).curr_date ?? ""),
+    currReading,
+    usage,
+    rate,
+    amount: Number((usage * rate).toFixed(2)),
+    unitLabel: "kWh",
+  };
+}
+
+function isMeterSnapshotComplete(snapshot: MeterSnapshot | null) {
+  if (!snapshot) return false;
+  const hasPrev = snapshot.prevDate || snapshot.prevReading || snapshot.prevReading === 0;
+  const hasCur = snapshot.currDate || snapshot.currReading || snapshot.currReading === 0;
+  return Boolean(hasPrev && hasCur);
+}
+
+function getInvoiceReference(invoice: InvoiceHeaderRow, fallbackReference: Date) {
+  if (invoice.period) {
+    const match = String(invoice.period).match(/^(\d{4})-(\d{2})$/);
+    if (match) {
+      const year = Number(match[1]);
+      const monthIndex = Number(match[2]) - 1;
+      if (Number.isFinite(year) && Number.isFinite(monthIndex) && monthIndex >= 0 && monthIndex <= 11) {
+        return new Date(Date.UTC(year, monthIndex, 1));
+      }
+    }
+  }
+  return invoice.invoice_date ? new Date(invoice.invoice_date) : fallbackReference;
+}
+
+async function fetchInitialElectricityReading(unitNumber: string, unitId?: string | null) {
+  const raw = await datasetsRepo.getDataset<InitialReadingRecord[]>("initial-readings", []);
+  const rows = Array.isArray(raw) ? raw : [];
+  const matches = rows.filter((row) => {
+    const meterType = String(row?.meter_type ?? "electricity").toLowerCase();
+    if (meterType !== "electricity") return false;
+    const rowUnit = row?.unit !== undefined && row?.unit !== null ? String(row.unit).trim() : "";
+    const rowUnitId = row?.unit_id !== undefined && row?.unit_id !== null ? String(row.unit_id).trim() : "";
+    if (unitId && rowUnitId && rowUnitId === unitId) return true;
+    return rowUnit === unitNumber;
+  });
+  if (!matches.length) return null;
+  const sorted = matches.slice().sort((a, b) => {
+    const aDate = Date.parse(String(a.reading_date || a.updated_at || "")) || 0;
+    const bDate = Date.parse(String(b.reading_date || b.updated_at || "")) || 0;
+    return bDate - aDate;
+  });
+  const entry = sorted[0];
+  const value = toNumberOrNull(entry?.reading_value);
+  if (value === null) return null;
+  return {
+    value,
+    date: "Initial",
+  };
+}
+
+async function fetchMeterSnapshotFromReadings(input: {
+  unit: UnitLookupRow | null;
+  invoice: InvoiceHeaderRow;
+  lineItems: InvoiceLineItem[];
+  fallbackReference: Date;
+}) {
+  const unitNumber =
+    input.unit?.unit_number !== undefined && input.unit?.unit_number !== null ? String(input.unit.unit_number).trim() : "";
+  if (!unitNumber) return null;
+
+  const reference = getInvoiceReference(input.invoice, input.fallbackReference);
+  const { start, nextStart } = monthStartExclusiveRange(reference);
+  const [prevRes, curRes] = await Promise.all([
+    query<{ reading_value: number | string; reading_date: string | Date }>(
+      `SELECT reading_value, reading_date
+       FROM public.meter_readings
+       WHERE unit = $1
+         AND lower(meter_type) = 'electricity'
+         AND reading_date < $2
+       ORDER BY reading_date DESC, created_at DESC
+       LIMIT 1`,
+      [unitNumber, toISO(start)],
+    ),
+    query<{ reading_value: number | string; reading_date: string | Date }>(
+      `SELECT reading_value, reading_date
+       FROM public.meter_readings
+       WHERE unit = $1
+         AND lower(meter_type) = 'electricity'
+         AND reading_date >= $2
+         AND reading_date < $3
+       ORDER BY reading_date DESC, created_at DESC
+       LIMIT 1`,
+      [unitNumber, toISO(start), toISO(nextStart)],
+    ),
+  ]);
+
+  const curRow = curRes.rows[0];
+  const curReading = toNumberOrNull(curRow?.reading_value);
+  if (curReading === null) return null;
+  const prevRow = prevRes.rows[0];
+  let prevReading = toNumberOrNull(prevRow?.reading_value);
+  let prevDate =
+    prevRow?.reading_date instanceof Date
+      ? prevRow.reading_date.toISOString().slice(0, 10)
+      : normalizeSnapshotDate(prevRow?.reading_date);
+
+  if (prevReading === null) {
+    const initial = await fetchInitialElectricityReading(unitNumber, input.unit?.id ?? null);
+    if (initial) {
+      prevReading = initial.value;
+      prevDate = initial.date;
+    }
+  }
+
+  if (prevReading === null) return null;
+
+  const electricityLine = input.lineItems.find((item) => {
+    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
+    return meta?.kind === "METER_ELECTRICITY" || /electric/i.test(String(item.description || ""));
+  });
+  const electricityMeta = electricityLine?.meta && typeof electricityLine.meta === "object" ? electricityLine.meta : null;
+  const rate = Number(electricityMeta?.unit_rate ?? electricityLine?.rate ?? 0.41);
+  const usage = Number(Math.max(curReading - prevReading, 0).toFixed(2));
+
+  return {
+    prevDate: normalizeSnapshotDate(prevDate || "Initial"),
+    prevReading,
+    currDate:
+      curRow?.reading_date instanceof Date
+        ? curRow.reading_date.toISOString().slice(0, 10)
+        : normalizeSnapshotDate(curRow?.reading_date),
+    currReading: curReading,
+    usage,
+    rate,
+    amount: Number((usage * rate).toFixed(2)),
+    unitLabel: "kWh",
+  } satisfies MeterSnapshot;
+}
+
+async function loadInvoiceLines(invoiceId: string, storedLineItems: unknown) {
+  const mappedStored = mapStoredLineItems(storedLineItems);
+  if (mappedStored.length) {
+    return mappedStored;
+  }
+  const lineRes = await query(
+    `SELECT id, invoice_id, line_index, description, quantity, unit_price_cents, total_cents, meta, created_at
+     FROM public.invoice_lines
+     WHERE invoice_id = $1
+     ORDER BY line_index ASC, created_at ASC`,
+    [invoiceId],
+  );
+  return mapInvoiceLineRows(lineRes.rows as InvoiceLineRow[]);
+}
+
+async function loadTenantRecord(tenantId: string | null, unit: UnitLookupRow | null): Promise<TenantRecord> {
+  if (tenantId) {
+    try {
+      const tenantRes = await query(
+        `SELECT id, name, building, property_id, unit, monthly_rent, due_day, reference
+         FROM public.tenants
+         WHERE id = $1
+         LIMIT 1`,
+        [tenantId],
+      );
+      const tenantRow = tenantRes.rows[0] as Partial<TenantRecord> | undefined;
+      if (tenantRow) {
+        return {
+          id: String(tenantRow.id || tenantId),
+          name: String(tenantRow.name || "Tenant"),
+          building: tenantRow.building ?? undefined,
+          property_id: tenantRow.property_id ?? undefined,
+          unit: tenantRow.unit ?? (unit?.unit_number !== null && unit?.unit_number !== undefined ? String(unit.unit_number) : undefined),
+          monthly_rent:
+            tenantRow.monthly_rent !== null && tenantRow.monthly_rent !== undefined
+              ? Number(tenantRow.monthly_rent)
+              : undefined,
+          due_day: tenantRow.due_day !== null && tenantRow.due_day !== undefined ? Number(tenantRow.due_day) : undefined,
+          reference: tenantRow.reference ?? undefined,
+        };
+      }
+    } catch (err) {
+      console.warn("Failed to load tenant for invoice export:", err);
+    }
+  }
+
+  return {
+    id: tenantId || "",
+    name: tenantId || "Tenant",
+    property_id: unit?.property_id ?? undefined,
+    unit: unit?.unit_number !== null && unit?.unit_number !== undefined ? String(unit.unit_number) : undefined,
+  };
+}
+
+async function buildInvoicePayloadFromRow(invoice: InvoiceHeaderRow, fallbackReference: Date): Promise<InvoicePayload> {
+  const invoiceId = String(invoice.id);
+  const issueDate = getInvoiceReference(invoice, fallbackReference);
+  const unitRes = invoice.unit_id
+    ? await query(
+        `SELECT id, property_id, unit_number
+         FROM public.units
+         WHERE id = $1
+         LIMIT 1`,
+        [invoice.unit_id],
+      )
+    : { rows: [] };
+  const unit = (unitRes.rows[0] as UnitLookupRow | undefined) ?? null;
+  const tenant = await loadTenantRecord(invoice.tenant_id, unit);
+  const lineItems = await loadInvoiceLines(invoiceId, invoice.line_items);
+  const totalAmount = lineItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const savedSnapshot = normalizeMeterSnapshot(
+    invoice.meter_snapshot ?? invoice.meta?.meter_snapshot ?? invoice.meta?.meterSnapshot ?? null,
+  );
+  let meterSnapshot = deriveMeterSnapshotFromLineItems(lineItems, savedSnapshot);
+  if (!isMeterSnapshotComplete(meterSnapshot)) {
+    try {
+      const readingsSnapshot = await fetchMeterSnapshotFromReadings({
+        unit,
+        invoice,
+        lineItems,
+        fallbackReference,
+      });
+      if (readingsSnapshot) {
+        meterSnapshot = readingsSnapshot;
+      }
+    } catch (err) {
+      console.warn("Failed to hydrate meter snapshot from readings:", err);
+    }
+  }
+  const dueDate = invoice.due_date ? new Date(invoice.due_date) : dueDateForMonth(issueDate, tenant.due_day);
+
+  return {
+    tenant,
+    invoiceId,
+    line_items: lineItems,
+    meter_snapshot: meterSnapshot,
+    total_amount: totalAmount,
+    invoiceNumber: invoice.invoice_number || invoiceId,
+    issueDate,
+    dueDate,
+  };
+}
 
 async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, company: CompanyProfile) {
   const fontRegular = path.join(process.cwd(), "public", "fonts", "Inter-Regular.ttf");
@@ -170,115 +570,158 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
 
     const left = doc.page.margins.left;
     const right = doc.page.width - doc.page.margins.right;
+    const contentWidth = right - left;
     let y = doc.page.margins.top;
 
+    const metaWidth = 220;
+    const logoWidth = 128;
+    const logoX = right - logoWidth;
     if (logoBuffer) {
-      doc.image(logoBuffer, left, y, { width: 120 });
-      y += 56;
+      doc.image(logoBuffer, logoX, y, { width: logoWidth });
     }
 
-    doc.fillColor("#000000").font("Inter-Bold").fontSize(20).text("INVOICE", left, y);
-    y += 22;
-    doc.fillColor("#000000").font("Inter").fontSize(10).text(`Billing period: ${monthLabel(payload.issueDate)}`, left, y);
+    doc.fillColor("#1a1a1a").font("Inter-Bold").fontSize(24).text("Invoice", left, y, {
+      width: contentWidth - metaWidth - 24,
+    });
+    y += 28;
+    doc.fillColor("#6b6b6b").font("Inter").fontSize(10).text(payload.invoiceNumber, left, y);
+    doc.text(formatTemplateDate(payload.issueDate), left, y + 14);
 
-    const metaX = right - 220;
-    const metaTop = doc.page.margins.top;
-    doc.fillColor("#000000").font("Inter").fontSize(9).text("Invoice #", metaX, metaTop, { width: 220, align: "right" });
-    doc.fillColor("#000000").font("Inter-Bold").fontSize(10).text(payload.invoiceNumber, metaX, metaTop + 12, {
-      width: 220,
-      align: "right",
-    });
-    doc.fillColor("#000000").font("Inter").fontSize(9).text("Issue date", metaX, metaTop + 30, { width: 220, align: "right" });
-    doc.fillColor("#000000").font("Inter").fontSize(10).text(formatUkDate(payload.issueDate), metaX, metaTop + 42, {
-      width: 220,
-      align: "right",
-    });
-    doc.fillColor("#000000").font("Inter").fontSize(9).text("Due date", metaX, metaTop + 60, { width: 220, align: "right" });
-    doc.fillColor("#000000").font("Inter").fontSize(10).text(formatUkDate(payload.dueDate), metaX, metaTop + 72, {
-      width: 220,
-      align: "right",
-    });
+    const metaTop = doc.page.margins.top + 140;
+    doc
+      .moveTo(left, metaTop)
+      .lineTo(right, metaTop)
+      .strokeColor("#0e0e0e")
+      .lineWidth(1.2)
+      .stroke();
 
-    y += 36;
+    y = metaTop + 24;
 
     const billToX = left;
-    const fromX = doc.page.width / 2 + 12;
-    const sectionY = y + 12;
-    doc.fillColor("#000000").font("Inter").fontSize(9).text("BILL TO", billToX, sectionY);
-    doc.fillColor("#000000").font("Inter-Bold").fontSize(12).text(payload.tenant.name, billToX, sectionY + 14);
-    doc.fillColor("#000000").font("Inter").fontSize(10);
-    doc.text(payload.tenant.building || payload.tenant.property_id || "—", billToX, sectionY + 30);
-    doc.text(payload.tenant.unit ? `Unit ${payload.tenant.unit}` : "Unit —", billToX, sectionY + 44);
-
-    doc.fillColor("#000000").font("Inter").fontSize(9).text("FROM", fromX, sectionY);
-    doc.fillColor("#000000").font("Inter-Bold").fontSize(12).text(company.name, fromX, sectionY + 14);
-    doc.fillColor("#000000").font("Inter").fontSize(10);
+    const fromX = left + contentWidth / 2;
+    const sectionY = y;
+    doc.fillColor("#b8972a").font("Inter-Bold").fontSize(8).text("FROM", billToX, sectionY, { characterSpacing: 1.2 });
+    doc.fillColor("#1a1a1a").font("Inter-Bold").fontSize(13).text(company.name, billToX, sectionY + 12);
+    doc.fillColor("#6b6b6b").font("Inter").fontSize(10);
     const fromLines = [company.address, company.phone].filter(Boolean);
     fromLines.forEach((line, idx) => {
-      doc.text(line || "", fromX, sectionY + 30 + idx * 14);
+      doc.text(line || "", billToX, sectionY + 28 + idx * 13);
     });
 
-    y = sectionY + 80;
+    doc.fillColor("#b8972a").font("Inter-Bold").fontSize(8).text("BILLED TO", fromX, sectionY, { characterSpacing: 1.2 });
+    doc.fillColor("#1a1a1a").font("Inter-Bold").fontSize(13).text(payload.tenant.name, fromX, sectionY + 12);
+    doc.fillColor("#6b6b6b").font("Inter").fontSize(10);
+    const tenantLines = [
+      payload.tenant.unit ? `Unit ${payload.tenant.unit}` : "Unit -",
+      payload.tenant.building || payload.tenant.property_id || company.name,
+      monthLabel(payload.issueDate),
+    ];
+    tenantLines.forEach((line, idx) => {
+      doc.text(line, fromX, sectionY + 28 + idx * 13);
+    });
+
+    y = sectionY + 82;
+    const totals = summarizeLineItems(payload.line_items || []);
+
+    if (payload.meter_snapshot) {
+      const snap = payload.meter_snapshot;
+      const meterHeight = 66;
+      doc.roundedRect(left, y, contentWidth, meterHeight, 6).fillAndStroke("#faf9f7", "#d0ccc4");
+      doc.fillColor("#b8972a").font("Inter-Bold").fontSize(8).text("ELECTRICITY METER SNAPSHOT", left + 16, y + 12, {
+        characterSpacing: 1.1,
+      });
+      const meterCols = 5;
+      const meterCellWidth = (contentWidth - 32) / meterCols;
+      const meterItems = [
+        { label: "Prev. Date", value: formatTemplateDate(snap.prevDate) || "Initial" },
+        { label: "Prev. Reading", value: `${formatQuantity(snap.prevReading)} ${snap.unitLabel || "kWh"}` },
+        { label: "Curr. Date", value: formatTemplateDate(snap.currDate) || "-" },
+        { label: "Curr. Reading", value: `${formatQuantity(snap.currReading)} ${snap.unitLabel || "kWh"}` },
+        { label: "Usage", value: `${formatQuantity(snap.usage)} ${snap.unitLabel || "kWh"}` },
+      ];
+      meterItems.forEach((item, meterIndex) => {
+        const x = left + 16 + meterCellWidth * meterIndex;
+        doc.fillColor("#6b6b6b").font("Inter").fontSize(7).text(item.label.toUpperCase(), x, y + 28, {
+          width: meterCellWidth - 8,
+        });
+        doc.fillColor("#1a1a1a").font("Inter-Bold").fontSize(9).text(item.value, x, y + 40, {
+          width: meterCellWidth - 8,
+        });
+      });
+      y += meterHeight + 18;
+    }
 
     const tableTop = y;
     const colDesc = left;
     const colQty = left + 260;
-    const colRate = left + 340;
-    const colAmount = right - 100;
-    doc.fillColor("#000000").font("Inter-Bold").fontSize(9);
+    const colRate = left + 350;
+    const colAmount = right - 96;
+    doc.fillColor("#6b6b6b").font("Inter-Bold").fontSize(8);
     doc.text("DESCRIPTION", colDesc, tableTop);
     doc.text("QTY", colQty, tableTop, { width: 60, align: "right" });
-    doc.text("RATE", colRate, tableTop, { width: 80, align: "right" });
+    doc.text("UNIT RATE", colRate, tableTop, { width: 80, align: "right" });
     doc.text("AMOUNT", colAmount, tableTop, { width: 100, align: "right" });
 
     y = tableTop + 16;
-    doc.moveTo(left, y).lineTo(right, y).strokeColor("#e2e8f0").stroke();
+    doc.moveTo(left, y).lineTo(right, y).strokeColor("#0e0e0e").lineWidth(1.2).stroke();
     y += 8;
 
-    doc.font("Inter").fontSize(10).fillColor("#000000");
+    doc.font("Inter").fontSize(10).fillColor("#1a1a1a");
     const lineItems = payload.line_items || [];
     lineItems.forEach((item) => {
-      const descWidth = colQty - colDesc - 12;
-      const descHeight = doc.heightOfString(item.description, { width: descWidth });
-      const rowHeight = Math.max(descHeight, 18);
+      const lineDisplay = describeLineItem(item);
+      const descWidth = colQty - colDesc - 14;
+      const titleHeight = doc.heightOfString(lineDisplay.title, { width: descWidth });
+      const subtitleHeight = lineDisplay.subtitle
+        ? doc.heightOfString(lineDisplay.subtitle, { width: descWidth })
+        : 0;
+      const rowHeight = Math.max(titleHeight + subtitleHeight + (lineDisplay.subtitle ? 8 : 0), 20);
       if (y + rowHeight > doc.page.height - doc.page.margins.bottom - 80) {
         doc.addPage();
         y = doc.page.margins.top;
       }
-      doc.text(item.description, colDesc, y, { width: descWidth });
+      doc.fillColor("#1a1a1a").font("Inter-Bold").fontSize(10).text(lineDisplay.title, colDesc, y, { width: descWidth });
+      if (lineDisplay.subtitle) {
+        doc.fillColor("#6b6b6b").font("Inter").fontSize(8.5).text(lineDisplay.subtitle, colDesc, y + titleHeight + 2, {
+          width: descWidth,
+        });
+      }
+      doc.fillColor("#6b6b6b").font("Inter").fontSize(9);
       doc.text(formatQuantity(item.qty), colQty, y, { width: 60, align: "right" });
       doc.text(toMoney(item.rate), colRate, y, { width: 80, align: "right" });
-      doc.text(toMoney(item.amount), colAmount, y, { width: 100, align: "right" });
-      y += rowHeight + 6;
+      doc.fillColor("#1a1a1a").font("Inter-Bold").fontSize(9).text(toMoney(item.amount), colAmount, y, {
+        width: 100,
+        align: "right",
+      });
+      y += rowHeight + 10;
+      doc.moveTo(left, y - 4).lineTo(right, y - 4).strokeColor("#d0ccc4").lineWidth(0.7).stroke();
     });
 
-    y += 4;
-    doc.moveTo(left, y).lineTo(right, y).strokeColor("#e2e8f0").stroke();
     y += 10;
-    const totalDue = payload.total_amount;
-    doc.font("Inter-Bold").text("Total due", colDesc, y, { width: colAmount - colDesc - 12, align: "right" });
-    doc.text(toMoney(totalDue), colAmount, y, { width: 120, align: "right" });
+    const totalsX = right - 220;
+    doc.fillColor("#6b6b6b").font("Inter").fontSize(10).text("Rent", totalsX, y, { width: 100 });
+    doc.fillColor("#1a1a1a").font("Inter").fontSize(10).text(toMoney(totals.rent), totalsX + 100, y, {
+      width: 120,
+      align: "right",
+    });
+    y += 18;
+    doc.fillColor("#6b6b6b").font("Inter").fontSize(10).text("Electricity", totalsX, y, { width: 100 });
+    doc.fillColor("#1a1a1a").font("Inter").fontSize(10).text(toMoney(totals.electricity), totalsX + 100, y, {
+      width: 120,
+      align: "right",
+    });
+    y += 22;
+    doc.moveTo(totalsX, y - 6).lineTo(right, y - 6).strokeColor("#0e0e0e").lineWidth(1.2).stroke();
+    doc.fillColor("#1a1a1a").font("Inter-Bold").fontSize(16).text("Total Due", totalsX, y, { width: 100 });
+    doc.fillColor("#1a1a1a").font("Inter-Bold").fontSize(16).text(toMoney(payload.total_amount), totalsX + 100, y, {
+      width: 120,
+      align: "right",
+    });
 
-    if (payload.meter_snapshot) {
-      const snap = payload.meter_snapshot;
-      y += 24;
-      doc.font("Inter-Bold").fontSize(10).fillColor("#000000").text("Electricity Reading", colDesc, y);
-      y += 14;
-      doc.font("Inter").fontSize(9).fillColor("#000000");
-      if (snap.prevDate) {
-        doc.text(`Previous Reading (${formatUkDate(snap.prevDate)}) ${formatQuantity(snap.prevReading)} ${snap.unitLabel || "kWh"}`, colDesc, y);
-        y += 12;
-      }
-      if (snap.currDate) {
-        doc.text(`Current Reading (${formatUkDate(snap.currDate)}) ${formatQuantity(snap.currReading)} ${snap.unitLabel || "kWh"}`, colDesc, y);
-        y += 12;
-      }
-      doc.text(
-        `Usage ${formatQuantity(snap.usage)} ${snap.unitLabel || "kWh"} @ ${toMoney(snap.rate)} = ${toMoney(snap.amount)}`,
-        colDesc,
-        y,
-      );
-    }
+    const footerY = doc.page.height - doc.page.margins.bottom - 22;
+    doc.moveTo(left, footerY).lineTo(right, footerY).strokeColor("#d0ccc4").lineWidth(0.7).stroke();
+    doc.fillColor("#b0b0b0").font("Inter").fontSize(8).text("Thank you for your tenancy at Orfane Tower.", left, footerY + 8);
+    doc.text("ORFANE TOWER", right - 120, footerY + 8, { width: 120, align: "right" });
   };
 
   if (!invoices.length) {
@@ -343,103 +786,142 @@ function buildInvoiceSection(
   const propertyLabel = tenant.building || tenant.property_id || "—";
   const unitLabel = tenant.unit ? `Unit ${tenant.unit}` : "Unit —";
   const fromLines = [company.address, company.phone].filter(Boolean);
+  const totals = summarizeLineItems(lineItems);
 
   const lines = lineItems
     .map(
-      (item) => `
+      (item) => {
+        const lineDisplay = describeLineItem(item);
+        return `
         <tr>
-          <td>${item.description}</td>
-          <td class="qty">${formatQuantity(item.qty)}</td>
-          <td class="amount">${toMoney(item.rate)}</td>
-          <td class="amount">${toMoney(item.amount)}</td>
-        </tr>`,
+          <td>
+            <div class="item-name">${escapeHtml(lineDisplay.title)}</div>
+            ${lineDisplay.subtitle ? `<div class="item-sub">${escapeHtml(lineDisplay.subtitle)}</div>` : ""}
+          </td>
+          <td class="right muted">${formatQuantity(item.qty)}</td>
+          <td class="right muted">${toMoney(item.rate)}</td>
+          <td class="right">${toMoney(item.amount)}</td>
+        </tr>`;
+      },
     )
     .join("");
 
   const logoPath = "/branding/Logo.png";
   const logo = `<img class="logo" src="${logoPath}" alt="${company.name} logo" />`;
-  const prevLine = meterSnapshot?.prevDate
-    ? `<p>Previous Reading (${formatUkDate(meterSnapshot.prevDate)}) ${formatQuantity(meterSnapshot.prevReading)} ${
-        meterSnapshot.unitLabel || "kWh"
-      }</p>`
-    : "";
-  const currLine = meterSnapshot?.currDate
-    ? `<p>Current Reading (${formatUkDate(meterSnapshot.currDate)}) ${formatQuantity(meterSnapshot.currReading)} ${
-        meterSnapshot.unitLabel || "kWh"
-      }</p>`
+  const meterBlock = meterSnapshot
+    ? `
+      <div class="meter-block">
+        <div class="meter-block-title">Electricity Meter Snapshot</div>
+        <div class="meter-row">
+          <div class="meter-item">
+            <div class="meter-item-label">Prev. Date</div>
+            <div class="meter-item-val">${escapeHtml(formatTemplateDate(meterSnapshot.prevDate) || "Initial")}</div>
+          </div>
+          <div class="meter-item">
+            <div class="meter-item-label">Prev. Reading</div>
+            <div class="meter-item-val">${formatQuantity(meterSnapshot.prevReading)} ${escapeHtml(meterSnapshot.unitLabel || "kWh")}</div>
+          </div>
+          <div class="meter-item">
+            <div class="meter-item-label">Curr. Date</div>
+            <div class="meter-item-val">${escapeHtml(formatTemplateDate(meterSnapshot.currDate) || "-")}</div>
+          </div>
+          <div class="meter-item">
+            <div class="meter-item-label">Curr. Reading</div>
+            <div class="meter-item-val">${formatQuantity(meterSnapshot.currReading)} ${escapeHtml(meterSnapshot.unitLabel || "kWh")}</div>
+          </div>
+          <div class="meter-item">
+            <div class="meter-item-label">Usage</div>
+            <div class="meter-item-val">${formatQuantity(meterSnapshot.usage)} ${escapeHtml(meterSnapshot.unitLabel || "kWh")}</div>
+          </div>
+        </div>
+      </div>
+    `
     : "";
 
   return `
-    <section class="invoice">
-      <div class="invoice-top">
-        <div>
+    <section class="invoice page">
+      <div class="inv-header">
+        <div class="inv-meta">
+          <div class="inv-label">Invoice</div>
+          <div class="inv-number">${escapeHtml(invoiceNumber)}</div>
+          <div class="inv-date">${escapeHtml(formatTemplateDate(issueDate))}</div>
+        </div>
+        <div class="logo-block">
           ${logo}
-          <h1>Invoice</h1>
-          <p class="muted">Billing period: ${monthLabel(issueDate)}</p>
-        </div>
-        <div class="invoice-meta">
-          <div><span>Invoice #</span>${invoiceNumber}</div>
-          <div><span>Issue date</span>${formatUkDate(issueDate)}</div>
-          <div><span>Due date</span>${formatUkDate(dueDate)}</div>
         </div>
       </div>
-      <div class="invoice-grid">
+      <div class="parties">
         <div>
-          <h2>Bill To</h2>
-          <p class="name">${tenant.name}</p>
-          <p>${propertyLabel}</p>
-          <p>${unitLabel}</p>
+          <div class="party-label">From</div>
+          <div class="party-name">${escapeHtml(company.name)}</div>
+          <div class="party-detail">${fromLines.map((line) => escapeHtml(line)).join("<br>")}</div>
         </div>
         <div>
-          <h2>From</h2>
-          <p class="name">${company.name}</p>
-          ${fromLines.map((line) => `<p>${line}</p>`).join("")}
+          <div class="party-label">Billed To</div>
+          <div class="party-name">${escapeHtml(tenant.name)}</div>
+          <div class="party-detail">
+            ${escapeHtml(unitLabel)}<br>
+            ${escapeHtml(propertyLabel)}<br>
+            ${escapeHtml(extractBillingPeriodSubtitle(issueDate))}
+          </div>
         </div>
       </div>
-      <table>
+
+      ${meterBlock}
+
+      <table class="items-table">
         <thead>
           <tr>
-            <th>Description</th>
-            <th class="qty">Qty</th>
-            <th class="amount">Rate</th>
-            <th class="amount">Amount</th>
+            <th style="width:46%">Description</th>
+            <th class="right" style="width:14%">Qty</th>
+            <th class="right" style="width:18%">Unit Rate</th>
+            <th class="right" style="width:22%">Amount</th>
           </tr>
         </thead>
         <tbody>
           ${lines}
         </tbody>
-        <tfoot>
-          <tr>
-            <td colspan="3" class="total-label">Total due</td>
-            <td class="amount total">${toMoney(totalAmount)}</td>
-          </tr>
-        </tfoot>
       </table>
-      ${
-        meterSnapshot
-          ? `<div class="meter-block">
-          <h3>Electricity Reading</h3>
-          ${prevLine}
-          ${currLine}
-          <p>Usage ${formatQuantity(meterSnapshot.usage)} ${meterSnapshot.unitLabel || "kWh"} @ ${toMoney(
-              meterSnapshot.rate,
-            )} = ${toMoney(meterSnapshot.amount)}</p>
-        </div>`
-          : ""
-      }
+
+      <div class="totals-block">
+        <table class="totals-table">
+          <tr>
+            <td>Rent</td>
+            <td>${toMoney(totals.rent)}</td>
+          </tr>
+          <tr>
+            <td>Electricity</td>
+            <td>${toMoney(totals.electricity)}</td>
+          </tr>
+          <tr class="total-final">
+            <td>Total Due</td>
+            <td>${toMoney(totalAmount)}</td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="inv-footer">
+        <div class="footer-note">Thank you for your tenancy at Orfane Tower.</div>
+        <div class="footer-brand">ORFANE TOWER</div>
+      </div>
     </section>
   `;
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const organization = await getOrganizationSnapshot();
-    const company = buildCompanyProfile(organization);
+    let company = FALLBACK_COMPANY;
+    try {
+      const organization = await getOrganizationSnapshot();
+      company = buildCompanyProfile(organization);
+    } catch (err) {
+      console.warn("Failed to load organization settings for invoice export:", err);
+    }
     const { searchParams } = new URL(req.url);
     const requestedTenantId = searchParams.get("tenantId") || searchParams.get("tenant") || "";
+    const requestedInvoiceId = searchParams.get("invoiceId") || "";
     const mode = searchParams.get("mode") || "download";
-    const isView = mode === "view";
-    const wantsPdf = mode === "download" || mode === "pdf";
+    const wantsPdf = mode === "download";
     const requestedMonth = searchParams.get("month") || "";
     const requestedYear = searchParams.get("year") || "";
     let reference = new Date();
@@ -452,92 +934,85 @@ export async function GET(req: NextRequest) {
     }
 
     const { start, end } = monthRange(reference);
-    const rawTenants = await tenantsRepo.listTenants();
-    const tenants: TenantRecord[] = rawTenants.map((tenant) => ({
-      ...tenant,
-      property_id: opt(tenant.property_id),
-      building: opt(tenant.building),
-      unit: opt(tenant.unit),
-      monthly_rent: opt(tenant.monthly_rent),
-      due_day: opt(tenant.due_day),
-      reference: opt(tenant.reference),
-    }));
     const normalizedTenantId = normalizeId(requestedTenantId);
-    const scopedTenants = normalizedTenantId
-      ? tenants.filter((tenant) => {
-          const candidates = [tenant.id, tenant.reference, tenant.unit].filter(Boolean).map(String);
-          return candidates.some((candidate) => normalizeId(candidate) === normalizedTenantId);
-        })
-      : tenants;
-    const tenantIndex = new Map<string, TenantRecord>();
-    tenants.forEach((tenant) => tenantIndex.set(String(tenant.id), tenant));
-    const scopedTenantIds = scopedTenants.map((tenant) => String(tenant.id));
+    let invoicePayloads: InvoicePayload[] = [];
 
-    let invoiceRows: InvoiceHeaderRow[] = [];
-    if (!normalizedTenantId || scopedTenantIds.length) {
-      if (scopedTenantIds.length) {
-        const res = await query(
-          `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, line_items, meter_snapshot
-           FROM public.invoices
-           WHERE invoice_date >= $1 AND invoice_date <= $2
-             AND tenant_id = ANY($3)
-           ORDER BY invoice_date ASC, id ASC`,
-          [start, end, scopedTenantIds],
-        );
-        invoiceRows = res.rows as InvoiceHeaderRow[];
-      } else {
-        const res = await query(
-          `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, line_items, meter_snapshot
-           FROM public.invoices
-           WHERE invoice_date >= $1 AND invoice_date <= $2
-           ORDER BY invoice_date ASC, id ASC`,
-          [start, end],
-        );
-        invoiceRows = res.rows as InvoiceHeaderRow[];
-      }
-    }
-
-    const invoicePayloads = invoiceRows.map((invoice) => {
-      const tenant =
-        tenantIndex.get(String(invoice.tenant_id)) ||
-        ({
-          id: String(invoice.tenant_id || ""),
-          name: "Tenant",
-        } as TenantRecord);
-      const storedLines = Array.isArray(invoice.line_items) ? invoice.line_items : [];
-      const lineItems = mapLineItems(storedLines);
-      const totalAmount = lineItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-      const meterSnapshot = normalizeMeterSnapshot(
-        invoice.meter_snapshot ?? invoice.meta?.meter_snapshot ?? invoice.meta?.meterSnapshot ?? null,
+    if (requestedInvoiceId) {
+      const singleRes = await query(
+        `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, period, line_items, meter_snapshot
+         FROM public.invoices
+         WHERE id = $1
+         LIMIT 1`,
+        [requestedInvoiceId],
       );
-      const issueDate = invoice.invoice_date ? new Date(invoice.invoice_date) : reference;
-      const dueDate = invoice.due_date
-        ? new Date(invoice.due_date)
-        : dueDateForMonth(reference, tenant.due_day);
-      return {
-        tenant: {
-          id: tenant.id,
-          name: tenant.name,
-          property_id: tenant.property_id ?? undefined,
-          building: tenant.building ?? undefined,
-          unit: tenant.unit ?? undefined,
-          reference: tenant.reference ?? undefined,
-          monthly_rent: tenant.monthly_rent ?? undefined,
-          due_day: tenant.due_day ?? undefined,
-        },
-        invoiceId: String(invoice.id),
-        line_items: lineItems,
-        meter_snapshot: meterSnapshot,
-        total_amount: totalAmount,
-        invoiceNumber: invoice.invoice_number || String(invoice.id),
-        issueDate,
-        dueDate,
-      } satisfies InvoicePayload;
-    });
+      const invoice = singleRes.rows[0] as InvoiceHeaderRow | undefined;
+      if (!invoice) {
+        return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
+      }
+      invoicePayloads = [await buildInvoicePayloadFromRow(invoice, reference)];
+      reference = invoicePayloads[0]?.issueDate || reference;
+    } else {
+      let tenants: TenantRecord[] = [];
+      try {
+        const rawTenants = await tenantsRepo.listTenants();
+        tenants = rawTenants.map((tenant) => ({
+          ...tenant,
+          property_id: opt(tenant.property_id),
+          building: opt(tenant.building),
+          unit: opt(tenant.unit),
+          monthly_rent: opt(tenant.monthly_rent),
+          due_day: opt(tenant.due_day),
+          reference: opt(tenant.reference),
+        }));
+      } catch (err) {
+        console.warn("Failed to load tenants for invoice export:", err);
+      }
+      const tenantIndex = new Map<string, TenantRecord>();
+      tenants.forEach((tenant) => tenantIndex.set(String(tenant.id), tenant));
+      const res = await query(
+        `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, period, line_items, meter_snapshot
+         FROM public.invoices
+         WHERE invoice_date >= $1 AND invoice_date <= $2
+         ORDER BY invoice_date ASC, id ASC`,
+        [start, end],
+      );
+      let invoiceRows = res.rows as InvoiceHeaderRow[];
+      if (requestedTenantId) {
+        invoiceRows = invoiceRows.filter((invoice) => {
+          const rawTenantId = String(invoice.tenant_id || "");
+          if (!rawTenantId) return false;
+          if (rawTenantId === requestedTenantId) return true;
+          return normalizedTenantId ? normalizeId(rawTenantId) === normalizedTenantId : false;
+        });
+      }
+
+      invoicePayloads = await Promise.all(
+        invoiceRows.map(async (invoice) => {
+          const built = await buildInvoicePayloadFromRow(invoice, reference);
+          const tenant = tenantIndex.get(String(invoice.tenant_id));
+          if (!tenant) return built;
+          return {
+            ...built,
+            tenant: {
+              id: tenant.id,
+              name: tenant.name,
+              property_id: tenant.property_id ?? built.tenant.property_id,
+              building: tenant.building ?? built.tenant.building,
+              unit: tenant.unit ?? built.tenant.unit,
+              reference: tenant.reference ?? undefined,
+              monthly_rent: tenant.monthly_rent ?? undefined,
+              due_day: tenant.due_day ?? undefined,
+            },
+            dueDate: invoice.due_date ? new Date(invoice.due_date) : dueDateForMonth(built.issueDate, tenant.due_day),
+          } satisfies InvoicePayload;
+        }),
+      );
+    }
 
     if (wantsPdf) {
       const pdf = await renderInvoicesPdf(invoicePayloads, reference, company);
-      const periodLabel = toISO(reference).slice(0, 7);
+      const filenameReference = invoicePayloads[0]?.issueDate || reference;
+      const periodLabel = toISO(filenameReference).slice(0, 7);
       const sanitize = (value: string) => value.replace(/[^a-zA-Z0-9-_]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
       let filename = `Invoices-${periodLabel}.pdf`;
       if (invoicePayloads.length === 1) {
@@ -576,57 +1051,64 @@ export async function GET(req: NextRequest) {
       sections ||
       `<section class="empty">No charges found for ${monthLabel(reference)}${normalizedTenantId ? " for this tenant" : ""}.</section>`;
 
-    const themeOverride = isView
-      ? `
-      body { background: #0b1220; color: #e2e8f0; }
-      .invoice { background: #000000; box-shadow: 0 16px 32px rgba(2, 6, 23, 0.6); }
-      h2, .muted, .invoice-meta span, th, .note { color: #94a3b8; }
-      .invoice-meta { color: #cbd5f5; }
-      th, td { border-bottom: 1px solid #1f2937; }
-      .meter-block { background: #0b1220; border-color: #1f2937; }
-      .meter-block p { color: #94a3b8; }
-      .empty { background: #000000; color: #94a3b8; }
-      `
-      : "";
-
     const html = `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Monthly Invoices</title>
+    <title>Invoice — Orfane Tower</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
-      body { margin: 0; font-family: "Helvetica Neue", Arial, sans-serif; background: #f2f4f8; color: #000000; }
-      .invoice { background: #fff; margin: 32px auto; padding: 48px; max-width: 860px; border-radius: 16px; box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08); }
-      .invoice:last-child { page-break-after: auto; }
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --gold: #b8972a;
+        --black: #0e0e0e;
+        --ink: #1a1a1a;
+        --muted: #6b6b6b;
+        --rule: #d0ccc4;
+        --bg: #faf9f7;
+      }
+      body { font-family: 'DM Sans', "Helvetica Neue", Arial, sans-serif; background: #e8e4de; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; min-height: 100vh; }
       .invoice { page-break-after: always; }
-      .invoice-top { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
-      .logo { height: 52px; width: auto; display: block; margin-bottom: 12px; }
-      h1 { margin: 8px 0 4px; font-size: 28px; letter-spacing: 0.05em; text-transform: uppercase; }
-      h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; color: #000000; }
-      .tag { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #9f1239; font-weight: 700; }
-      .muted { color: #000000; font-size: 12px; margin: 0; }
-      .invoice-meta { text-align: right; font-size: 12px; color: #000000; }
-      .invoice-meta span { display: block; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: #94a3b8; margin-bottom: 2px; }
-      .invoice-meta div { margin-bottom: 6px; }
-      .invoice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 32px 0; }
-      .name { font-weight: 700; font-size: 16px; margin: 0 0 6px; }
-      table { width: 100%; border-collapse: collapse; font-size: 14px; }
-      th { text-align: left; font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: #000000; border-bottom: 1px solid #e2e8f0; padding: 12px 0; }
-      td { padding: 12px 0; border-bottom: 1px solid #e2e8f0; }
-      .qty { text-align: right; width: 70px; }
-      .amount { text-align: right; }
-      tfoot td { border-bottom: none; }
-      .total-label { text-align: right; font-weight: 600; }
-      .total { font-size: 18px; font-weight: 700; }
-      .meter-block { margin-top: 20px; padding: 16px; border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; }
-      .meter-block h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: #000000; }
-      .meter-block p { margin: 4px 0; font-size: 12px; color: #000000; }
-      .note { margin-top: 16px; font-size: 12px; color: #000000; }
-      .empty { margin: 48px auto; padding: 32px; max-width: 720px; border-radius: 16px; background: #fff; text-align: center; color: #000000; }
-      ${themeOverride}
+      .invoice:last-child { page-break-after: auto; }
+      .page { width: 794px; min-height: 1123px; background: #fff; margin: 0 auto 32px; padding: 64px 72px 56px; position: relative; box-shadow: 0 8px 48px rgba(0,0,0,0.18); }
+      .inv-header { display: flex; align-items: flex-start; justify-content: space-between; padding-bottom: 32px; border-bottom: 1.5px solid var(--black); margin-bottom: 32px; }
+      .logo-block img { height: 160px; width: auto; display: block; }
+      .inv-label { font-family: 'Cormorant Garamond', serif; font-size: 36px; font-weight: 600; color: var(--ink); letter-spacing: 0.04em; line-height: 1; }
+      .inv-number { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 6px; letter-spacing: 0.06em; }
+      .inv-date { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 3px; }
+      .parties { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-bottom: 36px; }
+      .party-label { font-size: 9px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); margin-bottom: 8px; }
+      .party-name { font-family: 'Cormorant Garamond', serif; font-size: 18px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+      .party-detail { font-size: 12px; color: var(--muted); line-height: 1.7; }
+      .meter-block { background: var(--bg); border: 1px solid var(--rule); border-radius: 6px; padding: 18px 22px; margin-bottom: 28px; }
+      .meter-block-title { font-size: 9px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); margin-bottom: 14px; }
+      .meter-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+      .meter-item-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+      .meter-item-val { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 500; color: var(--ink); }
+      .items-table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+      .items-table thead tr { border-bottom: 1.5px solid var(--black); }
+      .items-table thead th { font-size: 9px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); padding: 0 0 10px 0; text-align: left; }
+      .items-table thead th.right { text-align: right; }
+      .items-table tbody tr { border-bottom: 1px solid var(--rule); }
+      .items-table tbody td { padding: 14px 0; font-size: 13px; color: var(--ink); vertical-align: top; }
+      .items-table tbody td.right { text-align: right; font-family: 'DM Mono', monospace; }
+      .items-table tbody td.muted { color: var(--muted); }
+      .item-name { font-weight: 500; }
+      .item-sub { font-size: 11px; color: var(--muted); margin-top: 3px; font-family: 'DM Mono', monospace; }
+      .totals-block { display: flex; justify-content: flex-end; margin-top: 0; }
+      .totals-table { width: 280px; }
+      .totals-table tr td { padding: 7px 0; font-size: 13px; color: var(--muted); }
+      .totals-table tr td:last-child { text-align: right; font-family: 'DM Mono', monospace; color: var(--ink); }
+      .totals-table tr.total-final { border-top: 1.5px solid var(--black); }
+      .totals-table tr.total-final td { padding-top: 12px; font-family: 'Cormorant Garamond', serif; font-size: 20px; font-weight: 600; color: var(--ink); }
+      .inv-footer { position: absolute; bottom: 40px; left: 72px; right: 72px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--rule); padding-top: 14px; }
+      .footer-note { font-size: 10px; color: #bbb; }
+      .footer-brand { font-family: 'DM Mono', monospace; font-size: 10px; color: #ccc; letter-spacing: 0.06em; }
+      .empty { margin: 48px auto; padding: 32px; max-width: 720px; border-radius: 16px; background: #fff; text-align: center; color: var(--ink); }
       @media print {
-        body { background: #fff; }
-        .invoice { box-shadow: none; margin: 0; border-radius: 0; }
+        body { background: white; padding: 0; }
+        .page { box-shadow: none; width: 100%; min-height: auto; padding: 48px 56px; }
+        @page { margin: 0; size: A4; }
       }
     </style>
   </head>
@@ -647,6 +1129,13 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     console.error("Failed to generate invoices:", err);
-    return NextResponse.json({ ok: false, error: "Failed to generate invoices" }, { status: 500 });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Failed to generate invoices",
+        detail: process.env.NODE_ENV !== "production" ? (err instanceof Error ? err.message : String(err)) : undefined,
+      },
+      { status: 500 },
+    );
   }
 }

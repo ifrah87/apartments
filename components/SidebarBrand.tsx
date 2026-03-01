@@ -19,14 +19,14 @@ export function SidebarBrand() {
   const altText = general.orgName || branding.appName || DEFAULT_GENERAL.orgName;
 
   return (
-    <div className="flex items-center justify-center px-6 pb-4 pt-3">
-      <div className="relative h-48 w-48">
+    <div className="flex items-center justify-center px-4 pb-2 pt-4">
+      <div className="relative h-24 w-24">
         <Image
           src={logoPath}
           alt={altText}
           fill
-          sizes="192px"
-          className="object-contain object-bottom"
+          sizes="96px"
+          className="object-contain"
           priority
         />
       </div>

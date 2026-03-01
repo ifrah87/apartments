@@ -112,6 +112,16 @@ type LeaseRow = {
   status: string;
 };
 
+type ResolvedLease = {
+  id: string;
+  tenant_id: string;
+  rent: number | null;
+  start_date: string;
+  end_date: string | null;
+  status: string;
+  source: "db" | "dataset";
+};
+
 function normalizeServiceList(value: unknown): ServiceRecord[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as ServiceRecord[];
@@ -131,6 +141,38 @@ function toNumberOrNull(value: unknown) {
   if (value === undefined || value === null || value === "") return null;
   const num = typeof value === "number" ? value : Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+function formatReadingDate(value?: string | null) {
+  if (!value) return "";
+  if (value === "Initial") return "Initial";
+  const trimmed = String(value).trim();
+  if (!trimmed) return "";
+  return trimmed.length >= 10 ? trimmed.slice(0, 10) : trimmed;
+}
+
+function buildElectricityLineDescription(input: {
+  prevValue: number | null;
+  prevDate?: string | null;
+  curValue: number | null;
+  curDate?: string | null;
+  usage: number;
+  rate: number;
+  total: number;
+  missingPrev?: boolean;
+}) {
+  const prevDateLabel = formatReadingDate(input.prevDate);
+  const curDateLabel = formatReadingDate(input.curDate);
+  const prevLabel =
+    input.prevValue === null
+      ? "missing"
+      : `${Number(input.prevValue).toFixed(2)}${prevDateLabel ? ` (${prevDateLabel})` : ""}`;
+  const curLabel =
+    input.curValue === null
+      ? "missing"
+      : `${Number(input.curValue).toFixed(2)}${curDateLabel ? ` (${curDateLabel})` : ""}`;
+  const base = `Electricity | Initial reading: ${prevLabel} | Current reading: ${curLabel} | Usage: ${input.usage.toFixed(2)} | Rate: ${input.rate.toFixed(2)} | Total: ${input.total.toFixed(2)}`;
+  return input.missingPrev ? `${base} | Missing previous reading` : base;
 }
 
 async function fetchInitialElectricityReading(
@@ -196,7 +238,7 @@ async function resolveElectricityReadings(opts: {
     }
     const cur: ElectricityReading = {
       value: curValue,
-      date: String(curRow.reading_date),
+      date: curRow.reading_date instanceof Date ? curRow.reading_date.toISOString().slice(0, 10) : String(curRow.reading_date),
       source: "reading",
     };
 
@@ -207,7 +249,7 @@ async function resolveElectricityReadings(opts: {
         ? null
         : {
             value: prevValue,
-            date: String(prevRow.reading_date),
+            date: prevRow.reading_date instanceof Date ? prevRow.reading_date.toISOString().slice(0, 10) : String(prevRow.reading_date),
             source: "reading",
           };
 
@@ -297,9 +339,19 @@ async function buildElectricityLineItem(
   if (!readings.prev) {
     console.warn("⚠️ missing previous electricity reading", { unitNumber, periodStart });
     const curValue = readings.cur.value;
+    const total = 0;
     return {
       lineItem: {
-        description: `Electricity — Prev: missing, Cur: ${curValue} | Usage: 0 (Missing prev reading)`,
+        description: buildElectricityLineDescription({
+          prevValue: null,
+          prevDate: "Initial",
+          curValue,
+          curDate: readings.cur.date,
+          usage: 0,
+          rate,
+          total,
+          missingPrev: true,
+        }),
         qty: 0,
         unit_cents: rateCents,
         total_cents: 0,
@@ -309,6 +361,9 @@ async function buildElectricityLineItem(
           cur: curValue,
           usage: 0,
           unit_rate: rate,
+          prev_date: "Initial",
+          curr_date: readings.cur.date,
+          amount: total,
           periodStart,
           periodEnd,
           sourcePrev: "missing",
@@ -321,21 +376,33 @@ async function buildElectricityLineItem(
 
   const usage = readings.usage ?? Math.max(0, Number((readings.cur.value - readings.prev.value).toFixed(2)));
   const totalCents = Math.round(usage * rateCents);
-  const prevLabel = readings.prev.date || "Initial";
-  const curLabel = readings.cur.date || "";
+  const total = Number((totalCents / 100).toFixed(2));
+  const prevLabel = formatReadingDate(readings.prev.date || "Initial");
+  const curLabel = formatReadingDate(readings.cur.date || "");
   const sourcePrev = readings.prev.source === "initial" ? "baseline" : "reading";
   return {
     lineItem: {
-      description: `Electricity — Prev: ${readings.prev.value} (${prevLabel}), Cur: ${readings.cur.value} (${curLabel}) | Usage: ${usage}`,
+      description: buildElectricityLineDescription({
+        prevValue: readings.prev.value,
+        prevDate: prevLabel,
+        curValue: readings.cur.value,
+        curDate: curLabel,
+        usage,
+        rate,
+        total,
+      }),
       qty: usage,
       unit_cents: rateCents,
       total_cents: totalCents,
       meta: {
         kind: "METER_ELECTRICITY",
         prev: readings.prev.value,
+        prev_date: prevLabel,
         cur: readings.cur.value,
+        curr_date: curLabel,
         usage,
         unit_rate: rate,
+        amount: total,
         periodStart,
         periodEnd,
         sourcePrev,
@@ -406,6 +473,7 @@ type StoredInvoice = {
   unitLabel: string;
   invoiceDate: string;
   total: number;
+  rentAmount: number;
   outstanding: number;
   status: "Unpaid" | "Partially Paid" | "Paid";
   createdAt: string;
@@ -461,6 +529,68 @@ function stableUuid(seed: string) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+function formatInvoiceNumber(seq: number) {
+  return `Inv-${String(seq).padStart(2, "0")}`;
+}
+
+function isFormattedInvoiceNumber(value: string | null | undefined) {
+  return /^Inv-\d+$/.test(String(value || "").trim());
+}
+
+async function ensureInvoiceNumberRegistry() {
+  await query(`CREATE SEQUENCE IF NOT EXISTS public.invoice_number_seq`);
+  await query(
+    `CREATE TABLE IF NOT EXISTS public.invoice_numbers (
+      seq bigint PRIMARY KEY,
+      invoice_number text NOT NULL UNIQUE,
+      tenant_id text,
+      unit text,
+      property_id uuid,
+      period text,
+      issued_at timestamptz NOT NULL DEFAULT now()
+    )`,
+  );
+}
+
+async function syncInvoiceNumberSequence() {
+  await ensureInvoiceNumberRegistry();
+  const { rows } = await query<{ max_seq: string | number | null }>(
+    `SELECT GREATEST(
+        COALESCE((SELECT MAX(seq) FROM public.invoice_numbers), 0),
+        COALESCE((
+          SELECT MAX((regexp_match(invoice_number, '^Inv-([0-9]+)$'))[1]::bigint)
+          FROM public.invoices
+          WHERE invoice_number ~ '^Inv-[0-9]+$'
+        ), 0)
+      ) AS max_seq`,
+  );
+  const maxSeq = Number(rows[0]?.max_seq ?? 0);
+  if (maxSeq > 0) {
+    await query(`SELECT setval('public.invoice_number_seq', $1, true)`, [maxSeq]);
+    return;
+  }
+  await query(`SELECT setval('public.invoice_number_seq', 1, false)`);
+}
+
+async function allocateInvoiceNumber(input: {
+  tenantId: string;
+  unitLabel: string;
+  propertyId?: string | null;
+  period: string;
+}) {
+  await syncInvoiceNumberSequence();
+  const seqRes = await query<{ seq: string | number }>(`SELECT nextval('public.invoice_number_seq') AS seq`);
+  const seq = Number(seqRes.rows[0]?.seq ?? 0);
+  const invoiceNumber = formatInvoiceNumber(seq);
+  await query(
+    `INSERT INTO public.invoice_numbers (seq, invoice_number, tenant_id, unit, property_id, period)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (seq) DO NOTHING`,
+    [seq, invoiceNumber, input.tenantId, input.unitLabel, input.propertyId ?? null, input.period],
+  );
+  return invoiceNumber;
+}
+
 function parsePeriod(period?: string) {
   if (!period) return null;
   const trimmed = String(period).trim();
@@ -484,6 +614,10 @@ function buildTenantIndex(tenants: TenantRecord[]) {
     map.set(`::${unit}`.toLowerCase(), tenant);
   });
   return map;
+}
+
+function coerceLeaseStatus(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
 function buildLeaseIndex(leases: LeaseAgreement[]) {
@@ -581,8 +715,6 @@ export async function POST(req: NextRequest) {
     const monthStartKey = start.toISOString().slice(0, 10);
     const monthEndExclusive = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 1));
     const monthEndKey = monthEndExclusive.toISOString().slice(0, 10);
-    const periodStart = start;
-    const periodEnd = monthEndExclusive;
 
     const [units, tenants, charges, leasesData] = await Promise.all([
       unitsRepo.listUnits(),
@@ -590,6 +722,8 @@ export async function POST(req: NextRequest) {
       datasetsRepo.getDataset<ChargeRow[]>("tenant_charges", []),
       datasetsRepo.getDataset<LeaseAgreement[]>("lease_agreements", []),
     ]);
+
+    const tenantIndex = buildTenantIndex(tenants);
 
     const chargeIndex = new Map<
       string,
@@ -619,7 +753,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Unit not found." }, { status: 404 });
     }
 
-    let lease: LeaseRow | null = null;
+    let lease: ResolvedLease | null = null;
     try {
       const leaseRes = await query(
         `SELECT id, tenant_id, rent, start_date, end_date, status
@@ -629,9 +763,49 @@ export async function POST(req: NextRequest) {
          LIMIT 1`,
         [unit.id],
       );
-      lease = (leaseRes.rows[0] as LeaseRow | undefined) ?? null;
+      const dbLease = (leaseRes.rows[0] as LeaseRow | undefined) ?? null;
+      if (dbLease) {
+        lease = {
+          ...dbLease,
+          source: "db",
+        };
+      }
     } catch (err) {
       console.warn("⚠️ failed to load lease from db", err);
+    }
+
+    if (!lease) {
+      const leaseIndex = buildLeaseIndex(Array.isArray(leasesData) ? leasesData : []);
+      const propertyKey = String(unit.property_id || "").toLowerCase();
+      const datasetLease =
+        leaseIndex.get(`${propertyKey}::${unit.unit}`.toLowerCase()) ||
+        leaseIndex.get(`::${unit.unit}`.toLowerCase()) ||
+        null;
+
+      if (datasetLease && coerceLeaseStatus(datasetLease.status) === "active") {
+        const tenant =
+          tenantIndex.get(`${propertyKey}::${unit.unit}`.toLowerCase()) ||
+          tenantIndex.get(`::${unit.unit}`.toLowerCase()) ||
+          tenants.find((row) => {
+            const tenantUnit = String(row.unit || "").trim().toLowerCase();
+            const tenantProperty = String(row.property_id || row.building || "").trim().toLowerCase();
+            return tenantUnit === String(datasetLease.unit || "").trim().toLowerCase() &&
+              (!propertyKey || !tenantProperty || tenantProperty === propertyKey);
+          }) ||
+          null;
+
+        if (tenant) {
+          lease = {
+            id: String(datasetLease.id),
+            tenant_id: String(tenant.id),
+            rent: toNumberOrNull(datasetLease.rent),
+            start_date: String(datasetLease.startDate || ""),
+            end_date: datasetLease.endDate ? String(datasetLease.endDate) : null,
+            status: String(datasetLease.status || "Active"),
+            source: "dataset",
+          };
+        }
+      }
     }
 
     if (!lease) {
@@ -643,7 +817,7 @@ export async function POST(req: NextRequest) {
       };
       if (debugEnabled) {
         console.info("Bills debug", response);
-        return NextResponse.json({ ...response, debug: { lease: null } }, { status: 400 });
+        return NextResponse.json({ ...response, debug: { lease: null, lease_sources: ["db", "dataset"] } }, { status: 400 });
       }
       return NextResponse.json(response, { status: 400 });
     }
@@ -653,10 +827,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Missing tenant_id on active lease." }, { status: 400 });
     }
 
-    const tenant = tenants.find((row) => String(row.id) === tenantId);
-    if (!tenant) {
-      return NextResponse.json({ ok: false, error: "Tenant not found for active lease." }, { status: 404 });
-    }
+    const tenant =
+      tenants.find((row) => String(row.id) === tenantId) ||
+      ({
+        id: tenantId,
+        name:
+          lease.source === "dataset"
+            ? (
+                (Array.isArray(leasesData) ? leasesData : []).find((entry) => String(entry.id) === lease?.id)?.tenantName ||
+                "Tenant"
+              )
+            : "Tenant",
+        property_id: unit.property_id ?? null,
+        building: null,
+        unit: unit.unit,
+        monthly_rent: null,
+        due_day: null,
+        reference: null,
+      } satisfies TenantRecord);
 
     const rentValue = toNumberOrNull(lease.rent) ?? toNumberOrNull((tenant as any)?.monthly_rent) ?? 0;
     const rentCents = Math.round(rentValue * 100);
@@ -736,9 +924,13 @@ export async function POST(req: NextRequest) {
       service: "ELECTRICITY";
       unit: string;
       prev_reading: number | null;
+      prev_date?: string | null;
       cur_reading: number | null;
+      cur_date?: string | null;
       usage: number;
       rate: number;
+      amount?: number;
+      unit_label?: string;
     } | null = null;
 
     if (electricity) {
@@ -752,9 +944,13 @@ export async function POST(req: NextRequest) {
         service: "ELECTRICITY",
         unit: electricityResult.debug.unitNumber || unit.unit || "",
         prev_reading: prevValue ?? null,
+        prev_date: electricityResult.snapshot?.prevDate ?? String((meta as any)?.prev_date ?? ""),
         cur_reading: curValue ?? null,
+        cur_date: electricityResult.snapshot?.currDate ?? String((meta as any)?.curr_date ?? ""),
         usage,
         rate,
+        amount: Number((usage * rate).toFixed(2)),
+        unit_label: "kWh",
       };
     }
 
@@ -770,6 +966,7 @@ export async function POST(req: NextRequest) {
       invoiceDate: invoiceDate.toISOString().slice(0, 10),
       dueDate: dueDate.toISOString().slice(0, 10),
       lineItems: lineItemsForInvoice,
+      meterSnapshot,
     };
 
     if (dryRun) {
@@ -780,6 +977,7 @@ export async function POST(req: NextRequest) {
             id: lease.id,
             tenant_id: tenantId,
             rent: rentValue,
+            source: lease.source,
           },
           meter: electricityDebugPayload,
           invoice: {
@@ -830,6 +1028,7 @@ export async function POST(req: NextRequest) {
       id,
       tenant_id: tenantId,
       unit_id: unit.id,
+      invoice_number: null as string | null,
       invoice_date: invoiceDate.toISOString().slice(0, 10),
       due_date: dueDate.toISOString().slice(0, 10),
       status: "draft",
@@ -844,14 +1043,37 @@ export async function POST(req: NextRequest) {
       meter_snapshot: meterSnapshot,
       total_amount: Number((totalCents / 100).toFixed(2)),
     };
+    const invoiceMetaJson = invoicePayload.meta ? JSON.stringify(invoicePayload.meta) : null;
+    const lineItemsJsonb = JSON.stringify(invoicePayload.line_items);
+    const meterSnapshotJson = invoicePayload.meter_snapshot ? JSON.stringify(invoicePayload.meter_snapshot) : null;
 
     try {
       await query("BEGIN");
+      const existingInvoiceRes = await query<{ id: string; invoice_number: string | null }>(
+        `SELECT id, invoice_number
+         FROM public.invoices
+         WHERE unit_id = $1 AND period = $2
+         LIMIT 1`,
+        [unit.id, periodKey],
+      );
+      const existingInvoiceNumber = existingInvoiceRes.rows[0]?.invoice_number ?? null;
+      invoicePayload.invoice_number =
+        (isFormattedInvoiceNumber(existingInvoiceNumber) ? existingInvoiceNumber : null) ||
+        (await allocateInvoiceNumber({
+          tenantId,
+          unitLabel: unit.unit,
+          propertyId: unit.property_id,
+          period: periodKey,
+        }));
       const invoiceRes = await query(
-        `INSERT INTO public.invoices (id, tenant_id, unit_id, invoice_date, due_date, status, currency, subtotal_cents, tax_cents, total_cents, notes, meta, period, line_items, meter_snapshot, total_amount)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        `INSERT INTO public.invoices (id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, subtotal_cents, tax_cents, total_cents, notes, meta, period, line_items, meter_snapshot, total_amount)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15::jsonb,$16::jsonb,$17)
          ON CONFLICT (unit_id, period) DO UPDATE SET
            tenant_id = EXCLUDED.tenant_id,
+           invoice_number = CASE
+             WHEN public.invoices.invoice_number ~ '^Inv-[0-9]+$' THEN public.invoices.invoice_number
+             ELSE EXCLUDED.invoice_number
+           END,
            invoice_date = EXCLUDED.invoice_date,
            due_date = EXCLUDED.due_date,
            status = EXCLUDED.status,
@@ -869,18 +1091,19 @@ export async function POST(req: NextRequest) {
           invoicePayload.id,
           invoicePayload.tenant_id,
           invoicePayload.unit_id,
-          invoiceDate,
-          dueDate,
+          invoicePayload.invoice_number,
+          invoicePayload.invoice_date,
+          invoicePayload.due_date,
           invoicePayload.status,
           invoicePayload.currency,
           invoicePayload.subtotal_cents,
           invoicePayload.tax_cents,
           invoicePayload.total_cents,
           invoicePayload.notes,
-          invoicePayload.meta,
+          invoiceMetaJson,
           invoicePayload.period,
-          invoicePayload.line_items,
-          invoicePayload.meter_snapshot,
+          lineItemsJsonb,
+          meterSnapshotJson,
           invoicePayload.total_amount,
         ],
       );
@@ -900,8 +1123,16 @@ export async function POST(req: NextRequest) {
         const placeholders = normalizedLineItems
           .map((row, idx) => {
             const offset = idx * 7;
-            values.push(invoiceId, idx, row.description, row.qty, row.unit_cents, row.total_cents, row.meta);
-            return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7})`;
+            values.push(
+              invoiceId,
+              idx,
+              row.description,
+              row.qty,
+              row.unit_cents,
+              row.total_cents,
+              row.meta ? JSON.stringify(row.meta) : null,
+            );
+            return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}::jsonb)`;
           })
           .join(",");
         await query(
@@ -913,7 +1144,7 @@ export async function POST(req: NextRequest) {
       await query("COMMIT");
       if (debugEnabled) {
         console.info("Bills debug", {
-          lease: { id: lease.id, tenant_id: tenantId, rent: rentValue },
+          lease: { id: lease.id, tenant_id: tenantId, rent: rentValue, source: lease.source },
           meter: electricityDebugPayload,
           invoice: invoicePayload,
         });
@@ -927,6 +1158,10 @@ export async function POST(req: NextRequest) {
       throw err;
     }
 
+    const rentCentsTotal = normalizedLineItems
+      .filter((item) => (item.meta as any)?.kind === "RENT")
+      .reduce((sum, item) => sum + item.total_cents, 0);
+
     const created: StoredInvoice = {
       id: savedInvoiceId,
       tenantId,
@@ -935,6 +1170,7 @@ export async function POST(req: NextRequest) {
       unitLabel: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
       invoiceDate: invoiceDate.toISOString().slice(0, 10),
       total: Number((totalCents / 100).toFixed(2)),
+      rentAmount: Number((rentCentsTotal / 100).toFixed(2)),
       outstanding: Number((totalCents / 100).toFixed(2)),
       status: "Unpaid",
       createdAt: now,
@@ -956,7 +1192,7 @@ export async function POST(req: NextRequest) {
     const response: Record<string, unknown> = { ok: true, invoiceId: savedInvoiceId, data: updated, created: [created] };
     if (debugEnabled) {
       response.debug = {
-        lease: { id: lease.id, tenant_id: tenantId, rent: rentValue },
+        lease: { id: lease.id, tenant_id: tenantId, rent: rentValue, source: lease.source },
         meter: electricityDebugPayload,
         invoice: invoicePayload,
       };
