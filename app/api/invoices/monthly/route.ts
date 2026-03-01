@@ -597,7 +597,7 @@ async function buildInvoicePayloadFromRow(invoice: InvoiceHeaderRow, fallbackRef
 async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, company: CompanyProfile) {
   const fontRegular = path.join(process.cwd(), "public", "fonts", "Inter-Regular.ttf");
   const fontBold = path.join(process.cwd(), "public", "fonts", "Inter-Bold.ttf");
-  const doc = new PDFDocument({ size: "A4", margin: 48 });
+  const doc = new PDFDocument({ size: "A4", margin: 48, autoFirstPage: false });
   const chunks: Buffer[] = [];
 
   doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
@@ -609,7 +609,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
   const logoBuffer = await resolveLogoBuffer("/branding/Logo.png");
 
   const addInvoicePage = (payload: InvoicePayload, index: number) => {
-    if (index > 0) doc.addPage();
+    doc.addPage({ size: "A4", margin: 48 });
 
     const left = doc.page.margins.left;
     const right = doc.page.width - doc.page.margins.right;
