@@ -156,6 +156,11 @@ function monthBounds(month: string, year: string) {
   return { start, end };
 }
 
+function isWithinBillingWindow(date: Date, bounds: { start: Date; end: Date }) {
+  if (Number.isNaN(date.getTime())) return false;
+  return date >= bounds.start && date <= bounds.end;
+}
+
 function formatSnapshotDate(value?: string) {
   if (!value) return "";
   if (value === "Initial") return "Initial";
@@ -706,8 +711,7 @@ export default function BillsPage() {
           if (!bounds || !reading.reading_date) return false;
           if (!reading.propertyKey) return false;
           const readingDate = new Date(reading.reading_date);
-          if (Number.isNaN(readingDate.getTime())) return false;
-          return readingDate >= bounds.start && readingDate < bounds.end;
+          return isWithinBillingWindow(readingDate, bounds);
         })
         .map((reading) => `${String(reading.propertyKey || "").toLowerCase()}::${normalizeUnitValue(String(reading.unit || ""))}`),
     );

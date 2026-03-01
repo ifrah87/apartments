@@ -282,7 +282,7 @@ async function resolveElectricityReadings(opts: {
       query(
         `SELECT reading_value, reading_date
          FROM public.meter_readings
-         WHERE unit = $1 AND lower(meter_type) = 'electricity' AND reading_date >= $2 AND reading_date < $3
+         WHERE unit = $1 AND lower(meter_type) = 'electricity' AND reading_date >= $2 AND reading_date <= $3
          ORDER BY reading_date DESC, created_at DESC
          LIMIT 1`,
         [unitNumber, periodStart, periodEnd],
@@ -292,7 +292,7 @@ async function resolveElectricityReadings(opts: {
     const curRow = curRes.rows[0];
     const curValue = toNumberOrNull(curRow?.reading_value);
     if (curValue === null) {
-      return { prev: null, cur: null, usage: null, reason: "missing current reading within period" };
+      return { prev: null, cur: null, usage: null, reason: "missing current reading within billing window" };
     }
     const cur: ElectricityReading = {
       value: curValue,
@@ -388,7 +388,7 @@ async function buildElectricityLineItem(
   }
 
   if (!readings.cur) {
-    console.warn("⚠️ missing current electricity reading within period", { unitNumber, periodStart, periodEnd });
+    console.warn("⚠️ missing current electricity reading within billing window", { unitNumber, periodStart, periodEnd });
     return { lineItem: null, debug, snapshot: null };
   }
 
