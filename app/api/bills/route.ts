@@ -25,6 +25,8 @@ type ServiceRecord = {
   name?: string;
   code?: string;
   rate?: number;
+  type?: string;
+  unit?: string;
   icon?: string;
 };
 
@@ -88,6 +90,14 @@ type ElectricityServiceMatch = {
   found: boolean;
   rate: number | null;
   serviceId?: string;
+};
+
+type GenericServiceLineItem = {
+  description: string;
+  qty: number;
+  unit_cents: number;
+  total_cents: number;
+  meta: Record<string, unknown> | null;
 };
 
 type ElectricityReading = {
@@ -173,6 +183,34 @@ function buildElectricityLineDescription(input: {
       : `${Number(input.curValue).toFixed(2)}${curDateLabel ? ` (${curDateLabel})` : ""}`;
   const base = `Electricity | Initial reading: ${prevLabel} | Current reading: ${curLabel} | Usage: ${input.usage.toFixed(2)} | Rate: ${input.rate.toFixed(2)} | Total: ${input.total.toFixed(2)}`;
   return input.missingPrev ? `${base} | Missing previous reading` : base;
+}
+
+function isElectricityService(service: ServiceRecord) {
+  const code = String(service.code || "").trim().toUpperCase();
+  if (code === "ELECTRICITY") return true;
+  return String(service.name || "").toLowerCase().includes("electric");
+}
+
+function normalizeMeterSnapshotInput(input: unknown) {
+  if (!input || typeof input !== "object") return null;
+  const row = input as Record<string, unknown>;
+  const prevReading = toNumberOrNull(row.prevReading ?? row.prev_reading ?? row.prev);
+  const currReading = toNumberOrNull(row.currReading ?? row.cur_reading ?? row.cur);
+  const usage = toNumberOrNull(row.usage) ?? Math.max(Number(currReading ?? 0) - Number(prevReading ?? 0), 0);
+  const rate = toNumberOrNull(row.rate ?? row.unit_rate) ?? 0.41;
+  const amount = toNumberOrNull(row.amount) ?? Number((usage * rate).toFixed(2));
+  return {
+    service: "ELECTRICITY" as const,
+    unit: String(row.unit ?? ""),
+    prev_reading: prevReading,
+    prev_date: formatReadingDate(String(row.prevDate ?? row.prev_date ?? "Initial")),
+    cur_reading: currReading,
+    cur_date: formatReadingDate(String(row.currDate ?? row.cur_date ?? "")),
+    usage: Number(usage.toFixed(2)),
+    rate: Number(rate.toFixed(2)),
+    amount,
+    unit_label: String(row.unitLabel ?? row.unit_label ?? "kWh"),
+  };
 }
 
 async function fetchInitialElectricityReading(
@@ -430,12 +468,8 @@ async function fetchElectricityRate(unitId: string, propertyId?: string | null):
   const unitServices = normalizeUnitServices(rawUnitServices);
   const buildingServices = normalizeBuildingServices(rawBuildingServices);
 
-  const codedServices = services.filter(
-    (service) => String(service.code ?? "").trim().toUpperCase() === "ELECTRICITY",
-  );
-  const namedServices = services.filter((service) =>
-    String(service.name ?? "").toLowerCase().includes("electric"),
-  );
+  const codedServices = services.filter((service) => String(service.code ?? "").trim().toUpperCase() === "ELECTRICITY");
+  const namedServices = services.filter((service) => String(service.name ?? "").toLowerCase().includes("electric"));
   const electricityServices = codedServices.length ? codedServices : namedServices;
   const electricityServiceIds = new Set(electricityServices.map((service) => String(service.id)));
 
@@ -463,6 +497,76 @@ async function fetchElectricityRate(unitId: string, propertyId?: string | null):
     return { found: true, rate: null, serviceId: String(serviceId) };
   }
   return { found: true, rate, serviceId: String(serviceId) };
+}
+
+async function buildAssignedServiceLineItems(input: {
+  unitId: string;
+  propertyId?: string | null;
+  reference: Date;
+}): Promise<GenericServiceLineItem[]> {
+  const [rawServices, rawUnitServices, rawBuildingServices] = await Promise.all([
+    datasetsRepo.getDataset<ServiceRecord[]>("services", []),
+    datasetsRepo.getDataset<UnitServiceRecord[]>("unit_services", []),
+    datasetsRepo.getDataset<BuildingServiceRecord[]>("building_services", []),
+  ]);
+
+  const services = normalizeServiceList(rawServices);
+  const unitServices = normalizeUnitServices(rawUnitServices);
+  const buildingServices = normalizeBuildingServices(rawBuildingServices);
+  const effectiveBefore = new Date(Date.UTC(input.reference.getUTCFullYear(), input.reference.getUTCMonth() + 1, 1));
+  const periodLabel = input.reference.toLocaleString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" });
+
+  const isEffective = (startDate?: string | null) => {
+    if (!startDate) return true;
+    const parsed = new Date(startDate);
+    if (Number.isNaN(parsed.getTime())) return true;
+    return parsed < effectiveBefore;
+  };
+
+  const selected = new Map<string, { service: ServiceRecord; source: "unit" | "building" }>();
+
+  unitServices
+    .filter((entry) => entry.unitId === input.unitId && isEffective(entry.startDate))
+    .forEach((entry) => {
+      const service = services.find((item) => String(item.id) === String(entry.serviceId));
+      if (!service || isElectricityService(service)) return;
+      selected.set(String(service.id), { service, source: "unit" });
+    });
+
+  if (input.propertyId) {
+    buildingServices
+      .filter((entry) => String(entry.propertyId || "") === String(input.propertyId || "") && isEffective(entry.startDate))
+      .forEach((entry) => {
+        const service = services.find((item) => String(item.id) === String(entry.serviceId));
+        if (!service || isElectricityService(service)) return;
+        if (!selected.has(String(service.id))) {
+          selected.set(String(service.id), { service, source: "building" });
+        }
+      });
+  }
+
+  return Array.from(selected.values())
+    .map(({ service, source }) => {
+      const rate = toNumberOrNull(service.rate);
+      if (rate === null || !Number.isFinite(rate) || rate <= 0) return null;
+      const unitCents = Math.round(rate * 100);
+      return {
+        description: `${String(service.name || "Service").trim()} (${periodLabel})`,
+        qty: 1,
+        unit_cents: unitCents,
+        total_cents: unitCents,
+        meta: {
+          kind: "ASSIGNED_SERVICE",
+          service_id: String(service.id),
+          service_code: String(service.code || "").trim().toUpperCase() || null,
+          service_name: String(service.name || "").trim() || "Service",
+          assignment_source: source,
+          service_type: service.type || null,
+          service_unit: service.unit || null,
+        },
+      } satisfies GenericServiceLineItem;
+    })
+    .filter((item): item is GenericServiceLineItem => Boolean(item));
 }
 
 type StoredInvoice = {
@@ -848,7 +952,7 @@ export async function POST(req: NextRequest) {
 
     const rentValue = toNumberOrNull(lease.rent) ?? toNumberOrNull((tenant as any)?.monthly_rent) ?? 0;
     const rentCents = Math.round(rentValue * 100);
-    const rentLabel = `Monthly Rent (${reference.toLocaleString("en", { month: "short", year: "numeric", timeZone: "UTC" })})`;
+    const rentLabel = `Monthly Rent (${reference.toLocaleString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" })})`;
 
     const { rows } = createStatement({
       tenant: {
@@ -889,10 +993,16 @@ export async function POST(req: NextRequest) {
       };
     });
 
+    const assignedServiceLineItems = await buildAssignedServiceLineItems({
+      unitId: unit.id,
+      propertyId: unit.property_id,
+      reference,
+    });
+
     // --- ELECTRICITY AUTO CALCULATION ---
     const periodStartKey = monthStartKey;
     const periodEndKey = monthEndKey;
-    const lineItemsForInvoice = [rentLineItem, ...extraLineItems];
+    const lineItemsForInvoice = [rentLineItem, ...assignedServiceLineItems, ...extraLineItems];
 
     const electricityResult = await buildElectricityLineItem({
       unitId: unit.id,
@@ -952,6 +1062,10 @@ export async function POST(req: NextRequest) {
         amount: Number((usage * rate).toFixed(2)),
         unit_label: "kWh",
       };
+    }
+    const requestedMeterSnapshot = normalizeMeterSnapshotInput(payload?.meterSnapshot ?? payload?.meter_snapshot ?? null);
+    if (requestedMeterSnapshot) {
+      meterSnapshot = requestedMeterSnapshot;
     }
 
     const invoiceDate = reference;
