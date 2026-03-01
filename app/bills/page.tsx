@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
@@ -97,6 +98,8 @@ type MeterReadingRecord = {
   unit: string;
   meter_type?: string | null;
   reading_date?: string | null;
+  tenant_id?: string | null;
+  propertyKey?: string | null;
 };
 
 type LeaseRecord = {
@@ -186,6 +189,25 @@ function normalizeDraftMeterSnapshot(input: any): MeterSnapshot | null {
   };
 }
 
+function deriveDraftMeterSnapshot(
+  snapshotInput: MeterSnapshot | Record<string, unknown> | null | undefined,
+  lineItems: DraftLineItem[],
+) {
+  const direct = normalizeDraftMeterSnapshot(snapshotInput);
+  if (direct) return direct;
+  for (const item of lineItems) {
+    const meta = item?.meta;
+    if (!meta || typeof meta !== "object") continue;
+    const nested = normalizeDraftMeterSnapshot((meta as Record<string, unknown>).meter_snapshot);
+    if (nested) return nested;
+    const fromMeta = normalizeDraftMeterSnapshot(meta);
+    if (fromMeta && ((meta as Record<string, unknown>).kind === "METER_ELECTRICITY" || item.description.toLowerCase().includes("electric"))) {
+      return fromMeta;
+    }
+  }
+  return null;
+}
+
 function parseInvoiceDate(value?: string) {
   if (!value) return null;
   const trimmed = value.trim();
@@ -197,7 +219,7 @@ function parseInvoiceDate(value?: string) {
 function formatInvoicePeriod(value?: string) {
   const date = parseInvoiceDate(value);
   if (!date) return "";
-  return date.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  return date.toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
 }
 
 function getInvoicePeriodLabel(invoice: InvoiceRow) {
@@ -208,7 +230,7 @@ function getInvoiceMonthYear(invoice: InvoiceRow) {
   const date = parseInvoiceDate(invoice.invoiceDate);
   if (date) {
     return {
-      month: date.toLocaleString("en-US", { month: "long", timeZone: "UTC" }),
+      month: date.toLocaleString("en-GB", { month: "long", timeZone: "UTC" }),
       year: String(date.getUTCFullYear()),
     };
   }
@@ -243,6 +265,7 @@ function normalizeInvoice(row: any): InvoiceRow {
 }
 
 export default function BillsPage() {
+  const confirm = useConfirm();
   const [query, setQuery] = useState("");
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [units, setUnits] = useState<UnitCard[]>([]);
@@ -311,12 +334,28 @@ export default function BillsPage() {
         const meterReadingsData = meterReadingsPayload?.ok ? meterReadingsPayload.data : meterReadingsPayload;
 
         const tenantIndex = new Map<string, TenantRecord>();
+        const tenantPropertyById = new Map<string, string>();
         if (Array.isArray(tenantsData)) {
           tenantsData.forEach((tenant) => {
             const property = tenant.property_id || tenant.building || "";
             const unit = tenant.unit || "";
+            if (tenant.id && property) {
+              tenantPropertyById.set(String(tenant.id), String(property).toLowerCase());
+            }
             if (!property || !unit) return;
             tenantIndex.set(`${property}::${unit}`.toLowerCase(), tenant);
+          });
+        }
+
+        const unitPropertyCandidates = new Map<string, Set<string>>();
+        if (Array.isArray(unitsData)) {
+          unitsData.forEach((unit: UnitRecord) => {
+            const unitNumber = String(unit.unit || "").trim().toLowerCase();
+            const propertyId = String(unit.property_id || "").trim().toLowerCase();
+            if (!unitNumber || !propertyId) return;
+            const existing = unitPropertyCandidates.get(unitNumber) ?? new Set<string>();
+            existing.add(propertyId);
+            unitPropertyCandidates.set(unitNumber, existing);
           });
         }
 
@@ -391,7 +430,24 @@ export default function BillsPage() {
         setServices(Array.isArray(servicesData) ? servicesData : []);
         setUnitServices(Array.isArray(unitServicesData) ? unitServicesData : []);
         setBuildingServices(Array.isArray(buildingServicesData) ? buildingServicesData : []);
-        setMeterReadings(Array.isArray(meterReadingsData) ? meterReadingsData : []);
+        setMeterReadings(
+          Array.isArray(meterReadingsData)
+            ? meterReadingsData.map((reading: MeterReadingRecord) => {
+                const unitNumber = normalizeUnitValue(String(reading.unit || ""));
+                const tenantProperty = reading.tenant_id ? tenantPropertyById.get(String(reading.tenant_id)) : "";
+                const candidateProperties = unitPropertyCandidates.get(unitNumber);
+                const inferredProperty =
+                  tenantProperty ||
+                  (candidateProperties && candidateProperties.size === 1
+                    ? Array.from(candidateProperties)[0]
+                    : "");
+                return {
+                  ...reading,
+                  propertyKey: inferredProperty || null,
+                };
+              })
+            : [],
+        );
       } catch (err) {
         console.error("Failed to load units for billing", err);
         setUnits([]);
@@ -634,46 +690,29 @@ export default function BillsPage() {
       billedInvoices.map((invoice) => buildUnitIdentityKey({ unit: invoice.unitLabel, unitNumber: invoice.unitLabel, tenant: invoice.tenantName })),
     );
     const bounds = monthBounds(generatorMonth, generatorYear);
-    const electricServiceIds = new Set(
-      services
-        .filter((service) => {
-          const code = String(service.code || "").trim().toUpperCase();
-          if (code === "ELECTRICITY") return true;
-          return String(service.name || "").toLowerCase().includes("electric");
-        })
-        .map((service) => String(service.id)),
-    );
-    const readyMeterUnits = new Set(
+    const readyMeterKeys = new Set(
       meterReadings
         .filter((reading) => {
           if (String(reading.meter_type || "").toLowerCase() !== "electricity") return false;
           if (!bounds || !reading.reading_date) return false;
+          if (!reading.propertyKey) return false;
           const readingDate = new Date(reading.reading_date);
           if (Number.isNaN(readingDate.getTime())) return false;
           return readingDate >= bounds.start && readingDate < bounds.end;
         })
-        .map((reading) => normalizeUnitValue(String(reading.unit || ""))),
+        .map((reading) => `${String(reading.propertyKey || "").toLowerCase()}::${normalizeUnitValue(String(reading.unit || ""))}`),
     );
     return Array.from(
       units.reduce((map, unit) => {
         const key = buildUnitIdentityKey(unit);
-        const hasUnitElectricity = unitServices.some(
-          (entry) => entry.unitId === unit.id && electricServiceIds.has(String(entry.serviceId)),
+        const hasCurrentMeterReading = readyMeterKeys.has(
+          `${String(unit.propertyKey || "").toLowerCase()}::${normalizeUnitValue(unit.unitNumber || unit.unit)}`,
         );
-        const hasBuildingElectricity =
-          !!unit.propertyKey &&
-          buildingServices.some(
-            (entry) =>
-              String(entry.propertyId || "").toLowerCase() === String(unit.propertyKey || "").toLowerCase() &&
-              electricServiceIds.has(String(entry.serviceId)),
-          );
-        const needsMeter = hasUnitElectricity || hasBuildingElectricity;
-        const hasCurrentMeterReading = readyMeterUnits.has(normalizeUnitValue(unit.unitNumber || unit.unit));
         const nextStatus: BillingUnit["status"] = !unit.hasTenant
           ? "waiting"
           : billedUnitIds.has(unit.id) || billedUnitKeys.has(key)
             ? "billed"
-            : needsMeter && !hasCurrentMeterReading
+            : !hasCurrentMeterReading
               ? "waiting"
               : "ready";
         const nextUnit: BillingUnit = {
@@ -690,7 +729,7 @@ export default function BillsPage() {
         return map;
       }, new Map<string, BillingUnit>()).values(),
     );
-  }, [units, invoices, billingPeriod, generatorMonth, generatorYear, services, unitServices, buildingServices, meterReadings]);
+  }, [units, invoices, billingPeriod, generatorMonth, generatorYear, meterReadings]);
 
   const rentBilled = useMemo(
     () =>
@@ -715,7 +754,13 @@ export default function BillsPage() {
   }, [query, invoices]);
 
   const handleDeleteInvoice = async (invoice: InvoiceRow) => {
-    if (!confirm(`Delete invoice for ${invoice.unitLabel}?`)) return;
+    const confirmed = await confirm({
+      title: "Delete Invoice",
+      message: `Delete invoice for ${invoice.unitLabel}?`,
+      confirmLabel: "Delete",
+      tone: "danger",
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch("/api/bills", {
         method: "DELETE",
@@ -818,7 +863,10 @@ export default function BillsPage() {
             }),
           )
         : [];
-      const draftSnapshot = normalizeDraftMeterSnapshot(draft.meterSnapshot ?? draft.meter_snapshot ?? null);
+      const draftSnapshot = deriveDraftMeterSnapshot(
+        draft.meterSnapshot ?? draft.meter_snapshot ?? null,
+        draftItems,
+      );
 
       setDraftInvoice({
         tenantId: String(draft.tenantId || ""),
@@ -856,6 +904,7 @@ export default function BillsPage() {
           unitIds: [draftInvoice.unitId],
           month: draftInvoice.month,
           year: draftInvoice.year,
+          meterSnapshot: deriveDraftMeterSnapshot(draftInvoice.meterSnapshot ?? null, draftItems),
           lineItems: draftItems.map((item) => ({
             description: item.description,
             qty: Number(item.qty || 0),
@@ -894,6 +943,8 @@ export default function BillsPage() {
     if (year) params.set("year", year);
     return `/api/invoices/monthly?${params.toString()}`;
   };
+
+  const previewMeterSnapshot = draftInvoice ? deriveDraftMeterSnapshot(draftInvoice.meterSnapshot ?? null, draftItems) : null;
 
   const handleViewInvoice = (invoice: InvoiceRow) => {
     window.open(buildInvoiceUrl(invoice, "pdf"), "_blank", "noopener,noreferrer");
@@ -1282,7 +1333,7 @@ export default function BillsPage() {
                 </div>
               </div>
 
-              {draftInvoice.meterSnapshot ? (
+              {previewMeterSnapshot ? (
                 <div className="rounded-xl border border-white/10 bg-panel/70 p-4">
                   <div>
                     <h3 className="text-sm font-semibold text-slate-100">Electricity Meter Snapshot</h3>
@@ -1291,33 +1342,33 @@ export default function BillsPage() {
                   <div className="mt-4 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
                     <div>
                       <p className="text-[11px] uppercase tracking-wide text-slate-500">Initial Date</p>
-                      <p className="mt-1 text-sm text-slate-100">{draftInvoice.meterSnapshot.prevDate || "Initial"}</p>
+                      <p className="mt-1 text-sm text-slate-100">{previewMeterSnapshot.prevDate || "Initial"}</p>
                     </div>
                     <div>
                       <p className="text-[11px] uppercase tracking-wide text-slate-500">Initial Reading</p>
                       <p className="mt-1 text-sm text-slate-100">
-                        {formatQuantity(draftInvoice.meterSnapshot.prevReading)} {draftInvoice.meterSnapshot.unitLabel || "kWh"}
+                        {formatQuantity(previewMeterSnapshot.prevReading)} {previewMeterSnapshot.unitLabel || "kWh"}
                       </p>
                     </div>
                     <div>
                       <p className="text-[11px] uppercase tracking-wide text-slate-500">Current Date</p>
-                      <p className="mt-1 text-sm text-slate-100">{draftInvoice.meterSnapshot.currDate || "-"}</p>
+                      <p className="mt-1 text-sm text-slate-100">{previewMeterSnapshot.currDate || "-"}</p>
                     </div>
                     <div>
                       <p className="text-[11px] uppercase tracking-wide text-slate-500">Current Reading</p>
                       <p className="mt-1 text-sm text-slate-100">
-                        {formatQuantity(draftInvoice.meterSnapshot.currReading)} {draftInvoice.meterSnapshot.unitLabel || "kWh"}
+                        {formatQuantity(previewMeterSnapshot.currReading)} {previewMeterSnapshot.unitLabel || "kWh"}
                       </p>
                     </div>
                     <div>
                       <p className="text-[11px] uppercase tracking-wide text-slate-500">Usage</p>
                       <p className="mt-1 text-sm text-slate-100">
-                        {formatQuantity(draftInvoice.meterSnapshot.usage)} {draftInvoice.meterSnapshot.unitLabel || "kWh"}
+                        {formatQuantity(previewMeterSnapshot.usage)} {previewMeterSnapshot.unitLabel || "kWh"}
                       </p>
                     </div>
                     <div>
                       <p className="text-[11px] uppercase tracking-wide text-slate-500">Rate</p>
-                      <p className="mt-1 text-sm text-slate-100">{formatCurrency(draftInvoice.meterSnapshot.rate)}</p>
+                      <p className="mt-1 text-sm text-slate-100">{formatCurrency(previewMeterSnapshot.rate)}</p>
                     </div>
                   </div>
                 </div>
