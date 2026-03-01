@@ -31,9 +31,9 @@ export const DEFAULT_BANK: BankSettings = {
     {
       id: "acct_default",
       nickname: "Business Bank Account",
-      bankName: "",
-      holder: "Orfane Tower",
-      accountNumber: "",
+      bankName: "Salaam Bank",
+      holder: "Ahmed Awale Sabriyee",
+      accountNumber: "32191089",
       iban: "",
       swift: "",
       currency: "USD",

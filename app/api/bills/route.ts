@@ -524,7 +524,14 @@ async function fetchElectricityRate(unitId: string, propertyId?: string | null):
 
   const serviceId = unitService?.serviceId ?? buildingService?.serviceId;
   if (!serviceId) {
-    return { found: false, rate: null };
+    // Some live datasets have a valid electricity service/rate but incomplete unit/building assignments.
+    // Fall back to the first configured electricity service so metered units still bill correctly.
+    const fallbackService = electricityServices[0];
+    const fallbackRate = fallbackService?.rate !== undefined ? Number(fallbackService.rate) : null;
+    if (fallbackRate === null || !Number.isFinite(fallbackRate) || fallbackRate <= 0) {
+      return { found: false, rate: null };
+    }
+    return { found: true, rate: fallbackRate, serviceId: String(fallbackService.id) };
   }
 
   const service = services.find((entry) => String(entry.id) === String(serviceId));
@@ -620,6 +627,23 @@ type StoredInvoice = {
   updatedAt: string;
 };
 
+type StoredInvoiceDbRow = {
+  id: string;
+  tenant_id: string | null;
+  unit_id: string | null;
+  invoice_date: string | Date | null;
+  due_date: string | Date | null;
+  status: string | null;
+  total_amount: string | number | null;
+  total_cents: string | number | null;
+  line_items: unknown;
+  created_at?: string | Date | null;
+  updated_at?: string | Date | null;
+  tenant_name?: string | null;
+  tenant_unit?: string | null;
+  unit_number?: string | number | null;
+};
+
 const INVOICES_KEY = "billing_invoices";
 const INITIAL_READINGS_KEY = "initial-readings";
 const MONTHS = [
@@ -641,6 +665,73 @@ function handleError(err: unknown) {
   const status = err instanceof Error && (err as RepoError).status ? (err as RepoError).status : 500;
   const message = err instanceof Error ? err.message : "Unexpected error.";
   return NextResponse.json({ ok: false, error: message }, { status });
+}
+
+function normalizeStoredInvoiceStatus(value: unknown): StoredInvoice["status"] {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "paid") return "Paid";
+  if (raw === "partially paid" || raw === "partial" || raw === "partially_paid") return "Partially Paid";
+  return "Unpaid";
+}
+
+function deriveStoredInvoiceRentAmount(lineItems: unknown) {
+  if (!Array.isArray(lineItems)) return 0;
+  return Number(
+    lineItems
+      .reduce((sum, item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return sum;
+        const meta =
+          "meta" in item && item.meta && typeof item.meta === "object" && !Array.isArray(item.meta) ? item.meta : null;
+        const description = "description" in item ? String(item.description || "").toLowerCase() : "";
+        const isRent = String(meta?.kind || "").trim().toUpperCase() === "RENT" || description.includes("rent");
+        if (!isRent) return sum;
+        const amount =
+          ("amount" in item ? toNumberOrNull(item.amount) : null) ??
+          ("total" in item ? toNumberOrNull(item.total) : null) ??
+          ("total_cents" in item ? (toNumberOrNull(item.total_cents) ?? 0) / 100 : null) ??
+          0;
+        return sum + amount;
+      }, 0)
+      .toFixed(2),
+  );
+}
+
+async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
+  const { rows } = await query<StoredInvoiceDbRow>(
+    `SELECT i.id, i.tenant_id, i.unit_id, i.invoice_date, i.due_date, i.status, i.total_amount, i.total_cents,
+            i.line_items, i.created_at, i.updated_at,
+            t.name AS tenant_name, t.unit AS tenant_unit,
+            u.unit_number
+     FROM public.invoices i
+     LEFT JOIN public.tenants t ON t.id = i.tenant_id
+     LEFT JOIN public.units u ON u.id = i.unit_id
+     ORDER BY i.invoice_date DESC, i.created_at DESC, i.id DESC`,
+  );
+
+  return rows.map((row) => {
+    const total = toNumberOrNull(row.total_amount) ?? (toNumberOrNull(row.total_cents) ?? 0) / 100;
+    const invoiceDate = toDateOnlyString(row.invoice_date || "") || "";
+    const dueDate = toDateOnlyString(row.due_date || "") || "";
+    const updatedAt = toDateOnlyString(row.updated_at || row.invoice_date || "") || invoiceDate;
+    const createdAt = toDateOnlyString(row.created_at || row.invoice_date || "") || invoiceDate;
+    const unitNumber = row.unit_number !== undefined && row.unit_number !== null ? String(row.unit_number).trim() : "";
+    const tenantUnit = row.tenant_unit ? String(row.tenant_unit).trim() : "";
+
+    return {
+      id: String(row.id),
+      tenantId: String(row.tenant_id || ""),
+      tenantName: String(row.tenant_name || "Tenant"),
+      unitId: String(row.unit_id || ""),
+      unitLabel: unitNumber ? `Unit ${unitNumber}` : tenantUnit ? `Unit ${tenantUnit}` : "Unit",
+      invoiceDate,
+      total: Number(total.toFixed(2)),
+      rentAmount: deriveStoredInvoiceRentAmount(row.line_items),
+      outstanding: Number(total.toFixed(2)),
+      status: normalizeStoredInvoiceStatus(row.status),
+      createdAt,
+      updatedAt,
+    };
+  });
 }
 
 function toMonthIndex(value: string) {
@@ -785,6 +876,19 @@ function buildLeaseIndex(leases: LeaseAgreement[]) {
 export async function GET() {
   try {
     const data = await datasetsRepo.getDataset<StoredInvoice[]>(INVOICES_KEY, []);
+    if (Array.isArray(data) && data.length) {
+      return NextResponse.json({ ok: true, data });
+    }
+
+    try {
+      const dbData = await listStoredInvoicesFromDb();
+      if (dbData.length) {
+        return NextResponse.json({ ok: true, data: dbData });
+      }
+    } catch (err) {
+      console.warn("⚠️ failed to load bills from invoices table; falling back to dataset", err);
+    }
+
     return NextResponse.json({ ok: true, data });
   } catch (err) {
     console.error("❌ failed to load bills", err);

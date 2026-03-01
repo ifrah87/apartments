@@ -16,6 +16,8 @@ export type CompanyProfile = {
   address: string;
   phone: string;
   logoPath: string;
+  paymentLines: string[];
+  paymentInstructions: string;
 };
 
 export async function getOrganizationSnapshot(): Promise<OrganizationSnapshot> {
@@ -37,11 +39,26 @@ export function resolveCompanyName(general: GeneralSettings, branding: BrandingS
 }
 
 export function buildCompanyProfile(snapshot: OrganizationSnapshot): CompanyProfile {
-  const { general, branding } = snapshot;
+  const { general, branding, bank } = snapshot;
+  const selectedAccount = bank.accounts.find((acct) => acct.isDefault) || bank.accounts[0];
+  const hasPaymentDetails = Boolean(
+    selectedAccount?.bankName?.trim() || selectedAccount?.holder?.trim() || selectedAccount?.accountNumber?.trim(),
+  );
+  const defaultAccount = hasPaymentDetails ? selectedAccount : DEFAULT_BANK.accounts[0];
+  const paymentLines = [
+    defaultAccount?.bankName ? `Bank: ${defaultAccount.bankName}` : "",
+    defaultAccount?.holder ? `Account Name: ${defaultAccount.holder}` : "",
+    defaultAccount?.accountNumber ? `Account No: ${defaultAccount.accountNumber}` : "",
+    defaultAccount?.iban ? `IBAN: ${defaultAccount.iban}` : "",
+    defaultAccount?.swift ? `SWIFT: ${defaultAccount.swift}` : "",
+    defaultAccount?.currency ? `Currency: ${defaultAccount.currency}` : "",
+  ].filter(Boolean);
   return {
     name: resolveCompanyName(general, branding),
     address: (general.address || "").trim(),
     phone: (general.phone || "").trim(),
     logoPath: (branding.logoPath || "").trim(),
+    paymentLines,
+    paymentInstructions: (bank.tenantInstructions || DEFAULT_BANK.tenantInstructions).trim(),
   };
 }

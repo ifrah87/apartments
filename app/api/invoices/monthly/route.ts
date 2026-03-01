@@ -34,6 +34,12 @@ const FALLBACK_COMPANY: CompanyProfile = {
   address: "",
   phone: "",
   logoPath: "/branding/Logo.png",
+  paymentLines: [
+    "Bank: Salaam Bank",
+    "Account Name: Ahmed Awale Sabriyee",
+    "Account No: 32191089",
+  ],
+  paymentInstructions: "Please use your Unit + Name as the payment reference.",
 };
 
 type InvoiceHeaderRow = {
@@ -345,6 +351,16 @@ function summarizeLineItems(lineItems: InvoiceLineItem[]): InvoiceSummaryRow[] {
   }));
 }
 
+function paymentBoxContent(company: CompanyProfile) {
+  const lines = Array.isArray(company.paymentLines) ? company.paymentLines.filter(Boolean) : [];
+  const instructions = String(company.paymentInstructions || "").trim();
+  return {
+    lines,
+    instructions,
+    visible: lines.length > 0 || Boolean(instructions),
+  };
+}
+
 function deriveMeterSnapshotFromLineItems(lineItems: InvoiceLineItem[], existing: MeterSnapshot | null) {
   if (existing) return existing;
   const electricityItem = lineItems.find((item) => {
@@ -597,7 +613,7 @@ async function buildInvoicePayloadFromRow(invoice: InvoiceHeaderRow, fallbackRef
 async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, company: CompanyProfile) {
   const fontRegular = path.join(process.cwd(), "public", "fonts", "Inter-Regular.ttf");
   const fontBold = path.join(process.cwd(), "public", "fonts", "Inter-Bold.ttf");
-  const doc = new PDFDocument({ size: "A4", margin: 48, autoFirstPage: false });
+  const doc = new PDFDocument({ size: "A4", margin: 48, autoFirstPage: false, font: fontRegular });
   const chunks: Buffer[] = [];
 
   doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
@@ -607,6 +623,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
   doc.font("Inter");
 
   const logoBuffer = await resolveLogoBuffer("/branding/Logo.png");
+  const paymentBox = paymentBoxContent(company);
 
   const addInvoicePage = (payload: InvoicePayload, index: number) => {
     doc.addPage({ size: "A4", margin: 48 });
@@ -746,8 +763,29 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
       doc.moveTo(left, y - 4).lineTo(right, y - 4).strokeColor("#d0ccc4").lineWidth(0.7).stroke();
     });
 
-    y += 10;
+    const footerY = doc.page.height - doc.page.margins.bottom - 22;
+    const paymentBoxWidth = 264;
+    const paymentBoxPadding = 16;
+    const paymentInstructionsHeight =
+      paymentBox.visible && paymentBox.instructions
+        ? doc.font("Inter").fontSize(8).heightOfString(paymentBox.instructions, { width: paymentBoxWidth - paymentBoxPadding * 2 })
+        : 0;
+    const paymentBoxHeight = paymentBox.visible
+      ? 44 + paymentBox.lines.length * 11 + (paymentBox.instructions ? paymentInstructionsHeight + 12 : 0)
+      : 0;
+    const totalsHeight =
+      totals.reduce((height, _row, idx) => height + (idx === totals.length - 1 ? 22 : 18), 0) + 32;
+    const summaryHeight = Math.max(paymentBoxHeight, totalsHeight);
+    const summaryTop = footerY - summaryHeight - 18;
+
+    if (y > summaryTop - 56) {
+      doc.addPage({ size: "A4", margin: 48 });
+      y = doc.page.margins.top;
+    }
+
     const totalsX = right - 220;
+    const totalsY = footerY - totalsHeight - 18;
+    y = totalsY;
     totals.forEach((row, idx) => {
       doc.fillColor("#6b6b6b").font("Inter").fontSize(10).text(row.label, totalsX, y, { width: 100 });
       doc.fillColor("#1a1a1a").font("Inter").fontSize(10).text(toMoney(row.amount), totalsX + 100, y, {
@@ -763,13 +801,35 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
       align: "right",
     });
 
-    const footerY = doc.page.height - doc.page.margins.bottom - 22;
+    if (paymentBox.visible) {
+      const boxX = left;
+      const boxY = footerY - paymentBoxHeight - 18;
+      doc.roundedRect(boxX, boxY, paymentBoxWidth, paymentBoxHeight, 6).fillAndStroke("#faf9f7", "#d0ccc4");
+      doc.fillColor("#b8972a").font("Inter-Bold").fontSize(8).text("PAYMENT DETAILS", boxX + 16, boxY + 12, {
+        characterSpacing: 1.1,
+      });
+      let paymentY = boxY + 28;
+      paymentBox.lines.forEach((line) => {
+        doc.fillColor("#1a1a1a").font("Inter").fontSize(9).text(line, boxX + 16, paymentY, {
+          width: paymentBoxWidth - paymentBoxPadding * 2,
+        });
+        paymentY += 11;
+      });
+      if (paymentBox.instructions) {
+        paymentY += 4;
+        doc.fillColor("#6b6b6b").font("Inter").fontSize(8).text(paymentBox.instructions, boxX + 16, paymentY, {
+          width: paymentBoxWidth - paymentBoxPadding * 2,
+        });
+      }
+    }
+
     doc.moveTo(left, footerY).lineTo(right, footerY).strokeColor("#d0ccc4").lineWidth(0.7).stroke();
     doc.fillColor("#b0b0b0").font("Inter").fontSize(8).text("Thank you for your tenancy at Orfane Tower.", left, footerY + 8);
     doc.text("ORFANE TOWER", right - 120, footerY + 8, { width: 120, align: "right" });
   };
 
   if (!invoices.length) {
+    doc.addPage({ size: "A4", margin: 48 });
     doc.fillColor("#000000").font("Inter-Bold").fontSize(18).text("No charges found", doc.page.margins.left, doc.page.margins.top);
   } else {
     invoices.forEach(addInvoicePage);
@@ -831,6 +891,7 @@ function buildInvoiceSection(
   if (!lineItems.length) return "";
   const unitLabel = tenant.unit ? `Unit ${tenant.unit}` : "Unit —";
   const fromLines = [company.address, company.phone].filter(Boolean);
+  const paymentBox = paymentBoxContent(company);
   const totals = summarizeLineItems(lineItems);
   const totalRows = totals
     .map(
@@ -894,6 +955,17 @@ function buildInvoiceSection(
       </div>
     `
     : "";
+  const paymentBlock = paymentBox.visible
+    ? `
+      <div class="payment-box">
+        <div class="payment-box-title">Payment Details</div>
+        <div class="payment-box-body">
+          ${paymentBox.lines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}
+          ${paymentBox.instructions ? `<div class="payment-box-note">${escapeHtml(paymentBox.instructions)}</div>` : ""}
+        </div>
+      </div>
+    `
+    : "";
 
   return `
     <section class="invoice page">
@@ -940,14 +1012,17 @@ function buildInvoiceSection(
         </tbody>
       </table>
 
-      <div class="totals-block">
-        <table class="totals-table">
-          ${totalRows}
-          <tr class="total-final">
-            <td>Total Due</td>
-            <td>${toMoney(totalAmount)}</td>
-          </tr>
-        </table>
+      <div class="summary-row${paymentBox.visible ? "" : " summary-row-only-totals"}">
+        ${paymentBlock}
+        <div class="totals-block">
+          <table class="totals-table">
+            ${totalRows}
+            <tr class="total-final">
+              <td>Total Due</td>
+              <td>${toMoney(totalAmount)}</td>
+            </tr>
+          </table>
+        </div>
       </div>
 
       <div class="inv-footer">
@@ -971,7 +1046,7 @@ export async function GET(req: NextRequest) {
     const requestedTenantId = searchParams.get("tenantId") || searchParams.get("tenant") || "";
     const requestedInvoiceId = searchParams.get("invoiceId") || "";
     const mode = searchParams.get("mode") || "download";
-    const wantsPdf = mode === "download";
+    const wantsPdf = mode === "download" || mode === "pdf";
     const requestedMonth = searchParams.get("month") || "";
     const requestedYear = searchParams.get("year") || "";
     let reference = new Date();
@@ -1148,7 +1223,13 @@ export async function GET(req: NextRequest) {
       .items-table tbody td.muted { color: var(--muted); }
       .item-name { font-weight: 500; }
       .item-sub { font-size: 11px; color: var(--muted); margin-top: 3px; font-family: 'DM Mono', monospace; }
-      .totals-block { display: flex; justify-content: flex-end; margin-top: 0; }
+      .summary-row { position: absolute; left: 72px; right: 72px; bottom: 78px; display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; }
+      .summary-row-only-totals { justify-content: flex-end; }
+      .payment-box { width: 280px; background: var(--bg); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 18px; flex: 0 0 280px; }
+      .payment-box-title { font-size: 9px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); margin-bottom: 10px; }
+      .payment-box-body { font-size: 11px; color: var(--ink); line-height: 1.6; }
+      .payment-box-note { margin-top: 8px; color: var(--muted); font-size: 10px; }
+      .totals-block { display: flex; justify-content: flex-end; margin-top: 0; margin-left: auto; }
       .totals-table { width: 280px; }
       .totals-table tr td { padding: 7px 0; font-size: 13px; color: var(--muted); }
       .totals-table tr td:last-child { text-align: right; font-family: 'DM Mono', monospace; color: var(--ink); }
