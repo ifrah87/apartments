@@ -100,6 +100,26 @@ type GenericServiceLineItem = {
   meta: Record<string, unknown> | null;
 };
 
+function generatedLineItemKey(line: ElectricityLineItem | GenericServiceLineItem) {
+  const meta = line.meta && typeof line.meta === "object" ? line.meta : null;
+  const kind = String(meta?.kind || "").trim().toUpperCase();
+  const serviceId = String(meta?.service_id || "").trim();
+  const description = String(line.description || "").trim().toLowerCase();
+  return [kind, serviceId, description, Number(line.qty || 0), Number(line.unit_cents || 0)].join("::");
+}
+
+function dedupeGeneratedLineItems(lines: Array<ElectricityLineItem | GenericServiceLineItem>) {
+  const seen = new Set<string>();
+  const deduped: Array<ElectricityLineItem | GenericServiceLineItem> = [];
+  for (const line of lines) {
+    const key = generatedLineItemKey(line);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(line);
+  }
+  return deduped;
+}
+
 type ElectricityReading = {
   value: number;
   date: string;
@@ -1002,7 +1022,7 @@ export async function POST(req: NextRequest) {
     // --- ELECTRICITY AUTO CALCULATION ---
     const periodStartKey = monthStartKey;
     const periodEndKey = monthEndKey;
-    const lineItemsForInvoice = [rentLineItem, ...assignedServiceLineItems, ...extraLineItems];
+    const lineItemsForInvoice = dedupeGeneratedLineItems([rentLineItem, ...assignedServiceLineItems, ...extraLineItems]);
 
     const electricityResult = await buildElectricityLineItem({
       unitId: unit.id,
@@ -1029,6 +1049,7 @@ export async function POST(req: NextRequest) {
     if (electricity) {
       lineItemsForInvoice.push(electricity);
     }
+    const finalLineItemsForInvoice = dedupeGeneratedLineItems(lineItemsForInvoice);
 
     let meterSnapshot: {
       service: "ELECTRICITY";
@@ -1079,7 +1100,7 @@ export async function POST(req: NextRequest) {
       period: periodKey,
       invoiceDate: invoiceDate.toISOString().slice(0, 10),
       dueDate: dueDate.toISOString().slice(0, 10),
-      lineItems: lineItemsForInvoice,
+      lineItems: finalLineItemsForInvoice,
       meterSnapshot,
     };
 
@@ -1098,12 +1119,12 @@ export async function POST(req: NextRequest) {
             tenant_id: tenantId,
             unit_id: unit.id,
             period: periodKey,
-            total_cents: lineItemsForInvoice.reduce((sum, row) => sum + Number(row.total_cents || 0), 0),
-            line_items: lineItemsForInvoice,
+            total_cents: finalLineItemsForInvoice.reduce((sum, row) => sum + Number(row.total_cents || 0), 0),
+            line_items: finalLineItemsForInvoice,
             meter_snapshot: meterSnapshot,
           },
         };
-        response.lineItems = lineItemsForInvoice;
+        response.lineItems = finalLineItemsForInvoice;
         console.info("Bills debug", response.debug);
       }
       return NextResponse.json(response);
@@ -1310,7 +1331,7 @@ export async function POST(req: NextRequest) {
         meter: electricityDebugPayload,
         invoice: invoicePayload,
       };
-      response.lineItems = lineItemsForInvoice;
+      response.lineItems = finalLineItemsForInvoice;
     }
     return NextResponse.json(response);
   } catch (err) {

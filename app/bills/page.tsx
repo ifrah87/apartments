@@ -139,10 +139,11 @@ function normalizeUnitValue(value: string) {
   return value.replace(/^unit\s+/i, "").trim().toLowerCase();
 }
 
-function buildUnitIdentityKey(input: Pick<UnitCard, "unit" | "unitNumber" | "tenant">) {
+function buildUnitIdentityKey(input: Pick<UnitCard, "unit" | "unitNumber" | "tenant" | "propertyKey">) {
+  const propertyKey = String(input.propertyKey || "").trim().toLowerCase();
   const unitKey = normalizeUnitValue(input.unitNumber || input.unit);
   const tenantKey = String(input.tenant || "").trim().replace(/\s+/g, " ").toLowerCase();
-  return `${unitKey}::${tenantKey}`;
+  return `${propertyKey}::${unitKey}::${tenantKey}`;
 }
 
 function monthBounds(month: string, year: string) {
@@ -686,8 +687,16 @@ export default function BillsPage() {
   const billingUnits = useMemo<BillingUnit[]>(() => {
     const billedInvoices = invoices.filter((invoice) => getInvoicePeriodLabel(invoice) === billingPeriod);
     const billedUnitIds = new Set(billedInvoices.map((invoice) => invoice.unitId));
+    const unitPropertyById = new Map(units.map((unit) => [unit.id, unit.propertyKey ?? ""]));
     const billedUnitKeys = new Set(
-      billedInvoices.map((invoice) => buildUnitIdentityKey({ unit: invoice.unitLabel, unitNumber: invoice.unitLabel, tenant: invoice.tenantName })),
+      billedInvoices.map((invoice) =>
+        buildUnitIdentityKey({
+          unit: invoice.unitLabel,
+          unitNumber: invoice.unitLabel,
+          tenant: invoice.tenantName,
+          propertyKey: unitPropertyById.get(invoice.unitId) || "",
+        }),
+      ),
     );
     const bounds = monthBounds(generatorMonth, generatorYear);
     const readyMeterKeys = new Set(
