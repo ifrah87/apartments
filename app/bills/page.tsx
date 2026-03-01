@@ -32,7 +32,7 @@ type UnitCard = {
 };
 
 type BillingUnit = UnitCard & {
-  status: "ready" | "billed" | "waiting";
+  status: "ready" | "already_billed" | "waiting";
 };
 
 type InvoiceRow = {
@@ -821,7 +821,7 @@ export default function BillsPage() {
         const nextStatus: BillingUnit["status"] = !unit.hasTenant
           ? "waiting"
           : billedUnitIds.has(unit.id) || billedUnitKeys.has(key)
-            ? "billed"
+            ? "already_billed"
             : !hasCurrentMeterReading
               ? "waiting"
               : "ready";
@@ -834,7 +834,7 @@ export default function BillsPage() {
           map.set(key, nextUnit);
           return map;
         }
-        const rank = { billed: 3, ready: 2, waiting: 1 };
+        const rank = { already_billed: 3, ready: 2, waiting: 1 };
         map.set(key, rank[nextUnit.status] > rank[existing.status] ? nextUnit : existing);
         return map;
       }, new Map<string, BillingUnit>()).values(),
@@ -1401,13 +1401,13 @@ export default function BillsPage() {
                 const statusLabel =
                   unit.status === "waiting"
                     ? "Waiting for Meter Reading"
-                    : unit.status === "billed"
+                    : unit.status === "already_billed"
                       ? "Already Billed"
                       : "Ready";
                 const statusColor =
                   unit.status === "waiting"
                     ? "text-rose-300"
-                    : unit.status === "billed"
+                    : unit.status === "already_billed"
                       ? "text-emerald-300"
                       : "text-emerald-200";
                 const dotColor = unit.status === "waiting" ? "bg-rose-400" : "bg-emerald-400";

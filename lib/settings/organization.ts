@@ -51,7 +51,6 @@ export function buildCompanyProfile(snapshot: OrganizationSnapshot): CompanyProf
     defaultAccount?.accountNumber ? `Account No: ${defaultAccount.accountNumber}` : "",
     defaultAccount?.iban ? `IBAN: ${defaultAccount.iban}` : "",
     defaultAccount?.swift ? `SWIFT: ${defaultAccount.swift}` : "",
-    defaultAccount?.currency ? `Currency: ${defaultAccount.currency}` : "",
   ].filter(Boolean);
   return {
     name: resolveCompanyName(general, branding),
