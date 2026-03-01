@@ -17,6 +17,13 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
+    "types": [
+      "node",
+      "react",
+      "react-dom",
+      "pg",
+      "pdfkit"
+    ],
     "baseUrl": ".",
     "paths": {
       "@/*": [

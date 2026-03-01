@@ -3,6 +3,7 @@ import { query } from "@/lib/db";
 import { DEFAULT_INITIAL_READINGS } from "@/lib/settings/defaults";
 import { normalizeSettings } from "@/lib/settings/server";
 import type { InitialReadingsSettings } from "@/lib/settings/types";
+import { toDateOnlyString, toPeriodKeyFromDateOnly } from "@/lib/dateOnly";
 import { datasetsRepo } from "./datasetsRepo";
 import { badRequest } from "./errors";
 import { tenantsRepo } from "./tenantsRepo";
@@ -21,9 +22,7 @@ type InitialReadingRecord = {
 };
 
 function toPeriodKey(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  return toPeriodKeyFromDateOnly(value);
 }
 
 function periodBounds(period: string) {
@@ -75,7 +74,7 @@ async function upsertInitialReadingDataset({
     unit_id: unitId ?? null,
     meter_type: meterType,
     reading_value: readingValue,
-    reading_date: readingDate,
+    reading_date: toDateOnlyString(readingDate),
     baseline: true,
     updated_at: new Date().toISOString(),
   };
@@ -214,7 +213,7 @@ function normalizeReadingRow(row: any): MeterReading {
     unit: row.unit,
     tenant_id: row.tenant_id ?? null,
     meter_type: row.meter_type,
-    reading_date: row.reading_date,
+    reading_date: toDateOnlyString(row.reading_date),
     reading_value: row.reading_value !== null && row.reading_value !== undefined ? Number(row.reading_value) : 0,
     prev_value: row.prev_value !== null && row.prev_value !== undefined ? Number(row.prev_value) : 0,
     usage: row.usage !== null && row.usage !== undefined ? Number(row.usage) : 0,
@@ -252,7 +251,7 @@ export async function createReading(payload: MeterReadingInput): Promise<MeterRe
   const unit = payload.unit?.trim();
   const tenantId = payload.tenant_id?.trim() || null;
   const meterType = payload.meter_type?.trim();
-  const readingDate = payload.reading_date?.trim();
+  const readingDate = toDateOnlyString(payload.reading_date?.trim());
   const readingValue = toNumber(payload.reading_value);
   const isBaseline = payload.baseline === true;
 

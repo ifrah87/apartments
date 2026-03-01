@@ -16,6 +16,9 @@ function maskDatabaseUrl(raw: string) {
 }
 
 export async function GET() {
+  if (process.env.NODE_ENV !== "development") {
+    return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+  }
   const raw = process.env.DATABASE_URL || "";
   const { masked, host, dbName } = maskDatabaseUrl(raw);
   return NextResponse.json({

@@ -8,6 +8,7 @@ import { BarChart2, Calendar, Plus, X } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { getCurrentPropertyId } from "@/lib/currentProperty";
+import { dateOnlyToUtcTimestamp, formatDateOnly, formatDateOnlyMonthYear, todayDateOnly } from "@/lib/dateOnly";
 
 type ApiReading = {
   id: string;
@@ -47,14 +48,12 @@ type LeaseOption = {
 };
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return todayDateOnly();
 }
 
 function formatDateUK(value: string | null | undefined) {
   if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return String(value);
-  return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(d);
+  return formatDateOnly(value, "en-GB", { day: "2-digit", month: "short", year: "numeric" }) || String(value);
 }
 
 export default function ReadingsPage() {
@@ -290,13 +289,13 @@ export default function ReadingsPage() {
     const earliestByKey = new Map<string, ApiReading>();
     rows.forEach((row) => {
       const key = `${row.unit.toLowerCase()}||${row.meter_type || ""}`;
-      const rowDate = row.reading_date ? new Date(row.reading_date).getTime() : 0;
+      const rowDate = row.reading_date ? dateOnlyToUtcTimestamp(row.reading_date) : 0;
       const existing = earliestByKey.get(key);
       if (!existing) {
         earliestByKey.set(key, row);
         return;
       }
-      const existingDate = existing.reading_date ? new Date(existing.reading_date).getTime() : 0;
+      const existingDate = existing.reading_date ? dateOnlyToUtcTimestamp(existing.reading_date) : 0;
       if (rowDate < existingDate) {
         earliestByKey.set(key, row);
       }
@@ -418,7 +417,7 @@ export default function ReadingsPage() {
                   <p className="text-xs uppercase tracking-wide text-slate-500">
                     Billing period:{" "}
                     {readingDate
-                      ? new Date(readingDate).toLocaleString("en-GB", { month: "long", year: "numeric" })
+                      ? formatDateOnlyMonthYear(readingDate, "en-GB")
                       : "—"}
                   </p>
                 </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { displayPropertyLabel } from "@/lib/propertyLabel";
 import { CHART_OF_ACCOUNTS, suggestAccountForTransaction } from "@/lib/reports/chartOfAccounts";
 import { fetchSettings } from "@/lib/settings/client";
 import { DEFAULT_EXPENSE_CATEGORIES } from "@/lib/settings/defaults";
@@ -116,7 +117,7 @@ export default function TransactionCategoryTable({
                   <div className="font-medium">{txn.description || "—"}</div>
                   {txn.reference && <div className="text-xs text-slate-500">{txn.reference}</div>}
                 </td>
-                <td className="px-4 py-2 text-slate-600">{txn.property_id || "—"}</td>
+                <td className="px-4 py-2 text-slate-600">{displayPropertyLabel(txn.property_id)}</td>
                 <td className="px-4 py-2">
                   <select
                     value={accountId}

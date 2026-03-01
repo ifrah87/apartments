@@ -4,6 +4,7 @@ import StatCard from "@/components/ui/StatCard";
 import CashflowWidget, { type CashflowPoint } from "@/components/CashflowWidget";
 import { Badge } from "@/components/ui/Badge";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { displayPropertyLabel } from "@/lib/propertyLabel";
 import { calculateRentSummary } from "@/lib/reports/rentReports";
 import { calculateOccupancySummary } from "@/lib/reports/occupancyReports";
 import { calculateBankSummary, fetchLedger, type Txn } from "@/lib/reports/ledger";
@@ -27,7 +28,7 @@ async function fetchProperties() {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams?: Promise<SearchParams> | SearchParams;
+  searchParams?: Promise<SearchParams>;
 }) {
   const sp = searchParams ? await searchParams : undefined;
   const propertyId = sp?.propertyId ?? "";
@@ -162,7 +163,7 @@ export default async function DashboardPage({
                 <tr key={`${row.date}-${row.description}`}>
                   <td>{formatDate(row.date)}</td>
                   <td className="text-slate-200">{row.description}</td>
-                  <td className="text-slate-400">{row.property_id || row.unit || "—"}</td>
+                  <td className="text-slate-400">{displayPropertyLabel(row.property_id, row.unit || "—")}</td>
                   <td
                     className={`text-right font-semibold ${
                       row.amount >= 0 ? "text-emerald-200" : "text-rose-200"

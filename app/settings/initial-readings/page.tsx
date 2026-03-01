@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Calendar, ChevronLeft } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
+import { formatDateOnlyMonthYear, todayDateOnly } from "@/lib/dateOnly";
 
 type UnitOption = {
   id: string;
@@ -19,15 +20,13 @@ type TenantOption = {
   building?: string | null;
 };
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
-
 export default function InitialReadingsPage() {
   const [units, setUnits] = useState<UnitOption[]>([]);
   const [tenants, setTenants] = useState<TenantOption[]>([]);
   const [unitsLoading, setUnitsLoading] = useState(true);
   const [tenantsLoading, setTenantsLoading] = useState(true);
   const [selectedUnit, setSelectedUnit] = useState("");
-  const [readingDate, setReadingDate] = useState(() => todayISO());
+  const [readingDate, setReadingDate] = useState(() => todayDateOnly());
   const [waterValue, setWaterValue] = useState("");
   const [electricityValue, setElectricityValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -81,7 +80,7 @@ export default function InitialReadingsPage() {
 
   const baselinePeriod = useMemo(() => {
     if (!readingDate) return "—";
-    return new Date(readingDate).toLocaleString("en-GB", { month: "long", year: "numeric" });
+    return formatDateOnlyMonthYear(readingDate, "en-GB");
   }, [readingDate]);
 
   const handleSave = async () => {

@@ -2,7 +2,9 @@ import fs from "fs/promises";
 import path from "path";
 import PDFDocument from "pdfkit";
 import { NextRequest, NextResponse } from "next/server";
+import { dateOnlyToUtcTimestamp, toDateOnlyString } from "@/lib/dateOnly";
 import { query } from "@/lib/db";
+import { isUuid } from "@/lib/isUuid";
 import { datasetsRepo, tenantsRepo } from "@/lib/repos";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
 import { normalizeId } from "@/lib/reports/tenantStatement";
@@ -106,7 +108,7 @@ function normalizeSnapshotDate(value: unknown) {
   const raw = String(value).trim();
   if (!raw) return "";
   if (raw === "Initial") return "Initial";
-  return raw.length >= 10 ? raw.slice(0, 10) : raw;
+  return toDateOnlyString(raw);
 }
 
 function monthRange(reference: Date) {
@@ -204,6 +206,7 @@ function extractMeterSnapshot(rows: InvoiceLineRow[]): MeterSnapshot | null {
 
 type InvoicePayload = {
   tenant: TenantRecord;
+  propertyLabel: string;
   invoiceId: string;
   line_items: InvoiceLineItem[];
   meter_snapshot: MeterSnapshot | null;
@@ -222,6 +225,39 @@ type InvoiceSummaryRow = {
   label: string;
   amount: number;
 };
+
+const propertyLabelCache = new Map<string, string>();
+
+async function resolvePropertyLabel(propertyId?: string | null, building?: string | null) {
+  const normalizedPropertyId = String(propertyId || "").trim();
+  const normalizedBuilding = String(building || "").trim();
+  const cacheKey = `${normalizedPropertyId}::${normalizedBuilding}`;
+  const cached = propertyLabelCache.get(cacheKey);
+  if (cached) return cached;
+
+  if (normalizedPropertyId) {
+    try {
+      const res = await query<{ name: string | null }>(
+        `SELECT name
+         FROM public.properties
+         WHERE id = $1
+         LIMIT 1`,
+        [normalizedPropertyId],
+      );
+      const name = String(res.rows[0]?.name || "").trim();
+      if (name) {
+        propertyLabelCache.set(cacheKey, name);
+        return name;
+      }
+    } catch (err) {
+      console.warn("Failed to resolve property label for invoice export:", err);
+    }
+  }
+
+  const fallback = normalizedBuilding && !isUuid(normalizedBuilding) ? normalizedBuilding : "—";
+  propertyLabelCache.set(cacheKey, fallback);
+  return fallback;
+}
 
 function escapeHtml(value: string) {
   return value
@@ -367,8 +403,8 @@ async function fetchInitialElectricityReading(unitNumber: string, unitId?: strin
   });
   if (!matches.length) return null;
   const sorted = matches.slice().sort((a, b) => {
-    const aDate = Date.parse(String(a.reading_date || a.updated_at || "")) || 0;
-    const bDate = Date.parse(String(b.reading_date || b.updated_at || "")) || 0;
+    const aDate = dateOnlyToUtcTimestamp(a.reading_date || a.updated_at || "") || 0;
+    const bDate = dateOnlyToUtcTimestamp(b.reading_date || b.updated_at || "") || 0;
     return bDate - aDate;
   });
   const entry = sorted[0];
@@ -376,7 +412,7 @@ async function fetchInitialElectricityReading(unitNumber: string, unitId?: strin
   if (value === null) return null;
   return {
     value,
-    date: "Initial",
+    date: normalizeSnapshotDate(entry?.reading_date || entry?.updated_at || ""),
   };
 }
 
@@ -421,10 +457,7 @@ async function fetchMeterSnapshotFromReadings(input: {
   if (curReading === null) return null;
   const prevRow = prevRes.rows[0];
   let prevReading = toNumberOrNull(prevRow?.reading_value);
-  let prevDate =
-    prevRow?.reading_date instanceof Date
-      ? prevRow.reading_date.toISOString().slice(0, 10)
-      : normalizeSnapshotDate(prevRow?.reading_date);
+  let prevDate = normalizeSnapshotDate(toDateOnlyString(prevRow?.reading_date));
 
   if (prevReading === null) {
     const initial = await fetchInitialElectricityReading(unitNumber, input.unit?.id ?? null);
@@ -447,10 +480,7 @@ async function fetchMeterSnapshotFromReadings(input: {
   return {
     prevDate: normalizeSnapshotDate(prevDate || "Initial"),
     prevReading,
-    currDate:
-      curRow?.reading_date instanceof Date
-        ? curRow.reading_date.toISOString().slice(0, 10)
-        : normalizeSnapshotDate(curRow?.reading_date),
+    currDate: normalizeSnapshotDate(toDateOnlyString(curRow?.reading_date)),
     currReading: curReading,
     usage,
     rate,
@@ -549,9 +579,11 @@ async function buildInvoicePayloadFromRow(invoice: InvoiceHeaderRow, fallbackRef
     }
   }
   const dueDate = invoice.due_date ? new Date(invoice.due_date) : dueDateForMonth(issueDate, tenant.due_day);
+  const propertyLabel = await resolvePropertyLabel(tenant.property_id, tenant.building);
 
   return {
     tenant,
+    propertyLabel,
     invoiceId,
     line_items: lineItems,
     meter_snapshot: meterSnapshot,
@@ -624,7 +656,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     doc.fillColor("#6b6b6b").font("Inter").fontSize(10);
     const tenantLines = [
       payload.tenant.unit ? `Unit ${payload.tenant.unit}` : "Unit -",
-      payload.tenant.building || payload.tenant.property_id || company.name,
+      payload.propertyLabel || company.name,
       monthLabel(payload.issueDate),
     ];
     tenantLines.forEach((line, idx) => {
@@ -787,6 +819,7 @@ async function resolveLogoBuffer(logoPath: string) {
 
 function buildInvoiceSection(
   tenant: TenantRecord,
+  propertyLabel: string,
   lineItems: InvoiceLineItem[],
   meterSnapshot: MeterSnapshot | null,
   totalAmount: number,
@@ -796,7 +829,6 @@ function buildInvoiceSection(
   dueDate: Date,
 ) {
   if (!lineItems.length) return "";
-  const propertyLabel = tenant.building || tenant.property_id || "—";
   const unitLabel = tenant.unit ? `Unit ${tenant.unit}` : "Unit —";
   const fromLines = [company.address, company.phone].filter(Boolean);
   const totals = summarizeLineItems(lineItems);
@@ -1009,18 +1041,20 @@ export async function GET(req: NextRequest) {
           const built = await buildInvoicePayloadFromRow(invoice, reference);
           const tenant = tenantIndex.get(String(invoice.tenant_id));
           if (!tenant) return built;
+          const nextTenant = {
+            id: tenant.id,
+            name: tenant.name,
+            property_id: tenant.property_id ?? built.tenant.property_id,
+            building: tenant.building ?? built.tenant.building,
+            unit: tenant.unit ?? built.tenant.unit,
+            reference: tenant.reference ?? undefined,
+            monthly_rent: tenant.monthly_rent ?? undefined,
+            due_day: tenant.due_day ?? undefined,
+          } satisfies TenantRecord;
           return {
             ...built,
-            tenant: {
-              id: tenant.id,
-              name: tenant.name,
-              property_id: tenant.property_id ?? built.tenant.property_id,
-              building: tenant.building ?? built.tenant.building,
-              unit: tenant.unit ?? built.tenant.unit,
-              reference: tenant.reference ?? undefined,
-              monthly_rent: tenant.monthly_rent ?? undefined,
-              due_day: tenant.due_day ?? undefined,
-            },
+            tenant: nextTenant,
+            propertyLabel: await resolvePropertyLabel(nextTenant.property_id, nextTenant.building),
             dueDate: invoice.due_date ? new Date(invoice.due_date) : dueDateForMonth(built.issueDate, tenant.due_day),
           } satisfies InvoicePayload;
         }),
@@ -1053,6 +1087,7 @@ export async function GET(req: NextRequest) {
       .map((payload) =>
         buildInvoiceSection(
           payload.tenant,
+          payload.propertyLabel,
           payload.line_items,
           payload.meter_snapshot,
           payload.total_amount,

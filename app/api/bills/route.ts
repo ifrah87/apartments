@@ -4,6 +4,7 @@ import { datasetsRepo, tenantsRepo, unitsRepo, type RepoError } from "@/lib/repo
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { opt } from "@/src/lib/utils/normalize";
 import { query } from "@/lib/db";
+import { dateOnlyToUtcTimestamp, toDateOnlyString } from "@/lib/dateOnly";
 import { createStatement } from "@/lib/reports/tenantStatement";
 import { buildInvoiceLineItems } from "@/lib/invoices/lineItems";
 import type { LeaseAgreement } from "@/lib/leases";
@@ -100,6 +101,23 @@ type GenericServiceLineItem = {
   meta: Record<string, unknown> | null;
 };
 
+type MeterSnapshot = {
+  service: "ELECTRICITY";
+  unit: string;
+  prev_reading: number | null;
+  prev_date?: string | null;
+  cur_reading: number | null;
+  cur_date?: string | null;
+  usage: number;
+  rate: number;
+  amount?: number;
+  unit_label?: string;
+};
+
+function isNonNull<T>(value: T | null): value is T {
+  return value !== null;
+}
+
 function generatedLineItemKey(line: ElectricityLineItem | GenericServiceLineItem) {
   const meta = line.meta && typeof line.meta === "object" ? line.meta : null;
   const kind = String(meta?.kind || "").trim().toUpperCase();
@@ -173,12 +191,10 @@ function toNumberOrNull(value: unknown) {
   return Number.isFinite(num) ? num : null;
 }
 
-function formatReadingDate(value?: string | null) {
+function formatReadingDate(value?: string | Date | null) {
   if (!value) return "";
   if (value === "Initial") return "Initial";
-  const trimmed = String(value).trim();
-  if (!trimmed) return "";
-  return trimmed.length >= 10 ? trimmed.slice(0, 10) : trimmed;
+  return toDateOnlyString(value);
 }
 
 function buildElectricityLineDescription(input: {
@@ -211,7 +227,7 @@ function isElectricityService(service: ServiceRecord) {
   return String(service.name || "").toLowerCase().includes("electric");
 }
 
-function normalizeMeterSnapshotInput(input: unknown) {
+function normalizeMeterSnapshotInput(input: unknown): MeterSnapshot | null {
   if (!input || typeof input !== "object") return null;
   const row = input as Record<string, unknown>;
   const prevReading = toNumberOrNull(row.prevReading ?? row.prev_reading ?? row.prev);
@@ -249,14 +265,14 @@ async function fetchInitialElectricityReading(
   });
   if (!matches.length) return null;
   const sorted = matches.slice().sort((a, b) => {
-    const aDate = Date.parse(String(a.reading_date || a.updated_at || "")) || 0;
-    const bDate = Date.parse(String(b.reading_date || b.updated_at || "")) || 0;
+    const aDate = dateOnlyToUtcTimestamp(a.reading_date || a.updated_at || "") || 0;
+    const bDate = dateOnlyToUtcTimestamp(b.reading_date || b.updated_at || "") || 0;
     return bDate - aDate;
   });
   const pick = sorted[0];
   const value = toNumberOrNull(pick?.reading_value);
   if (value === null) return null;
-  return { value, date: "Initial", source: "initial" };
+  return { value, date: formatReadingDate(pick?.reading_date || pick?.updated_at || ""), source: "initial" };
 }
 
 async function resolveElectricityReadings(opts: {
@@ -296,7 +312,7 @@ async function resolveElectricityReadings(opts: {
     }
     const cur: ElectricityReading = {
       value: curValue,
-      date: curRow.reading_date instanceof Date ? curRow.reading_date.toISOString().slice(0, 10) : String(curRow.reading_date),
+      date: toDateOnlyString(curRow?.reading_date),
       source: "reading",
     };
 
@@ -307,7 +323,7 @@ async function resolveElectricityReadings(opts: {
         ? null
         : {
             value: prevValue,
-            date: prevRow.reading_date instanceof Date ? prevRow.reading_date.toISOString().slice(0, 10) : String(prevRow.reading_date),
+            date: toDateOnlyString(prevRow?.reading_date),
             source: "reading",
           };
 
@@ -566,7 +582,7 @@ async function buildAssignedServiceLineItems(input: {
   }
 
   return Array.from(selected.values())
-    .map(({ service, source }) => {
+    .map<GenericServiceLineItem | null>(({ service, source }) => {
       const rate = toNumberOrNull(service.rate);
       if (rate === null || !Number.isFinite(rate) || rate <= 0) return null;
       const unitCents = Math.round(rate * 100);
@@ -586,7 +602,7 @@ async function buildAssignedServiceLineItems(input: {
         },
       } satisfies GenericServiceLineItem;
     })
-    .filter((item): item is GenericServiceLineItem => Boolean(item));
+    .filter(isNonNull);
 }
 
 type StoredInvoice = {
@@ -654,7 +670,7 @@ function stableUuid(seed: string) {
 }
 
 function formatInvoiceNumber(seq: number) {
-  return `Inv-${String(seq).padStart(2, "0")}`;
+  return `Inv-${String(seq).padStart(3, "0")}`;
 }
 
 function isFormattedInvoiceNumber(value: string | null | undefined) {
@@ -786,6 +802,10 @@ export async function POST(req: NextRequest) {
       month?: string;
       year?: string;
       period?: string;
+      electricityPeriod?: string;
+      electricity_period?: string;
+      meterSnapshot?: unknown;
+      meter_snapshot?: unknown;
       lineItems?: {
         description?: string;
         qty?: number;
@@ -807,6 +827,7 @@ export async function POST(req: NextRequest) {
           : [];
 
     const parsedPeriod = parsePeriod(payload?.period);
+    const parsedElectricityPeriod = parsePeriod(payload?.electricityPeriod ?? payload?.electricity_period ?? payload?.period);
     const monthValue = payload?.month || "";
     const monthIndex = parsedPeriod ? parsedPeriod.reference.getUTCMonth() : toMonthIndex(monthValue);
     const year = parsedPeriod ? parsedPeriod.reference.getUTCFullYear() : Number(payload?.year);
@@ -814,10 +835,12 @@ export async function POST(req: NextRequest) {
       monthIndex !== null && Number.isFinite(year)
         ? `${year}-${String(monthIndex + 1).padStart(2, "0")}`
         : null;
+    const electricityPeriodPreview = parsedElectricityPeriod?.periodKey ?? periodPreview;
     console.info("Bills generate request", {
       tenant_id: payload?.tenant_id ?? payload?.tenantId ?? null,
       unit_id: unitIds[0] ?? null,
       period: periodPreview,
+      electricity_period: electricityPeriodPreview,
       line_items: Array.isArray(payload?.lineItems) ? payload.lineItems.length : 0,
       month: payload?.month ?? null,
       year: payload?.year ?? null,
@@ -835,10 +858,18 @@ export async function POST(req: NextRequest) {
 
     const reference = parsedPeriod?.reference ?? new Date(Date.UTC(year, monthIndex, 1));
     const periodKey = parsedPeriod?.periodKey ?? `${reference.getUTCFullYear()}-${String(reference.getUTCMonth() + 1).padStart(2, "0")}`;
+    const electricityReference = parsedElectricityPeriod?.reference ?? reference;
+    const electricityPeriodKey =
+      parsedElectricityPeriod?.periodKey ??
+      `${electricityReference.getUTCFullYear()}-${String(electricityReference.getUTCMonth() + 1).padStart(2, "0")}`;
     const { start, end } = monthRange(reference);
+    const { start: electricityStart } = monthRange(electricityReference);
     const monthStartKey = start.toISOString().slice(0, 10);
     const monthEndExclusive = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 1));
     const monthEndKey = monthEndExclusive.toISOString().slice(0, 10);
+    const electricityStartKey = electricityStart.toISOString().slice(0, 10);
+    const electricityEndExclusive = new Date(Date.UTC(electricityReference.getUTCFullYear(), electricityReference.getUTCMonth() + 1, 1));
+    const electricityEndKey = electricityEndExclusive.toISOString().slice(0, 10);
 
     const [units, tenants, charges, leasesData] = await Promise.all([
       unitsRepo.listUnits(),
@@ -1020,8 +1051,8 @@ export async function POST(req: NextRequest) {
     });
 
     // --- ELECTRICITY AUTO CALCULATION ---
-    const periodStartKey = monthStartKey;
-    const periodEndKey = monthEndKey;
+    const periodStartKey = electricityStartKey;
+    const periodEndKey = electricityEndKey;
     const lineItemsForInvoice = dedupeGeneratedLineItems([rentLineItem, ...assignedServiceLineItems, ...extraLineItems]);
 
     const electricityResult = await buildElectricityLineItem({
@@ -1051,18 +1082,7 @@ export async function POST(req: NextRequest) {
     }
     const finalLineItemsForInvoice = dedupeGeneratedLineItems(lineItemsForInvoice);
 
-    let meterSnapshot: {
-      service: "ELECTRICITY";
-      unit: string;
-      prev_reading: number | null;
-      prev_date?: string | null;
-      cur_reading: number | null;
-      cur_date?: string | null;
-      usage: number;
-      rate: number;
-      amount?: number;
-      unit_label?: string;
-    } | null = null;
+    let meterSnapshot: MeterSnapshot | null = null;
 
     if (electricity) {
       const rate = electricity.unit_cents / 100;
@@ -1100,6 +1120,7 @@ export async function POST(req: NextRequest) {
       period: periodKey,
       invoiceDate: invoiceDate.toISOString().slice(0, 10),
       dueDate: dueDate.toISOString().slice(0, 10),
+      electricityPeriod: electricityPeriodKey,
       lineItems: finalLineItemsForInvoice,
       meterSnapshot,
     };
@@ -1119,6 +1140,7 @@ export async function POST(req: NextRequest) {
             tenant_id: tenantId,
             unit_id: unit.id,
             period: periodKey,
+            electricity_period: electricityPeriodKey,
             total_cents: finalLineItemsForInvoice.reduce((sum, row) => sum + Number(row.total_cents || 0), 0),
             line_items: finalLineItemsForInvoice,
             meter_snapshot: meterSnapshot,

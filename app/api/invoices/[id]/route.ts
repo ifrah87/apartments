@@ -3,7 +3,7 @@ import { query } from "@/lib/db";
 import { datasetsRepo } from "@/lib/repos";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
 
-type ParamsMaybePromise = { id: string } | Promise<{ id: string }>;
+type RouteParams = Promise<{ id: string }>;
 
 const INVOICES_KEY = "billing_invoices";
 
@@ -19,6 +19,30 @@ function toCents(value: number) {
 
 function fromCents(value: number | null | undefined) {
   return Number(((value ?? 0) / 100).toFixed(2));
+}
+
+function normalizeDateInput(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
+
+function normalizeStoredDate(value: unknown): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return normalizeDateInput(value);
+}
+
+function normalizePeriodKey(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const trimmed = String(value).trim();
+  const direct = trimmed.match(/^(\d{4})-(\d{2})$/);
+  if (direct) return `${direct[1]}-${direct[2]}`;
+  const date = normalizeDateInput(trimmed);
+  return date ? date.slice(0, 7) : null;
 }
 
 type InvoiceLineRow = {
@@ -92,10 +116,10 @@ function extractMeterSnapshot(meta: Record<string, any> | null | undefined): Met
   return normalizeMeterSnapshot(snapshot);
 }
 
-export async function GET(_req: NextRequest, context: { params: ParamsMaybePromise }) {
+export async function GET(_req: NextRequest, context: { params: RouteParams }) {
   const { id } = await Promise.resolve(context.params);
   const invoiceRes = await query(
-    `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, line_items, meter_snapshot
+    `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, period, line_items, meter_snapshot
      FROM public.invoices
      WHERE id = $1`,
     [id],
@@ -146,12 +170,36 @@ export async function GET(_req: NextRequest, context: { params: ParamsMaybePromi
   });
 }
 
-export async function PATCH(req: NextRequest, context: { params: ParamsMaybePromise }) {
+export async function PATCH(req: NextRequest, context: { params: RouteParams }) {
   const { id } = await Promise.resolve(context.params);
   try {
     const body = await req.json();
+    const existingInvoiceRes = await query(
+      `SELECT id, unit_id, invoice_date, due_date, period
+       FROM public.invoices
+       WHERE id = $1`,
+      [id],
+    );
+    if (!existingInvoiceRes.rows.length) {
+      return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
+    }
+    const existingInvoice = existingInvoiceRes.rows[0] as Record<string, unknown>;
     const lineItems = normalizeLineItems(body?.lineItems);
     const meterSnapshot = normalizeMeterSnapshot(body?.meterSnapshot);
+    const requestedPeriod = normalizePeriodKey(body?.period);
+    const requestedInvoiceDate = normalizeDateInput(body?.invoiceDate);
+    const requestedDueDate = normalizeDateInput(body?.dueDate);
+    const nextInvoiceDate =
+      requestedInvoiceDate ??
+      (requestedPeriod ? `${requestedPeriod}-01` : null) ??
+      normalizeStoredDate(existingInvoice.invoice_date);
+    const nextPeriod =
+      requestedPeriod ??
+      normalizePeriodKey(nextInvoiceDate) ??
+      normalizePeriodKey(existingInvoice.period) ??
+      normalizeStoredDate(existingInvoice.invoice_date)?.slice(0, 7) ??
+      null;
+    const nextDueDate = requestedDueDate ?? normalizeStoredDate(existingInvoice.due_date);
 
     const lineRows = lineItems.map((item, index) => ({
       line_index: index,
@@ -163,6 +211,18 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
     }));
     const totalCents = lineRows.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
     const totalAmount = fromCents(totalCents);
+    const invoiceMetaJson = meterSnapshot ? JSON.stringify({ meter_snapshot: meterSnapshot }) : null;
+    const lineItemsJsonb = JSON.stringify(
+      lineItems.map((item, index) => ({
+        id: item.id || `line-${index + 1}`,
+        description: item.description,
+        qty: Number(item.qty || 0),
+        rate: Number(item.rate || 0),
+        amount: Number(item.amount || 0),
+        meta: item.meta ?? undefined,
+      })),
+    );
+    const meterSnapshotJson = meterSnapshot ? JSON.stringify(meterSnapshot) : null;
 
     await query("BEGIN");
     await query(`DELETE FROM public.invoice_lines WHERE invoice_id = $1`, [id]);
@@ -186,27 +246,26 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
        SET subtotal_cents = $1,
            tax_cents = $2,
            total_cents = $3,
-           meta = $4,
-           line_items = $5,
-           meter_snapshot = $6,
-           total_amount = $7,
-           status = 'draft'
-       WHERE id = $8`,
+           invoice_date = $4,
+           due_date = $5,
+           meta = $6::jsonb,
+           line_items = $7::jsonb,
+           meter_snapshot = $8::jsonb,
+           total_amount = $9,
+           status = 'draft',
+           period = $10
+       WHERE id = $11`,
       [
         totalCents,
         0,
         totalCents,
-        meterSnapshot ? { meter_snapshot: meterSnapshot } : null,
-        lineItems.map((item, index) => ({
-          id: item.id || `line-${index + 1}`,
-          description: item.description,
-          qty: Number(item.qty || 0),
-          rate: Number(item.rate || 0),
-          amount: Number(item.amount || 0),
-          meta: item.meta ?? undefined,
-        })),
-        meterSnapshot ?? null,
+        nextInvoiceDate,
+        nextDueDate,
+        invoiceMetaJson,
+        lineItemsJsonb,
+        meterSnapshotJson,
         totalAmount,
+        nextPeriod,
         id,
       ],
     );
@@ -217,7 +276,18 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
       (current) =>
         Array.isArray(current)
           ? current.map((item) =>
-              item?.id === id ? { ...item, total: totalAmount, outstanding: totalAmount } : item,
+              item?.id === id
+                ? {
+                    ...item,
+                    total: totalAmount,
+                    outstanding: totalAmount,
+                    period: nextPeriod ?? item?.period,
+                    invoiceDate: nextInvoiceDate ?? item?.invoiceDate,
+                    dueDate: nextDueDate ?? item?.dueDate,
+                    invoice_date: nextInvoiceDate ?? item?.invoice_date,
+                    due_date: nextDueDate ?? item?.due_date,
+                  }
+                : item,
             )
           : [],
       [],
@@ -236,6 +306,9 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
       ok: true,
       data: {
         id,
+        period: nextPeriod,
+        invoice_date: nextInvoiceDate,
+        due_date: nextDueDate,
         line_items: refreshedItems,
         meter_snapshot: meterSnapshot,
         total_amount: totalAmount,
@@ -247,6 +320,12 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
       await query("ROLLBACK");
     } catch {
       // ignore rollback errors
+    }
+    if (err?.code === "23505") {
+      return NextResponse.json(
+        { ok: false, error: "An invoice already exists for this unit and billing period." },
+        { status: 409 },
+      );
     }
     console.error("Failed to update invoice line items", err);
     return NextResponse.json({ ok: false, error: err?.message || "Failed to update invoice." }, { status: 500 });

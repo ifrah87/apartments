@@ -18,6 +18,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
+import { dateOnlyToUtcTimestamp } from "@/lib/dateOnly";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { normalizeId } from "@/lib/normalizeId";
 
@@ -42,6 +43,7 @@ type InvoiceRow = {
   tenantName: string;
   period: string;
   invoiceDate?: string;
+  dueDate?: string;
   total: number;
   rentAmount: number;
   outstanding: number;
@@ -63,6 +65,7 @@ type DraftInvoice = {
   unitId: string;
   unitLabel: string;
   period: string;
+  electricityPeriod: string;
   invoiceDate: string;
   dueDate: string;
   lineItems: DraftLineItem[];
@@ -156,9 +159,10 @@ function monthBounds(month: string, year: string) {
   return { start, end };
 }
 
-function isWithinBillingWindow(date: Date, bounds: { start: Date; end: Date }) {
-  if (Number.isNaN(date.getTime())) return false;
-  return date >= bounds.start && date <= bounds.end;
+function isWithinBillingWindow(date: string | Date, bounds: { start: Date; end: Date }) {
+  const timestamp = dateOnlyToUtcTimestamp(date);
+  if (Number.isNaN(timestamp)) return false;
+  return timestamp >= bounds.start.getTime() && timestamp < bounds.end.getTime();
 }
 
 function formatSnapshotDate(value?: string) {
@@ -228,6 +232,49 @@ function formatInvoicePeriod(value?: string) {
   return date.toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
 }
 
+function normalizePeriodInput(value?: string) {
+  const trimmed = String(value || "").trim();
+  if (/^\d{4}-\d{2}$/.test(trimmed)) return trimmed;
+  const date = parseInvoiceDate(trimmed);
+  if (!date) return "";
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function firstDateOfPeriod(period?: string) {
+  const normalized = normalizePeriodInput(period);
+  return normalized ? `${normalized}-01` : "";
+}
+
+function shiftDateToPeriod(dateValue: string | undefined, period: string, fallbackDay = 5) {
+  const normalizedPeriod = normalizePeriodInput(period);
+  if (!normalizedPeriod) return "";
+  const [yearText, monthText] = normalizedPeriod.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11) return "";
+  const existing = parseInvoiceDate(dateValue);
+  const day = existing?.getUTCDate() ?? fallbackDay;
+  const maxDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  return `${normalizedPeriod}-${String(Math.min(day, maxDay)).padStart(2, "0")}`;
+}
+
+function periodToMonthYear(period?: string) {
+  const normalized = normalizePeriodInput(period);
+  if (!normalized) return { month: "", year: "" };
+  const date = new Date(`${normalized}-01T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return { month: "", year: "" };
+  return {
+    month: date.toLocaleString("en-GB", { month: "long", timeZone: "UTC" }),
+    year: String(date.getUTCFullYear()),
+  };
+}
+
+function monthYearToPeriod(month: string, year: string) {
+  const date = new Date(`${month} 1, ${year}`);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function getInvoicePeriodLabel(invoice: InvoiceRow) {
   return formatInvoicePeriod(invoice.invoiceDate) || invoice.period || "";
 }
@@ -254,6 +301,7 @@ function normalizeInvoice(row: any): InvoiceRow {
   const unitLabel = row?.unitLabel || row?.unit || row?.unit_name || "Unit";
   const tenantName = row?.tenantName || row?.tenant || "Tenant";
   const invoiceDate = row?.invoiceDate ?? row?.invoice_date ?? "";
+  const dueDate = row?.dueDate ?? row?.due_date ?? "";
   const period = formatInvoicePeriod(String(invoiceDate)) || String(row?.period ?? "");
   return {
     id: String(row?.id ?? ""),
@@ -263,6 +311,7 @@ function normalizeInvoice(row: any): InvoiceRow {
     tenantName: String(tenantName),
     period,
     invoiceDate: invoiceDate ? String(invoiceDate) : undefined,
+    dueDate: dueDate ? String(dueDate) : undefined,
     total: Number(row?.total ?? 0),
     rentAmount: Number(row?.rentAmount ?? 0),
     outstanding: Number(row?.outstanding ?? row?.total ?? 0),
@@ -283,9 +332,13 @@ export default function BillsPage() {
   const [generatorYear, setGeneratorYear] = useState("2026");
   const [draftInvoice, setDraftInvoice] = useState<DraftInvoice | null>(null);
   const [draftItems, setDraftItems] = useState<DraftLineItem[]>([]);
+  const [draftRefreshing, setDraftRefreshing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [editingInvoice, setEditingInvoice] = useState<InvoiceRow | null>(null);
+  const [editingPeriod, setEditingPeriod] = useState("");
+  const [editingInvoiceDate, setEditingInvoiceDate] = useState("");
+  const [editingDueDate, setEditingDueDate] = useState("");
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
   const [meterSnapshot, setMeterSnapshot] = useState<MeterSnapshot | null>(null);
   const [services, setServices] = useState<ServiceRecord[]>([]);
@@ -473,7 +526,7 @@ export default function BillsPage() {
       draftInitRef.current = null;
       return;
     }
-    const key = `${draftInvoice.tenantId}-${draftInvoice.unitId}-${draftInvoice.period}`;
+    const key = `${draftInvoice.tenantId}-${draftInvoice.unitId}-${draftInvoice.period}-${draftInvoice.electricityPeriod}`;
     if (draftInitRef.current === key) return;
     draftInitRef.current = key;
     setDraftItems(draftInvoice.lineItems ?? []);
@@ -560,6 +613,10 @@ export default function BillsPage() {
           ? data.line_items
           : [createLineItem({ description: "Monthly Rent", qty: 1, rate: invoice.total, amount: invoice.total })];
         const snapshot = normalizeSnapshot(data?.meter_snapshot ?? null);
+        const nextPeriod = normalizePeriodInput(data?.period ?? invoice.invoiceDate ?? invoice.period);
+        setEditingPeriod(nextPeriod);
+        setEditingInvoiceDate(String(data?.invoice_date ?? invoice.invoiceDate ?? firstDateOfPeriod(nextPeriod) ?? ""));
+        setEditingDueDate(String(data?.due_date ?? invoice.dueDate ?? shiftDateToPeriod(invoice.dueDate, nextPeriod) ?? ""));
         setMeterSnapshot(snapshot);
         setLineItems(syncElectricityLine(initialItems, snapshot));
         setEditingLoading(false);
@@ -571,6 +628,10 @@ export default function BillsPage() {
 
     const fallbackItems = [createLineItem({ description: "Monthly Rent", qty: 1, rate: invoice.total, amount: invoice.total })];
     const snapshot = normalizeSnapshot(null);
+    const nextPeriod = normalizePeriodInput(invoice.invoiceDate ?? invoice.period);
+    setEditingPeriod(nextPeriod);
+    setEditingInvoiceDate(String(invoice.invoiceDate ?? firstDateOfPeriod(nextPeriod) ?? ""));
+    setEditingDueDate(String(invoice.dueDate ?? shiftDateToPeriod(invoice.dueDate, nextPeriod) ?? ""));
     setMeterSnapshot(snapshot);
     setLineItems(syncElectricityLine(fallbackItems, snapshot));
     setEditingLoading(false);
@@ -578,6 +639,9 @@ export default function BillsPage() {
 
   const closeEditor = () => {
     setEditingInvoice(null);
+    setEditingPeriod("");
+    setEditingInvoiceDate("");
+    setEditingDueDate("");
     setLineItems([]);
     setMeterSnapshot(null);
     setEditingLoading(false);
@@ -587,6 +651,7 @@ export default function BillsPage() {
   const closeDraft = () => {
     setDraftInvoice(null);
     setDraftItems([]);
+    setDraftRefreshing(false);
     setCreating(false);
   };
 
@@ -647,6 +712,13 @@ export default function BillsPage() {
     });
   };
 
+  const updateEditingPeriodValue = (value: string) => {
+    const nextPeriod = normalizePeriodInput(value);
+    setEditingPeriod(nextPeriod);
+    setEditingInvoiceDate(firstDateOfPeriod(nextPeriod));
+    setEditingDueDate((prev) => shiftDateToPeriod(prev, nextPeriod));
+  };
+
   const saveInvoice = async () => {
     if (!editingInvoice) return;
     setEditingSaving(true);
@@ -654,7 +726,13 @@ export default function BillsPage() {
       const res = await fetch(`/api/invoices/${editingInvoice.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lineItems, meterSnapshot }),
+        body: JSON.stringify({
+          lineItems,
+          meterSnapshot,
+          period: editingPeriod,
+          invoiceDate: editingInvoiceDate,
+          dueDate: editingDueDate,
+        }),
       });
       const payload = await res.json().catch(() => null);
       if (!res.ok || payload?.ok === false) {
@@ -665,13 +743,33 @@ export default function BillsPage() {
       const reloadData = reloadPayload?.ok ? reloadPayload.data : reloadPayload;
       const refreshedItems = Array.isArray(reloadData?.line_items) ? reloadData.line_items : [];
       const refreshedSnapshot = normalizeSnapshot(reloadData?.meter_snapshot ?? null);
+      const nextPeriod = normalizePeriodInput(reloadData?.period ?? reloadData?.invoice_date ?? editingPeriod);
+      const nextInvoiceDate = String(reloadData?.invoice_date ?? editingInvoiceDate ?? firstDateOfPeriod(nextPeriod) ?? "");
+      const nextDueDate = String(reloadData?.due_date ?? editingDueDate ?? shiftDateToPeriod(editingDueDate, nextPeriod) ?? "");
+      const updatedInvoice = {
+        ...editingInvoice,
+        period: nextPeriod ? formatInvoicePeriod(`${nextPeriod}-01`) || nextPeriod : editingInvoice.period,
+        invoiceDate: nextInvoiceDate,
+        dueDate: nextDueDate,
+      };
+      setEditingInvoice(updatedInvoice);
+      setEditingPeriod(nextPeriod);
+      setEditingInvoiceDate(nextInvoiceDate);
+      setEditingDueDate(nextDueDate);
       setMeterSnapshot(refreshedSnapshot);
       setLineItems(syncElectricityLine(refreshedItems, refreshedSnapshot));
       const totalAmount = Number(reloadData?.total_amount ?? payload?.data?.total_amount ?? computeTotal(lineItems));
       setInvoices((prev) =>
         prev.map((row) =>
           row.id === editingInvoice.id
-            ? { ...row, total: totalAmount, outstanding: totalAmount }
+            ? {
+                ...row,
+                total: totalAmount,
+                outstanding: totalAmount,
+                period: updatedInvoice.period,
+                invoiceDate: nextInvoiceDate,
+                dueDate: nextDueDate,
+              }
             : row,
         ),
       );
@@ -710,8 +808,7 @@ export default function BillsPage() {
           if (String(reading.meter_type || "").toLowerCase() !== "electricity") return false;
           if (!bounds || !reading.reading_date) return false;
           if (!reading.propertyKey) return false;
-          const readingDate = new Date(reading.reading_date);
-          return isWithinBillingWindow(readingDate, bounds);
+          return isWithinBillingWindow(reading.reading_date, bounds);
         })
         .map((reading) => `${String(reading.propertyKey || "").toLowerCase()}::${normalizeUnitValue(String(reading.unit || ""))}`),
     );
@@ -831,6 +928,83 @@ export default function BillsPage() {
     setSelectedUnits(readyUnitIds);
   };
 
+  const applyDraftPreview = (draft: any, fallbackPeriod?: string, fallbackElectricityPeriod?: string) => {
+    const normalizedPeriod = normalizePeriodInput(draft?.period ?? fallbackPeriod ?? "");
+    const normalizedElectricityPeriod = normalizePeriodInput(
+      draft?.electricityPeriod ?? draft?.electricity_period ?? fallbackElectricityPeriod ?? normalizedPeriod,
+    );
+    const draftItems = Array.isArray(draft?.lineItems)
+      ? draft.lineItems.map((item: any) =>
+          createDraftLineItem({
+            description: String(item?.description ?? ""),
+            qty: Number(item?.qty ?? 0),
+            unitCents: Number(item?.unit_cents ?? 0),
+            totalCents: Number(item?.total_cents ?? 0),
+            meta: item?.meta && typeof item.meta === "object" ? item.meta : undefined,
+          }),
+        )
+      : [];
+    const draftSnapshot = deriveDraftMeterSnapshot(
+      draft?.meterSnapshot ?? draft?.meter_snapshot ?? null,
+      draftItems,
+    );
+    const nextMonthYear = periodToMonthYear(normalizedPeriod);
+    const nextDraft = {
+      tenantId: String(draft?.tenantId || ""),
+      tenantName: String(draft?.tenantName || ""),
+      unitId: String(draft?.unitId || ""),
+      unitLabel: String(draft?.unitLabel || ""),
+      period: normalizedPeriod,
+      electricityPeriod: normalizedElectricityPeriod,
+      invoiceDate: String(draft?.invoiceDate || firstDateOfPeriod(normalizedPeriod)),
+      dueDate: String(draft?.dueDate || shiftDateToPeriod(undefined, normalizedPeriod)),
+      lineItems: draftItems,
+      meterSnapshot: draftSnapshot,
+      month: nextMonthYear.month,
+      year: nextMonthYear.year,
+    } satisfies DraftInvoice;
+
+    setDraftInvoice(nextDraft);
+    setDraftItems(draftItems);
+    if (nextMonthYear.month && nextMonthYear.year) {
+      setGeneratorMonth(nextMonthYear.month);
+      setGeneratorYear(nextMonthYear.year);
+    }
+  };
+
+  const loadDraftPreview = async (input: { unitId: string; period: string; electricityPeriod?: string }) => {
+    const normalizedPeriod = normalizePeriodInput(input.period);
+    const normalizedElectricityPeriod = normalizePeriodInput(input.electricityPeriod ?? normalizedPeriod);
+    if (!normalizedPeriod) {
+      throw new Error("Invalid billing period.");
+    }
+    if (!normalizedElectricityPeriod) {
+      throw new Error("Invalid electricity period.");
+    }
+
+    const res = await fetch("/api/bills?dryRun=1&debug=1", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        unitIds: [input.unitId],
+        period: normalizedPeriod,
+        electricityPeriod: normalizedElectricityPeriod,
+      }),
+    });
+    const payload = await res.json().catch(() => null);
+    if (payload?.debug) {
+      console.info("Bills debug", payload.debug);
+    }
+    if (!res.ok || !payload?.ok) {
+      throw new Error(payload?.error || "Failed to generate invoice preview.");
+    }
+    if (!payload?.draft) {
+      throw new Error("No preview available.");
+    }
+
+    applyDraftPreview(payload.draft, normalizedPeriod, normalizedElectricityPeriod);
+  };
+
   const runGenerator = async () => {
     if (!selectedUnits.length) return;
     if (selectedUnits.length !== 1) {
@@ -839,69 +1013,59 @@ export default function BillsPage() {
     }
     setGenerating(true);
     try {
-      const res = await fetch("/api/bills?dryRun=1&debug=1", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          unitIds: selectedUnits,
-          month: generatorMonth,
-          year: generatorYear,
-        }),
+      const requestedPeriod = monthYearToPeriod(generatorMonth, generatorYear);
+      await loadDraftPreview({
+        unitId: selectedUnits[0],
+        period: requestedPeriod,
+        electricityPeriod: requestedPeriod,
       });
-      const payload = await res.json().catch(() => null);
-      if (payload?.debug) {
-        console.info("Bills debug", payload.debug);
-      }
-      if (!res.ok || !payload?.ok) {
-        alert(payload?.error || "Failed to generate invoice preview.");
-        setGenerating(false);
-        return;
-      }
-
-      const draft = payload?.draft;
-      if (!draft) {
-        alert("No preview available.");
-        setGenerating(false);
-        return;
-      }
-
-      const draftItems = Array.isArray(draft.lineItems)
-        ? draft.lineItems.map((item: any) =>
-            createDraftLineItem({
-              description: String(item?.description ?? ""),
-              qty: Number(item?.qty ?? 0),
-              unitCents: Number(item?.unit_cents ?? 0),
-              totalCents: Number(item?.total_cents ?? 0),
-              meta: item?.meta && typeof item.meta === "object" ? item.meta : undefined,
-            }),
-          )
-        : [];
-      const draftSnapshot = deriveDraftMeterSnapshot(
-        draft.meterSnapshot ?? draft.meter_snapshot ?? null,
-        draftItems,
-      );
-
-      setDraftInvoice({
-        tenantId: String(draft.tenantId || ""),
-        tenantName: String(draft.tenantName || ""),
-        unitId: String(draft.unitId || ""),
-        unitLabel: String(draft.unitLabel || ""),
-        period: String(draft.period || ""),
-        invoiceDate: String(draft.invoiceDate || ""),
-        dueDate: String(draft.dueDate || ""),
-        lineItems: draftItems,
-        meterSnapshot: draftSnapshot,
-        month: generatorMonth,
-        year: generatorYear,
-      });
-      setDraftItems(draftItems);
       setShowGenerator(false);
       setSelectedUnits([]);
     } catch (err) {
       console.error("Failed to generate invoice preview", err);
-      alert("Failed to generate invoice preview.");
+      alert(err instanceof Error ? err.message : "Failed to generate invoice preview.");
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const updateDraftPeriod = async (value: string) => {
+    if (!draftInvoice || draftRefreshing || creating) return;
+    const nextPeriod = normalizePeriodInput(value);
+    if (!nextPeriod || nextPeriod === draftInvoice.period) return;
+
+    setDraftRefreshing(true);
+    try {
+      await loadDraftPreview({
+        unitId: draftInvoice.unitId,
+        period: nextPeriod,
+        electricityPeriod: draftInvoice.electricityPeriod || draftInvoice.period,
+      });
+    } catch (err) {
+      console.error("Failed to refresh invoice preview", err);
+      alert(err instanceof Error ? err.message : "Failed to refresh invoice preview.");
+    } finally {
+      setDraftRefreshing(false);
+    }
+  };
+
+  const updateDraftElectricityPeriod = async (value: string) => {
+    if (!draftInvoice || draftRefreshing || creating) return;
+    const nextElectricityPeriod = normalizePeriodInput(value);
+    if (!nextElectricityPeriod || nextElectricityPeriod === draftInvoice.electricityPeriod) return;
+
+    setDraftRefreshing(true);
+    try {
+      await loadDraftPreview({
+        unitId: draftInvoice.unitId,
+        period: draftInvoice.period,
+        electricityPeriod: nextElectricityPeriod,
+      });
+    } catch (err) {
+      console.error("Failed to refresh electricity preview", err);
+      alert(err instanceof Error ? err.message : "Failed to refresh electricity preview.");
+    } finally {
+      setDraftRefreshing(false);
     }
   };
 
@@ -915,8 +1079,8 @@ export default function BillsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           unitIds: [draftInvoice.unitId],
-          month: draftInvoice.month,
-          year: draftInvoice.year,
+          period: draftInvoice.period,
+          electricityPeriod: draftInvoice.electricityPeriod,
           meterSnapshot: deriveDraftMeterSnapshot(draftInvoice.meterSnapshot ?? null, draftItems),
           lineItems: draftItems.map((item) => ({
             description: item.description,
@@ -1196,6 +1360,14 @@ export default function BillsPage() {
                     <option>February</option>
                     <option>March</option>
                     <option>April</option>
+                    <option>May</option>
+                    <option>June</option>
+                    <option>July</option>
+                    <option>August</option>
+                    <option>September</option>
+                    <option>October</option>
+                    <option>November</option>
+                    <option>December</option>
                   </select>
                 </label>
                 <label className="flex items-center gap-2">
@@ -1205,8 +1377,10 @@ export default function BillsPage() {
                     onChange={(event) => setGeneratorYear(event.target.value)}
                     className="rounded-full border border-white/10 bg-panel/60 px-3 py-1 text-xs text-slate-200"
                   >
+                    <option>2027</option>
                     <option>2026</option>
                     <option>2025</option>
+                    <option>2024</option>
                   </select>
                 </label>
                 <button
@@ -1343,6 +1517,44 @@ export default function BillsPage() {
                     <p className="uppercase tracking-wide text-slate-500">Period</p>
                     <p className="mt-1 text-sm text-slate-100">{draftInvoice.period}</p>
                   </div>
+                  <div>
+                    <p className="uppercase tracking-wide text-slate-500">Electricity Period</p>
+                    <p className="mt-1 text-sm text-slate-100">{draftInvoice.electricityPeriod}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-panel/70 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-100">Billing Period</h3>
+                    <p className="text-xs text-slate-400">Change the billing month to regenerate this invoice preview.</p>
+                  </div>
+                  {draftRefreshing ? <span className="text-xs text-slate-400">Refreshing...</span> : null}
+                </div>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <label className="text-xs text-slate-400">
+                    Rent / invoice period
+                    <input
+                      type="month"
+                      value={normalizePeriodInput(draftInvoice.period)}
+                      onChange={(event) => updateDraftPeriod(event.target.value)}
+                      disabled={draftRefreshing || creating}
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                  </label>
+
+                  <label className="text-xs text-slate-400">
+                    Electricity readings period
+                    <input
+                      type="month"
+                      value={normalizePeriodInput(draftInvoice.electricityPeriod)}
+                      onChange={(event) => updateDraftElectricityPeriod(event.target.value)}
+                      disabled={draftRefreshing || creating}
+                      className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                  </label>
                 </div>
               </div>
 
@@ -1350,7 +1562,7 @@ export default function BillsPage() {
                 <div className="rounded-xl border border-white/10 bg-panel/70 p-4">
                   <div>
                     <h3 className="text-sm font-semibold text-slate-100">Electricity Meter Snapshot</h3>
-                    <p className="text-xs text-slate-400">Pulled from readings for this billing period.</p>
+                    <p className="text-xs text-slate-400">Pulled from readings for the selected electricity period.</p>
                   </div>
                   <div className="mt-4 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
                     <div>
@@ -1426,7 +1638,8 @@ export default function BillsPage() {
                           </td>
                           <td className="px-3 py-2">
                             <input
-                              type="number"
+                              type="text"
+                              inputMode="numeric"
                               value={item.qty}
                               onChange={(event) => updateDraftItem(item.id, "qty", event.target.value)}
                               className="w-24 rounded-lg border border-white/10 bg-transparent px-2 py-1 text-sm text-slate-100"
@@ -1434,9 +1647,9 @@ export default function BillsPage() {
                           </td>
                           <td className="px-3 py-2">
                             <input
-                              type="number"
-                              step="0.01"
-                              value={(item.unitCents / 100).toFixed(2)}
+                              type="text"
+                              inputMode="decimal"
+                              value={item.unitCents / 100}
                               onChange={(event) =>
                                 updateDraftItem(item.id, "unitCents", toCents(Number(event.target.value)))
                               }
@@ -1479,10 +1692,10 @@ export default function BillsPage() {
                 <button
                   type="button"
                   onClick={confirmDraft}
-                  disabled={creating}
+                  disabled={creating || draftRefreshing}
                   className="inline-flex items-center gap-2 rounded-full bg-accent px-5 py-2 text-xs font-semibold text-slate-900 shadow-[0_10px_20px_rgba(56,189,248,0.25)] hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {creating ? "Creating..." : "Confirm & Create Invoice"}
+                  {creating ? "Creating..." : draftRefreshing ? "Refreshing..." : "Confirm & Create Invoice"}
                 </button>
               </div>
             </div>
@@ -1500,7 +1713,7 @@ export default function BillsPage() {
                 <div>
                   <h2 className="text-sm font-semibold text-slate-100">Edit Invoice</h2>
                   <p className="text-xs text-slate-400">
-                    {editingInvoice.unitLabel} • {editingInvoice.tenantName} • {getInvoicePeriodLabel(editingInvoice)}
+                    {editingInvoice.unitLabel} • {editingInvoice.tenantName} • {formatInvoicePeriod(firstDateOfPeriod(editingPeriod)) || getInvoicePeriodLabel(editingInvoice)}
                   </p>
                 </div>
               </div>
@@ -1520,6 +1733,45 @@ export default function BillsPage() {
               </div>
             ) : (
               <div className="mt-6 space-y-6">
+                <div className="rounded-xl border border-white/10 bg-panel/70 p-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-100">Billing Period</h3>
+                    <p className="text-xs text-slate-400">Change the billing month and due date for this invoice.</p>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-3">
+                    <label className="text-xs text-slate-400">
+                      Billing period
+                      <input
+                        type="month"
+                        value={editingPeriod}
+                        onChange={(event) => updateEditingPeriodValue(event.target.value)}
+                        className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-slate-100"
+                      />
+                    </label>
+
+                    <label className="text-xs text-slate-400">
+                      Invoice date
+                      <input
+                        type="date"
+                        value={editingInvoiceDate}
+                        readOnly
+                        className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-300"
+                      />
+                    </label>
+
+                    <label className="text-xs text-slate-400">
+                      Due date
+                      <input
+                        type="date"
+                        value={editingDueDate}
+                        onChange={(event) => setEditingDueDate(event.target.value)}
+                        className="mt-1 w-full rounded-lg border border-white/10 bg-transparent px-3 py-2 text-sm text-slate-100"
+                      />
+                    </label>
+                  </div>
+                </div>
+
                 <div className="rounded-xl border border-white/10 bg-panel/70 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>

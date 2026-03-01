@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
+import { displayPropertyLabel } from "@/lib/propertyLabel";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 
 export default function TenantPortalPage() {
@@ -34,6 +35,10 @@ export default function TenantPortalPage() {
     });
   }, [tenants, search]);
 
+  const selectedTenantPropertyLabel = selectedTenant
+    ? displayPropertyLabel(selectedTenant.building || selectedTenant.property_id)
+    : "—";
+
   return (
     <div className="space-y-8">
       <header className="space-y-1">
@@ -57,6 +62,7 @@ export default function TenantPortalPage() {
           <div className="mt-4 max-h-[70vh] space-y-2 overflow-y-auto pr-1">
             {filteredTenants.map((tenant) => {
               const active = tenant.id === selectedTenant?.id;
+              const propertyLabel = displayPropertyLabel(tenant.building || tenant.property_id, "");
               return (
                 <button
                   key={tenant.id}
@@ -67,7 +73,7 @@ export default function TenantPortalPage() {
                 >
                   <p className="font-semibold text-slate-900">{tenant.name}</p>
                   <p className="text-xs text-slate-500">
-                    {(tenant.building || tenant.property_id || "").toUpperCase()} · Unit {tenant.unit || "—"}
+                    {propertyLabel ? `${propertyLabel.toUpperCase()} · ` : ""}Unit {tenant.unit || "—"}
                   </p>
                   <p className="mt-1 text-sm font-semibold text-slate-900">
                     {formatCurrency(Number(tenant.monthly_rent || 0))} / mo
@@ -92,7 +98,8 @@ export default function TenantPortalPage() {
                     <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Selected tenant</p>
                     <h2 className="text-2xl font-semibold text-slate-900">{selectedTenant.name}</h2>
                     <p className="text-sm text-slate-500">
-                      {selectedTenant.building || selectedTenant.property_id} · Unit {selectedTenant.unit || "—"}
+                      {selectedTenantPropertyLabel}
+                      {selectedTenant.unit ? ` · Unit ${selectedTenant.unit}` : ""}
                     </p>
                   </div>
                   <div className="text-right">
@@ -112,7 +119,7 @@ export default function TenantPortalPage() {
                   <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Property</p>
                     <p className="mt-2 text-sm text-slate-900">
-                      {selectedTenant.building || selectedTenant.property_id || "—"}
+                      {selectedTenantPropertyLabel}
                     </p>
                   </div>
                 </div>
