@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
+import { useTranslations } from "@/components/LanguageProvider";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import type { PropertySummary } from "@/lib/repos/propertiesRepo";
@@ -12,14 +13,9 @@ type Props = {
   summaries: PropertySummary[];
 };
 
-const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-
-function formatMoney(value: number) {
-  return currency.format(value || 0);
-}
-
 export default function PropertiesClient({ summaries }: Props) {
   const router = useRouter();
+  const { t, language } = useTranslations();
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<PropertySummary[]>(summaries);
   const [showModal, setShowModal] = useState(false);
@@ -28,6 +24,10 @@ export default function PropertiesClient({ summaries }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [isDeleting, startDelete] = useTransition();
+  const currency = useMemo(
+    () => new Intl.NumberFormat(language === "so" ? "so-SO" : "en-US", { style: "currency", currency: "USD" }),
+    [language],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -51,7 +51,7 @@ export default function PropertiesClient({ summaries }: Props) {
     setNotice(null);
     const name = form.name.trim();
     if (!name) {
-      setError("Name is required.");
+      setError(t("properties.nameRequired"));
       return;
     }
     const code = form.code.trim() || generateCode(name);
@@ -82,16 +82,16 @@ export default function PropertiesClient({ summaries }: Props) {
       ]);
       setForm({ name: "", code: "" });
       setShowModal(false);
-      setNotice("Property created.");
+      setNotice(t("properties.created"));
     } catch (err: any) {
-      setError(err?.message || "Failed to create property.");
+      setError(err?.message || t("properties.createFailed"));
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async (summary: PropertySummary) => {
-    const message = `Delete ${summary.name}? This will remove all units and related leases/payments.`;
+    const message = t("properties.deleteConfirm", { name: summary.name });
     if (!confirm(message)) return;
     setError(null);
     setNotice(null);
@@ -102,13 +102,13 @@ export default function PropertiesClient({ summaries }: Props) {
         });
         const payload = await res.json().catch(() => null);
         if (!res.ok || payload?.ok === false) {
-          throw new Error(payload?.error || "Failed to delete property.");
+          throw new Error(payload?.error || t("properties.deleteFailed"));
         }
         setItems((prev) => prev.filter((item) => item.id !== summary.id));
-        setNotice("Property deleted.");
+        setNotice(t("properties.deleted"));
         router.refresh();
       } catch (err: any) {
-        setError(err?.message || "Failed to delete property.");
+        setError(err?.message || t("properties.deleteFailed"));
       }
     });
   };
@@ -116,15 +116,15 @@ export default function PropertiesClient({ summaries }: Props) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Properties"
-        subtitle="Overview, units, and tenants per building."
+        title={t("properties.title")}
+        subtitle={t("properties.description")}
         actions={
           <button
             type="button"
             onClick={() => setShowModal(true)}
             className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900"
           >
-            Add Property
+            {t("properties.addProperty")}
           </button>
         }
       />
@@ -148,11 +148,11 @@ export default function PropertiesClient({ summaries }: Props) {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search building, unit, or tenant"
+              placeholder={t("properties.searchPlaceholder")}
               className="w-full bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-500"
             />
           </div>
-          <p className="text-xs text-slate-400">{items.length} properties loaded</p>
+          <p className="text-xs text-slate-400">{t("properties.propertiesLoaded", { count: items.length })}</p>
         </div>
       </SectionCard>
 
@@ -163,7 +163,11 @@ export default function PropertiesClient({ summaries }: Props) {
               <div>
                 <h2 className="text-lg font-semibold text-slate-100">{summary.name}</h2>
                 <p className="text-xs text-slate-400">
-                  {summary.totalUnits} units • {summary.occupiedUnits} occupied • {summary.vacantUnits} vacant
+                  {t("properties.headerLine", {
+                    total: summary.totalUnits,
+                    occupied: summary.occupiedUnits,
+                    vacant: summary.vacantUnits,
+                  })}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -171,46 +175,46 @@ export default function PropertiesClient({ summaries }: Props) {
                   href={`/properties/${summary.id}`}
                   className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-white/20"
                 >
-                  Overview
+                  {t("properties.tabs.overview")}
                 </Link>
                 <Link
                   href={`/units?propertyId=${encodeURIComponent(summary.id)}`}
                   className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-white/20"
                 >
-                  Units
+                  {t("properties.tabs.units")}
                 </Link>
                 <Link
                   href={`/tenants?propertyId=${encodeURIComponent(summary.id)}`}
                   className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-white/20"
                 >
-                  Tenants
+                  {t("properties.tabs.tenants")}
                 </Link>
                 <button
                   type="button"
                   onClick={() => handleDelete(summary)}
                   className="rounded-full border border-rose-400/40 px-3 py-1 text-xs font-semibold text-rose-200 hover:border-rose-400/70"
                 >
-                  Delete
+                  {t("common.delete")}
                 </button>
               </div>
             </div>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-xl border border-white/10 bg-panel/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-slate-400">Total Units</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400">{t("properties.summary.totalUnits")}</p>
                 <p className="mt-1 text-lg font-semibold text-slate-100">{summary.totalUnits}</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-panel/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-slate-400">Occupied</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400">{t("properties.summary.occupied")}</p>
                 <p className="mt-1 text-lg font-semibold text-slate-100">{summary.occupiedUnits}</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-panel/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-slate-400">Vacant</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400">{t("properties.summary.vacant")}</p>
                 <p className="mt-1 text-lg font-semibold text-slate-100">{summary.vacantUnits}</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-panel/60 p-3">
-                <p className="text-xs uppercase tracking-wide text-slate-400">Monthly Rent</p>
-                <p className="mt-1 text-lg font-semibold text-slate-100">{formatMoney(summary.monthlyRent)}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400">{t("properties.summary.monthlyRent")}</p>
+                <p className="mt-1 text-lg font-semibold text-slate-100">{currency.format(summary.monthlyRent || 0)}</p>
               </div>
             </div>
           </SectionCard>
@@ -218,7 +222,7 @@ export default function PropertiesClient({ summaries }: Props) {
 
         {!filtered.length && (
           <SectionCard className="p-6 text-center text-sm text-slate-400">
-            No properties match your search.
+            {t("properties.empty")}
           </SectionCard>
         )}
       </div>
@@ -227,7 +231,7 @@ export default function PropertiesClient({ summaries }: Props) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-8 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-panel/95 p-6 shadow-2xl">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-slate-100">Add Property</h2>
+              <h2 className="text-lg font-semibold text-slate-100">{t("properties.addProperty")}</h2>
               <button
                 type="button"
                 onClick={() => setShowModal(false)}
@@ -241,7 +245,7 @@ export default function PropertiesClient({ summaries }: Props) {
               <input
                 value={form.name}
                 onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-                placeholder="Name (required)"
+                placeholder={t("properties.nameRequired")}
                 className="w-full rounded-xl border border-white/10 bg-panel/80 px-4 py-2 text-sm text-slate-100"
               />
               <input

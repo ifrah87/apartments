@@ -21,6 +21,14 @@ function fromCents(value: number | null | undefined) {
   return Number(((value ?? 0) / 100).toFixed(2));
 }
 
+function normalizeSnapshotDate(value: unknown) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (raw === "Initial") return "Initial";
+  return raw.length >= 10 ? raw.slice(0, 10) : raw;
+}
+
 type InvoiceLineRow = {
   id: string;
   invoice_id: string;
@@ -64,9 +72,9 @@ function normalizeMeterSnapshot(input: unknown): MeterSnapshot | null {
   const rate = toNumber(snap.rate ?? snap.unit_rate, 0.41);
   const amount = Number((usage * rate).toFixed(2));
   return {
-    prevDate: String(snap.prevDate ?? ""),
+    prevDate: normalizeSnapshotDate(snap.prevDate),
     prevReading,
-    currDate: String(snap.currDate ?? ""),
+    currDate: normalizeSnapshotDate(snap.currDate),
     currReading,
     usage,
     rate,
@@ -163,6 +171,18 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
     }));
     const totalCents = lineRows.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
     const totalAmount = fromCents(totalCents);
+    const invoiceMetaJson = meterSnapshot ? JSON.stringify({ meter_snapshot: meterSnapshot }) : null;
+    const lineItemsJson = JSON.stringify(
+      lineItems.map((item, index) => ({
+        id: item.id || `line-${index + 1}`,
+        description: item.description,
+        qty: Number(item.qty || 0),
+        rate: Number(item.rate || 0),
+        amount: Number(item.amount || 0),
+        meta: item.meta ?? undefined,
+      })),
+    );
+    const meterSnapshotJson = meterSnapshot ? JSON.stringify(meterSnapshot) : null;
 
     await query("BEGIN");
     await query(`DELETE FROM public.invoice_lines WHERE invoice_id = $1`, [id]);
@@ -171,8 +191,16 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
       const placeholders = lineRows
         .map((row, idx) => {
           const offset = idx * 7;
-          values.push(id, row.line_index, row.description, row.quantity, row.unit_price_cents, row.total_cents, row.meta);
-          return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7})`;
+          values.push(
+            id,
+            row.line_index,
+            row.description,
+            row.quantity,
+            row.unit_price_cents,
+            row.total_cents,
+            row.meta ? JSON.stringify(row.meta) : null,
+          );
+          return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}::jsonb)`;
         })
         .join(",");
       await query(
@@ -186,9 +214,9 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
        SET subtotal_cents = $1,
            tax_cents = $2,
            total_cents = $3,
-           meta = $4,
-           line_items = $5,
-           meter_snapshot = $6,
+           meta = $4::jsonb,
+           line_items = $5::jsonb,
+           meter_snapshot = $6::jsonb,
            total_amount = $7,
            status = 'draft'
        WHERE id = $8`,
@@ -196,16 +224,9 @@ export async function PATCH(req: NextRequest, context: { params: ParamsMaybeProm
         totalCents,
         0,
         totalCents,
-        meterSnapshot ? { meter_snapshot: meterSnapshot } : null,
-        lineItems.map((item, index) => ({
-          id: item.id || `line-${index + 1}`,
-          description: item.description,
-          qty: Number(item.qty || 0),
-          rate: Number(item.rate || 0),
-          amount: Number(item.amount || 0),
-          meta: item.meta ?? undefined,
-        })),
-        meterSnapshot ?? null,
+        invoiceMetaJson,
+        lineItemsJson,
+        meterSnapshotJson,
         totalAmount,
         id,
       ],

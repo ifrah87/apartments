@@ -31,6 +31,7 @@ export function LanguageProvider({
 
   useEffect(() => {
     window.localStorage.setItem("language", language);
+    document.documentElement.lang = language;
   }, [language]);
 
   const value = { language, t: translator, setLanguage };

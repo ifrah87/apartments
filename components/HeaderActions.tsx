@@ -106,7 +106,7 @@ export default function HeaderActions() {
     <div className="flex flex-1 items-center justify-end gap-4">
       {!hidePropertySelector && activeProperties.length ? (
         <label className="flex items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm text-slate-200">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Property</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("header.property")}</span>
           <select
             value={currentProperty || ""}
             onChange={(event) => handlePropertyChange(event.target.value)}
@@ -124,7 +124,7 @@ export default function HeaderActions() {
         type="button"
         onClick={toggleTheme}
         className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-surface/70 text-slate-200 transition hover:border-white/20 hover:text-white"
-        aria-label="Toggle theme"
+        aria-label={t("header.toggleTheme")}
       >
         {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </button>
@@ -151,7 +151,7 @@ export default function HeaderActions() {
             aria-haspopup="menu"
             aria-expanded={menuOpen}
           >
-            Log in
+            {t("header.login")}
             <span className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-surface/80 text-slate-200">
               <LogOut className="h-4 w-4" />
             </span>
@@ -166,7 +166,7 @@ export default function HeaderActions() {
                 className="flex items-center justify-between gap-2 px-3 py-2 text-left text-slate-100 hover:bg-white/5"
                 role="menuitem"
               >
-                Log in
+                {t("header.login")}
                 <LogOut className="h-4 w-4 text-slate-400" />
               </Link>
             </div>
@@ -200,7 +200,7 @@ export default function HeaderActions() {
                 className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-slate-100 hover:bg-white/5"
                 role="menuitem"
               >
-                Log out
+                {t("header.logout")}
                 <LogOut className="h-4 w-4 text-slate-400" />
               </button>
             </div>
