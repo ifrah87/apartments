@@ -122,7 +122,7 @@ function monthStartExclusiveRange(reference: Date) {
 }
 
 function monthLabel(reference: Date) {
-  return reference.toLocaleString("en-US", { month: "long", year: "numeric" });
+  return reference.toLocaleString("en-GB", { month: "long", year: "numeric" });
 }
 
 function formatQuantity(value: number) {
@@ -218,6 +218,11 @@ type InvoiceLineDisplay = {
   subtitle: string;
 };
 
+type InvoiceSummaryRow = {
+  label: string;
+  amount: number;
+};
+
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -268,6 +273,14 @@ function describeLineItem(item: InvoiceLineItem): InvoiceLineDisplay {
     };
   }
 
+  const genericPeriodMatch = description.match(/^(.+?) \(([^)]+)\)$/);
+  if (genericPeriodMatch) {
+    return {
+      title: genericPeriodMatch[1].trim(),
+      subtitle: genericPeriodMatch[2].trim(),
+    };
+  }
+
   const parts = description.split("|").map((part) => part.trim()).filter(Boolean);
   if (!parts.length) {
     return { title: description, subtitle: "" };
@@ -282,20 +295,18 @@ function extractBillingPeriodSubtitle(issueDate: Date) {
   return monthLabel(issueDate);
 }
 
-function summarizeLineItems(lineItems: InvoiceLineItem[]) {
-  let rent = 0;
-  let electricity = 0;
+function summarizeLineItems(lineItems: InvoiceLineItem[]): InvoiceSummaryRow[] {
+  const totals = new Map<string, number>();
   lineItems.forEach((item) => {
-    const meta = item.meta && typeof item.meta === "object" ? item.meta : null;
-    if (meta?.kind === "RENT" || /^Monthly Rent/i.test(String(item.description || ""))) {
-      rent += Number(item.amount || 0);
-      return;
-    }
-    if (meta?.kind === "METER_ELECTRICITY" || /electric/i.test(String(item.description || ""))) {
-      electricity += Number(item.amount || 0);
-    }
+    const display = describeLineItem(item);
+    const label = display.title || String(item.description || "").trim() || "Other";
+    const amount = Number(item.amount || 0);
+    totals.set(label, Number(((totals.get(label) || 0) + amount).toFixed(2)));
   });
-  return { rent: Number(rent.toFixed(2)), electricity: Number(electricity.toFixed(2)) };
+  return Array.from(totals.entries()).map(([label, amount]) => ({
+    label,
+    amount: Number(amount.toFixed(2)),
+  }));
 }
 
 function deriveMeterSnapshotFromLineItems(lineItems: InvoiceLineItem[], existing: MeterSnapshot | null) {
@@ -623,7 +634,13 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     y = sectionY + 82;
     const totals = summarizeLineItems(payload.line_items || []);
 
-    if (payload.meter_snapshot) {
+    const shouldShowMeterBlock =
+      Boolean(payload.meter_snapshot) ||
+      (payload.line_items || []).some(
+        (item) => item.meta?.kind === "METER_ELECTRICITY" || item.description.toLowerCase().includes("electric"),
+      );
+
+    if (shouldShowMeterBlock) {
       const snap = payload.meter_snapshot;
       const meterHeight = 66;
       doc.roundedRect(left, y, contentWidth, meterHeight, 6).fillAndStroke("#faf9f7", "#d0ccc4");
@@ -633,11 +650,11 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
       const meterCols = 5;
       const meterCellWidth = (contentWidth - 32) / meterCols;
       const meterItems = [
-        { label: "Prev. Date", value: formatTemplateDate(snap.prevDate) || "Initial" },
-        { label: "Prev. Reading", value: `${formatQuantity(snap.prevReading)} ${snap.unitLabel || "kWh"}` },
-        { label: "Curr. Date", value: formatTemplateDate(snap.currDate) || "-" },
-        { label: "Curr. Reading", value: `${formatQuantity(snap.currReading)} ${snap.unitLabel || "kWh"}` },
-        { label: "Usage", value: `${formatQuantity(snap.usage)} ${snap.unitLabel || "kWh"}` },
+        { label: "Prev. Date", value: snap ? formatTemplateDate(snap.prevDate) || "Initial" : "Initial" },
+        { label: "Prev. Reading", value: snap ? `${formatQuantity(snap.prevReading)} ${snap.unitLabel || "kWh"}` : "-" },
+        { label: "Curr. Date", value: snap ? formatTemplateDate(snap.currDate) || "-" : "-" },
+        { label: "Curr. Reading", value: snap ? `${formatQuantity(snap.currReading)} ${snap.unitLabel || "kWh"}` : "-" },
+        { label: "Usage", value: snap ? `${formatQuantity(snap.usage)} ${snap.unitLabel || "kWh"}` : "-" },
       ];
       meterItems.forEach((item, meterIndex) => {
         const x = left + 16 + meterCellWidth * meterIndex;
@@ -699,18 +716,14 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
 
     y += 10;
     const totalsX = right - 220;
-    doc.fillColor("#6b6b6b").font("Inter").fontSize(10).text("Rent", totalsX, y, { width: 100 });
-    doc.fillColor("#1a1a1a").font("Inter").fontSize(10).text(toMoney(totals.rent), totalsX + 100, y, {
-      width: 120,
-      align: "right",
+    totals.forEach((row, idx) => {
+      doc.fillColor("#6b6b6b").font("Inter").fontSize(10).text(row.label, totalsX, y, { width: 100 });
+      doc.fillColor("#1a1a1a").font("Inter").fontSize(10).text(toMoney(row.amount), totalsX + 100, y, {
+        width: 120,
+        align: "right",
+      });
+      y += idx === totals.length - 1 ? 22 : 18;
     });
-    y += 18;
-    doc.fillColor("#6b6b6b").font("Inter").fontSize(10).text("Electricity", totalsX, y, { width: 100 });
-    doc.fillColor("#1a1a1a").font("Inter").fontSize(10).text(toMoney(totals.electricity), totalsX + 100, y, {
-      width: 120,
-      align: "right",
-    });
-    y += 22;
     doc.moveTo(totalsX, y - 6).lineTo(right, y - 6).strokeColor("#0e0e0e").lineWidth(1.2).stroke();
     doc.fillColor("#1a1a1a").font("Inter-Bold").fontSize(16).text("Total Due", totalsX, y, { width: 100 });
     doc.fillColor("#1a1a1a").font("Inter-Bold").fontSize(16).text(toMoney(payload.total_amount), totalsX + 100, y, {
@@ -787,6 +800,15 @@ function buildInvoiceSection(
   const unitLabel = tenant.unit ? `Unit ${tenant.unit}` : "Unit —";
   const fromLines = [company.address, company.phone].filter(Boolean);
   const totals = summarizeLineItems(lineItems);
+  const totalRows = totals
+    .map(
+      (row) => `
+          <tr>
+            <td>${escapeHtml(row.label)}</td>
+            <td>${toMoney(row.amount)}</td>
+          </tr>`,
+    )
+    .join("");
 
   const lines = lineItems
     .map(
@@ -808,30 +830,33 @@ function buildInvoiceSection(
 
   const logoPath = "/branding/Logo.png";
   const logo = `<img class="logo" src="${logoPath}" alt="${company.name} logo" />`;
-  const meterBlock = meterSnapshot
+  const shouldShowMeterBlock =
+    Boolean(meterSnapshot) ||
+    lineItems.some((item) => item.meta?.kind === "METER_ELECTRICITY" || item.description.toLowerCase().includes("electric"));
+  const meterBlock = shouldShowMeterBlock
     ? `
       <div class="meter-block">
         <div class="meter-block-title">Electricity Meter Snapshot</div>
         <div class="meter-row">
           <div class="meter-item">
             <div class="meter-item-label">Prev. Date</div>
-            <div class="meter-item-val">${escapeHtml(formatTemplateDate(meterSnapshot.prevDate) || "Initial")}</div>
+            <div class="meter-item-val">${escapeHtml(meterSnapshot ? formatTemplateDate(meterSnapshot.prevDate) || "Initial" : "Initial")}</div>
           </div>
           <div class="meter-item">
             <div class="meter-item-label">Prev. Reading</div>
-            <div class="meter-item-val">${formatQuantity(meterSnapshot.prevReading)} ${escapeHtml(meterSnapshot.unitLabel || "kWh")}</div>
+            <div class="meter-item-val">${meterSnapshot ? `${formatQuantity(meterSnapshot.prevReading)} ${escapeHtml(meterSnapshot.unitLabel || "kWh")}` : "-"}</div>
           </div>
           <div class="meter-item">
             <div class="meter-item-label">Curr. Date</div>
-            <div class="meter-item-val">${escapeHtml(formatTemplateDate(meterSnapshot.currDate) || "-")}</div>
+            <div class="meter-item-val">${escapeHtml(meterSnapshot ? formatTemplateDate(meterSnapshot.currDate) || "-" : "-")}</div>
           </div>
           <div class="meter-item">
             <div class="meter-item-label">Curr. Reading</div>
-            <div class="meter-item-val">${formatQuantity(meterSnapshot.currReading)} ${escapeHtml(meterSnapshot.unitLabel || "kWh")}</div>
+            <div class="meter-item-val">${meterSnapshot ? `${formatQuantity(meterSnapshot.currReading)} ${escapeHtml(meterSnapshot.unitLabel || "kWh")}` : "-"}</div>
           </div>
           <div class="meter-item">
             <div class="meter-item-label">Usage</div>
-            <div class="meter-item-val">${formatQuantity(meterSnapshot.usage)} ${escapeHtml(meterSnapshot.unitLabel || "kWh")}</div>
+            <div class="meter-item-val">${meterSnapshot ? `${formatQuantity(meterSnapshot.usage)} ${escapeHtml(meterSnapshot.unitLabel || "kWh")}` : "-"}</div>
           </div>
         </div>
       </div>
@@ -885,14 +910,7 @@ function buildInvoiceSection(
 
       <div class="totals-block">
         <table class="totals-table">
-          <tr>
-            <td>Rent</td>
-            <td>${toMoney(totals.rent)}</td>
-          </tr>
-          <tr>
-            <td>Electricity</td>
-            <td>${toMoney(totals.electricity)}</td>
-          </tr>
+          ${totalRows}
           <tr class="total-final">
             <td>Total Due</td>
             <td>${toMoney(totalAmount)}</td>
