@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import SectionCard from "@/components/ui/SectionCard";
@@ -21,6 +22,14 @@ function defaultMonth() {
 const CATEGORY_ORDER = ["Billing", "Utilities", "Banking", "Collections", "Reconciliation", "Admin"];
 
 export default function MonthEndPage() {
+  return (
+    <Suspense fallback={<div className="space-y-6 p-6 text-sm text-slate-400">Loading month-end close...</div>}>
+      <MonthEndPageContent />
+    </Suspense>
+  );
+}
+
+function MonthEndPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const month = searchParams.get("month") || defaultMonth();
