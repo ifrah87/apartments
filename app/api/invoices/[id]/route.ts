@@ -170,10 +170,36 @@ export async function GET(_req: NextRequest, context: { params: RouteParams }) {
   });
 }
 
+function normalizeInvoiceStatus(value: unknown): "draft" | "unpaid" | "paid" | "partially_paid" | null {
+  const raw = String(value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (raw === "paid") return "paid";
+  if (raw === "partially_paid" || raw === "partially paid") return "partially_paid";
+  if (raw === "unpaid") return "unpaid";
+  if (raw === "draft") return "draft";
+  return null;
+}
+
 export async function PATCH(req: NextRequest, context: { params: RouteParams }) {
   const { id } = await Promise.resolve(context.params);
   try {
     const body = await req.json();
+
+    // Fast path: status-only update (Mark Paid / Mark Unpaid)
+    if (body?.status !== undefined && Object.keys(body).length === 1) {
+      const nextStatus = normalizeInvoiceStatus(body.status);
+      if (!nextStatus) {
+        return NextResponse.json({ ok: false, error: "Invalid status value." }, { status: 400 });
+      }
+      const res = await query(
+        `UPDATE public.invoices SET status = $1, updated_at = now() WHERE id = $2 RETURNING id, status`,
+        [nextStatus, id],
+      );
+      if (!res.rowCount) {
+        return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true, data: { id, status: nextStatus } });
+    }
+
     const existingInvoiceRes = await query(
       `SELECT id, unit_id, invoice_date, due_date, period
        FROM public.invoices
@@ -186,6 +212,7 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
     const existingInvoice = existingInvoiceRes.rows[0] as Record<string, unknown>;
     const lineItems = normalizeLineItems(body?.lineItems);
     const meterSnapshot = normalizeMeterSnapshot(body?.meterSnapshot);
+    const requestedStatus = normalizeInvoiceStatus(body?.status);
     const requestedPeriod = normalizePeriodKey(body?.period);
     const requestedInvoiceDate = normalizeDateInput(body?.invoiceDate);
     const requestedDueDate = normalizeDateInput(body?.dueDate);
@@ -252,9 +279,10 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
            line_items = $7::jsonb,
            meter_snapshot = $8::jsonb,
            total_amount = $9,
-           status = 'draft',
-           period = $10
-       WHERE id = $11`,
+           status = COALESCE($10, 'draft'),
+           period = $11,
+           updated_at = now()
+       WHERE id = $12`,
       [
         totalCents,
         0,
@@ -265,6 +293,7 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
         lineItemsJsonb,
         meterSnapshotJson,
         totalAmount,
+        requestedStatus,
         nextPeriod,
         id,
       ],

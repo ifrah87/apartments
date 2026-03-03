@@ -1,72 +1,146 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
 import SectionCard from "@/components/ui/SectionCard";
-import { fetchMonthEndTasks } from "@/lib/reports/ownerReports";
 
-type SearchParams = {
-  month?: string;
+type Task = {
+  month: string;
+  task: string;
+  category: string;
+  order: number;
+  completed: boolean;
 };
-
-export const runtime = "nodejs";
 
 function defaultMonth() {
   const today = new Date();
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 }
 
-export default async function MonthEndPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
-  const sp = await searchParams;
-  const month = sp.month || defaultMonth();
-  const tasks = await fetchMonthEndTasks(month);
-  const completed = tasks.filter((task) => task.completed).length;
+const CATEGORY_ORDER = ["Billing", "Utilities", "Banking", "Collections", "Reconciliation", "Admin"];
+
+export default function MonthEndPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const month = searchParams.get("month") || defaultMonth();
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/month-end-tasks?month=${month}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((payload) => {
+        if (payload?.ok && Array.isArray(payload.data)) {
+          setTasks(payload.data.sort((a: Task, b: Task) => a.order - b.order));
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [month]);
+
+  const toggle = async (task: Task) => {
+    const next = !task.completed;
+    setTasks((prev) => prev.map((t) => t.task === task.task ? { ...t, completed: next } : t));
+    await fetch("/api/month-end-tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ month, task: task.task, completed: next }),
+    });
+  };
+
+  const completed = tasks.filter((t) => t.completed).length;
+  const categories = CATEGORY_ORDER.filter((cat) => tasks.some((t) => t.category === cat));
 
   return (
     <div className="space-y-6 p-6">
       <header className="space-y-1">
         <p className="text-sm text-slate-500">
-          <Link href="/reports" className="text-indigo-600 hover:underline">
-            Reports
-          </Link>{" "}
-          / Month-End Close
+          <Link href="/Reports" className="text-indigo-600 hover:underline">Reports</Link>{" "}/ Month-End Close
         </p>
-        <h1 className="text-3xl font-semibold text-slate-900">Month-End Close Summary</h1>
-        <p className="text-sm text-slate-500">Track close checklist items and outstanding tasks.</p>
+        <h1 className="text-3xl font-semibold text-slate-900">Month-End Close</h1>
+        <p className="text-sm text-slate-500">Work through this checklist every month. No shortcuts.</p>
       </header>
 
-      <SectionCard className="p-4">
-        <form className="flex flex-wrap gap-4">
-          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Month
-            <input type="month" name="month" defaultValue={month} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <button type="submit" className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">
-            Update
+      <div className="flex flex-wrap items-center gap-4">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const data = new FormData(e.currentTarget);
+            startTransition(() => router.push(`?month=${data.get("month")}`));
+          }}
+          className="flex items-center gap-3"
+        >
+          <input
+            type="month"
+            name="month"
+            defaultValue={month}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          />
+          <button
+            type="submit"
+            disabled={isPending}
+            className="rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
+          >
+            Go
           </button>
         </form>
-      </SectionCard>
-
-      <SectionCard className="p-4">
-        <p className="text-sm text-slate-500">Completed {completed} of {tasks.length} tasks</p>
-        <progress value={completed} max={tasks.length} className="mt-2 w-full" />
-      </SectionCard>
-
-      <SectionCard className="overflow-hidden">
-        <div className="border-b border-slate-100 px-4 py-3">
-          <h2 className="text-lg font-semibold text-slate-900">Checklist</h2>
+        <div className="flex items-center gap-3 text-sm">
+          <span className={`font-semibold ${completed === tasks.length && tasks.length > 0 ? "text-emerald-600" : "text-slate-700"}`}>
+            {completed} / {tasks.length} done
+          </span>
+          <div className="h-2 w-40 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className={`h-full rounded-full transition-all ${completed === tasks.length && tasks.length > 0 ? "bg-emerald-500" : "bg-indigo-500"}`}
+              style={{ width: tasks.length ? `${Math.round((completed / tasks.length) * 100)}%` : "0%" }}
+            />
+          </div>
         </div>
-        <ul className="divide-y divide-slate-100 text-sm">
-          {tasks.map((task) => (
-            <li key={task.task} className="flex items-center justify-between px-4 py-3">
-              <div>
-                <p className="font-semibold text-slate-900">{task.task}</p>
-              </div>
-              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${task.completed ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-                {task.completed ? "Completed" : "Pending"}
-              </span>
-            </li>
-          ))}
-          {!tasks.length && <li className="px-4 py-8 text-center text-slate-500">No tasks for this month.</li>}
-        </ul>
-      </SectionCard>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-slate-400">Loading...</p>
+      ) : (
+        <div className="space-y-4">
+          {categories.map((category) => {
+            const catTasks = tasks.filter((t) => t.category === category);
+            const catDone = catTasks.filter((t) => t.completed).length;
+            return (
+              <SectionCard key={category} className="overflow-hidden">
+                <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                  <h2 className="text-sm font-semibold text-slate-700">{category}</h2>
+                  <span className="text-xs text-slate-400">{catDone}/{catTasks.length}</span>
+                </div>
+                <ul className="divide-y divide-slate-100 text-sm">
+                  {catTasks.map((task) => (
+                    <li key={task.task} className="flex items-center gap-3 px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => toggle(task)}
+                        className={`h-5 w-5 flex-shrink-0 rounded border-2 transition-colors ${
+                          task.completed
+                            ? "border-emerald-500 bg-emerald-500"
+                            : "border-slate-300 bg-white hover:border-indigo-400"
+                        }`}
+                      >
+                        {task.completed && (
+                          <svg viewBox="0 0 12 12" fill="none" className="h-full w-full p-0.5">
+                            <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </button>
+                      <span className={task.completed ? "text-slate-400 line-through" : "text-slate-800"}>
+                        {task.task}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </SectionCard>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

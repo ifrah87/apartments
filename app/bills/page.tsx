@@ -46,6 +46,8 @@ type InvoiceRow = {
   dueDate?: string;
   total: number;
   rentAmount: number;
+  cleaningAmount: number;
+  electricityAmount: number;
   outstanding: number;
   status: "Unpaid" | "Partially Paid" | "Paid";
 };
@@ -314,6 +316,8 @@ function normalizeInvoice(row: any): InvoiceRow {
     dueDate: dueDate ? String(dueDate) : undefined,
     total: Number(row?.total ?? 0),
     rentAmount: Number(row?.rentAmount ?? 0),
+    cleaningAmount: Number(row?.cleaningAmount ?? 0),
+    electricityAmount: Number(row?.electricityAmount ?? 0),
     outstanding: Number(row?.outstanding ?? row?.total ?? 0),
     status: normalizedStatus,
   };
@@ -349,6 +353,8 @@ export default function BillsPage() {
   const [editingSaving, setEditingSaving] = useState(false);
   const draftInitRef = useRef<string | null>(null);
   const [rentTarget, setRentTarget] = useState<number>(37350);
+  const [activeLeaseRent, setActiveLeaseRent] = useState<number>(0);
+  const [activeLeaseCount, setActiveLeaseCount] = useState<number>(0);
 
   useEffect(() => {
     const loadData = async () => {
@@ -372,17 +378,25 @@ export default function BillsPage() {
           fetch("/api/building-services", { cache: "no-store" }),
           fetch("/api/meter-readings?meterType=electricity", { cache: "no-store" }),
         ]);
-        const leasesRes = await fetch("/api/lease-agreements", { cache: "no-store" });
+        const [leasesRes, leaseSummaryRes] = await Promise.all([
+          fetch("/api/lease-agreements", { cache: "no-store" }),
+          fetch("/api/leases/summary", { cache: "no-store" }),
+        ]);
         const unitsPayload = await unitsRes.json().catch(() => null);
         const tenantsPayload = await tenantsRes.json().catch(() => null);
         const invoicesPayload = await invoicesRes.json().catch(() => null);
         const leasesPayload = await leasesRes.json().catch(() => null);
+        const leaseSummaryPayload = await leaseSummaryRes.json().catch(() => null);
         const rentTargetPayload = await rentTargetRes.json().catch(() => null);
         const servicesPayload = await servicesRes.json().catch(() => null);
         const unitServicesPayload = await unitServicesRes.json().catch(() => null);
         const buildingServicesPayload = await buildingServicesRes.json().catch(() => null);
         const meterReadingsPayload = await meterReadingsRes.json().catch(() => null);
         if (typeof rentTargetPayload?.target === "number") setRentTarget(rentTargetPayload.target);
+        if (leaseSummaryPayload?.ok && leaseSummaryPayload.data) {
+          setActiveLeaseRent(Number(leaseSummaryPayload.data.totalRent ?? 0));
+          setActiveLeaseCount(Number(leaseSummaryPayload.data.activeCount ?? 0));
+        }
         const unitsData = unitsPayload?.ok ? unitsPayload.data : unitsPayload;
         const tenantsData = tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload;
         const invoicesData = invoicesPayload?.ok ? invoicesPayload.data : invoicesPayload;
@@ -852,6 +866,28 @@ export default function BillsPage() {
     [invoices, billingPeriod],
   );
 
+  const cleaningBilled = useMemo(
+    () =>
+      Number(
+        invoices
+          .filter((inv) => getInvoicePeriodLabel(inv) === billingPeriod)
+          .reduce((sum, inv) => sum + (inv.cleaningAmount ?? 0), 0)
+          .toFixed(2),
+      ),
+    [invoices, billingPeriod],
+  );
+
+  const electricityBilled = useMemo(
+    () =>
+      Number(
+        invoices
+          .filter((inv) => getInvoicePeriodLabel(inv) === billingPeriod)
+          .reduce((sum, inv) => sum + (inv.electricityAmount ?? 0), 0)
+          .toFixed(2),
+      ),
+    [invoices, billingPeriod],
+  );
+
   const visibleInvoices = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return invoices;
@@ -1138,6 +1174,40 @@ export default function BillsPage() {
     window.open(href, "_blank", "noopener,noreferrer");
   };
 
+  const handleMarkPaid = async (invoice: InvoiceRow) => {
+    const nextStatus = invoice.status === "Paid" ? "unpaid" : "paid";
+    const label = nextStatus === "paid" ? "Mark as Paid" : "Mark as Unpaid";
+    const confirmed = await confirm({
+      title: label,
+      message: `Mark invoice for ${invoice.tenantName} (${getInvoicePeriodLabel(invoice)}) as ${nextStatus === "paid" ? "Paid" : "Unpaid"}?`,
+      confirmLabel: label,
+      tone: nextStatus === "paid" ? "default" : "danger",
+    });
+    if (!confirmed) return;
+    try {
+      const res = await fetch(`/api/invoices/${invoice.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || payload?.ok === false) {
+        setToast({ type: "error", message: payload?.error || "Failed to update status." });
+        return;
+      }
+      setInvoices((prev) =>
+        prev.map((inv) =>
+          inv.id === invoice.id
+            ? { ...inv, status: nextStatus === "paid" ? "Paid" : "Unpaid" }
+            : inv,
+        ),
+      );
+      setToast({ type: "success", message: `Invoice marked as ${nextStatus === "paid" ? "Paid" : "Unpaid"}.` });
+    } catch {
+      setToast({ type: "error", message: "Failed to update invoice status." });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -1187,22 +1257,37 @@ export default function BillsPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
-          <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">Monthly Rent Target</p>
-          <p className="text-xl font-semibold text-slate-100">{formatCurrency(rentTarget)}</p>
+      <SectionCard className="p-5">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+            <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Monthly Revenue</p>
+            <p className="text-xl font-semibold text-slate-100">{formatCurrency(activeLeaseRent)}</p>
+            <p className="mt-1 text-xs text-slate-500">{activeLeaseCount} active {activeLeaseCount === 1 ? "lease" : "leases"}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+            <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Full Occupancy Target</p>
+            <p className="text-xl font-semibold text-slate-400">{formatCurrency(rentTarget)}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+            <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Rent Billed</p>
+            <p className="text-xl font-semibold text-slate-100">{formatCurrency(rentBilled)}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+            <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Cleaning Billed</p>
+            <p className="text-xl font-semibold text-slate-100">{formatCurrency(cleaningBilled)}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+            <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Electricity Billed</p>
+            <p className="text-xl font-semibold text-slate-100">{formatCurrency(electricityBilled)}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+            <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Difference</p>
+            <p className={`text-xl font-semibold ${rentBilled >= rentTarget ? "text-emerald-400" : "text-rose-400"}`}>
+              {rentBilled >= rentTarget ? "+" : ""}{formatCurrency(rentBilled - rentTarget)}
+            </p>
+          </div>
         </div>
-        <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
-          <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">Rent Billed</p>
-          <p className="text-xl font-semibold text-slate-100">{formatCurrency(rentBilled)}</p>
-        </div>
-        <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
-          <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">Difference</p>
-          <p className={`text-xl font-semibold ${rentBilled >= rentTarget ? "text-emerald-400" : "text-rose-400"}`}>
-            {rentBilled >= rentTarget ? "+" : ""}{formatCurrency(rentBilled - rentTarget)}
-          </p>
-        </div>
-      </div>
+      </SectionCard>
 
       <SectionCard className="p-0 overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 px-5 py-4">
@@ -1286,6 +1371,17 @@ export default function BillsPage() {
                         className="rounded-lg border border-white/10 p-2 text-slate-200 hover:border-white/20"
                       >
                         <FileDown className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleMarkPaid(invoice)}
+                        title={invoice.status === "Paid" ? "Mark as Unpaid" : "Mark as Paid"}
+                        className={`rounded-lg border p-2 ${
+                          invoice.status === "Paid"
+                            ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400/60"
+                            : "border-white/10 text-slate-400 hover:border-emerald-400/40 hover:text-emerald-300"
+                        }`}
+                      >
+                        <CheckSquare2 className="h-4 w-4" />
                       </button>
                       <button
                         onClick={() => handleWhatsAppInvoice(invoice)}

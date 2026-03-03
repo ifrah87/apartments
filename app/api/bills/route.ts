@@ -404,14 +404,12 @@ async function buildElectricityLineItem(
   }
 
   if (!readings.cur) {
-    console.warn("⚠️ missing current electricity reading within billing window", { unitNumber, periodStart, periodEnd });
     return { lineItem: null, debug, snapshot: null };
   }
 
   const rateCents = Math.round(rate * 100);
 
   if (!readings.prev) {
-    console.warn("⚠️ missing previous electricity reading", { unitNumber, periodStart });
     const curValue = readings.cur.value;
     const total = 0;
     return {
@@ -621,6 +619,8 @@ type StoredInvoice = {
   invoiceDate: string;
   total: number;
   rentAmount: number;
+  cleaningAmount: number;
+  electricityAmount: number;
   outstanding: number;
   status: "Unpaid" | "Partially Paid" | "Paid";
   createdAt: string;
@@ -674,26 +674,61 @@ function normalizeStoredInvoiceStatus(value: unknown): StoredInvoice["status"] {
   return "Unpaid";
 }
 
-function deriveStoredInvoiceRentAmount(lineItems: unknown) {
-  if (!Array.isArray(lineItems)) return 0;
-  return Number(
-    lineItems
-      .reduce((sum, item) => {
-        if (!item || typeof item !== "object" || Array.isArray(item)) return sum;
-        const meta =
-          "meta" in item && item.meta && typeof item.meta === "object" && !Array.isArray(item.meta) ? item.meta : null;
-        const description = "description" in item ? String(item.description || "").toLowerCase() : "";
-        const isRent = String(meta?.kind || "").trim().toUpperCase() === "RENT" || description.includes("rent");
-        if (!isRent) return sum;
-        const amount =
-          ("amount" in item ? toNumberOrNull(item.amount) : null) ??
-          ("total" in item ? toNumberOrNull(item.total) : null) ??
-          ("total_cents" in item ? (toNumberOrNull(item.total_cents) ?? 0) / 100 : null) ??
-          0;
-        return sum + amount;
-      }, 0)
-      .toFixed(2),
+function deriveLineItemAmount(item: Record<string, unknown>) {
+  return (
+    ("amount" in item ? toNumberOrNull(item.amount) : null) ??
+    ("total" in item ? toNumberOrNull(item.total) : null) ??
+    ("total_cents" in item ? (toNumberOrNull(item.total_cents) ?? 0) / 100 : null) ??
+    0
   );
+}
+
+function deriveStoredInvoiceAmounts(lineItems: unknown) {
+  const totals = { rentAmount: 0, cleaningAmount: 0, electricityAmount: 0 };
+  if (!Array.isArray(lineItems)) return totals;
+
+  lineItems.forEach((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
+    const record = item as Record<string, unknown>;
+    const meta =
+      record.meta && typeof record.meta === "object" && !Array.isArray(record.meta)
+        ? (record.meta as Record<string, unknown>)
+        : null;
+    const kind = String(meta?.kind || "").trim().toUpperCase();
+    const description = String(record.description || "").toLowerCase();
+    const serviceCode = String(meta?.service_code || "").trim().toUpperCase();
+    const serviceName = String(meta?.service_name || "").trim().toLowerCase();
+    const amount = deriveLineItemAmount(record);
+
+    if (kind === "RENT" || description.includes("rent")) {
+      totals.rentAmount += amount;
+      return;
+    }
+
+    if (
+      kind === "METER_ELECTRICITY" ||
+      serviceCode === "ELECTRICITY" ||
+      serviceName.includes("electric") ||
+      description.includes("electric")
+    ) {
+      totals.electricityAmount += amount;
+      return;
+    }
+
+    if (
+      serviceCode.includes("CLEAN") ||
+      serviceName.includes("clean") ||
+      description.includes("clean")
+    ) {
+      totals.cleaningAmount += amount;
+    }
+  });
+
+  return {
+    rentAmount: Number(totals.rentAmount.toFixed(2)),
+    cleaningAmount: Number(totals.cleaningAmount.toFixed(2)),
+    electricityAmount: Number(totals.electricityAmount.toFixed(2)),
+  };
 }
 
 async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
@@ -709,9 +744,9 @@ async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
   );
 
   return rows.map((row) => {
+    const amounts = deriveStoredInvoiceAmounts(row.line_items);
     const total = toNumberOrNull(row.total_amount) ?? (toNumberOrNull(row.total_cents) ?? 0) / 100;
     const invoiceDate = toDateOnlyString(row.invoice_date || "") || "";
-    const dueDate = toDateOnlyString(row.due_date || "") || "";
     const updatedAt = toDateOnlyString(row.updated_at || row.invoice_date || "") || invoiceDate;
     const createdAt = toDateOnlyString(row.created_at || row.invoice_date || "") || invoiceDate;
     const unitNumber = row.unit_number !== undefined && row.unit_number !== null ? String(row.unit_number).trim() : "";
@@ -725,7 +760,9 @@ async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
       unitLabel: unitNumber ? `Unit ${unitNumber}` : tenantUnit ? `Unit ${tenantUnit}` : "Unit",
       invoiceDate,
       total: Number(total.toFixed(2)),
-      rentAmount: deriveStoredInvoiceRentAmount(row.line_items),
+      rentAmount: amounts.rentAmount,
+      cleaningAmount: amounts.cleaningAmount,
+      electricityAmount: amounts.electricityAmount,
       outstanding: Number(total.toFixed(2)),
       status: normalizeStoredInvoiceStatus(row.status),
       createdAt,
@@ -935,20 +972,6 @@ export async function POST(req: NextRequest) {
     const monthValue = payload?.month || "";
     const monthIndex = parsedPeriod ? parsedPeriod.reference.getUTCMonth() : toMonthIndex(monthValue);
     const year = parsedPeriod ? parsedPeriod.reference.getUTCFullYear() : Number(payload?.year);
-    const periodPreview =
-      monthIndex !== null && Number.isFinite(year)
-        ? `${year}-${String(monthIndex + 1).padStart(2, "0")}`
-        : null;
-    const electricityPeriodPreview = parsedElectricityPeriod?.periodKey ?? periodPreview;
-    console.info("Bills generate request", {
-      tenant_id: payload?.tenant_id ?? payload?.tenantId ?? null,
-      unit_id: unitIds[0] ?? null,
-      period: periodPreview,
-      electricity_period: electricityPeriodPreview,
-      line_items: Array.isArray(payload?.lineItems) ? payload.lineItems.length : 0,
-      month: payload?.month ?? null,
-      year: payload?.year ?? null,
-    });
     if (!unitIds.length) {
       return NextResponse.json({ ok: false, error: "Select at least one unit." }, { status: 400 });
     }
@@ -968,9 +991,6 @@ export async function POST(req: NextRequest) {
       `${electricityReference.getUTCFullYear()}-${String(electricityReference.getUTCMonth() + 1).padStart(2, "0")}`;
     const { start, end } = monthRange(reference);
     const { start: electricityStart } = monthRange(electricityReference);
-    const monthStartKey = start.toISOString().slice(0, 10);
-    const monthEndExclusive = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() + 1, 1));
-    const monthEndKey = monthEndExclusive.toISOString().slice(0, 10);
     const electricityStartKey = electricityStart.toISOString().slice(0, 10);
     const electricityEndExclusive = new Date(Date.UTC(electricityReference.getUTCFullYear(), electricityReference.getUTCMonth() + 1, 1));
     const electricityEndKey = electricityEndExclusive.toISOString().slice(0, 10);
@@ -1172,15 +1192,6 @@ export async function POST(req: NextRequest) {
       cur: electricityResult.debug.cur,
       usage: electricityResult.debug.usage,
     };
-    if (!electricity) {
-      console.log("ELECTRICITY DEBUG", {
-        unitNumber: electricityResult.debug.unitNumber,
-        foundService: electricityResult.debug.foundElectricService,
-        rate: electricityResult.debug.rate,
-        prev: electricityResult.debug.prev,
-        cur: electricityResult.debug.cur,
-      });
-    }
     if (electricity) {
       lineItemsForInvoice.push(electricity);
     }
@@ -1369,15 +1380,7 @@ export async function POST(req: NextRequest) {
         ],
       );
       const invoiceId = String(invoiceRes.rows[0]?.id ?? id);
-      const invoiceNumber = invoiceRes.rows[0]?.invoice_number ?? null;
       savedInvoiceId = invoiceId;
-      console.info("Bills invoice upsert", {
-        invoice_id: invoiceId,
-        invoice_number: invoiceNumber,
-        unit_id: unit.id,
-        tenant_id: tenantId,
-        period: periodKey,
-      });
       await query(`DELETE FROM public.invoice_lines WHERE invoice_id = $1`, [invoiceId]);
       if (normalizedLineItems.length) {
         const values: any[] = [];
@@ -1422,6 +1425,30 @@ export async function POST(req: NextRequest) {
     const rentCentsTotal = normalizedLineItems
       .filter((item) => (item.meta as any)?.kind === "RENT")
       .reduce((sum, item) => sum + item.total_cents, 0);
+    const cleaningCentsTotal = normalizedLineItems
+      .filter((item) => {
+        const meta = item.meta as Record<string, unknown> | null | undefined;
+        const serviceCode = String(meta?.service_code || "").trim().toUpperCase();
+        const serviceName = String(meta?.service_name || "").trim().toLowerCase();
+        const description = String(item.description || "").toLowerCase();
+        return serviceCode.includes("CLEAN") || serviceName.includes("clean") || description.includes("clean");
+      })
+      .reduce((sum, item) => sum + item.total_cents, 0);
+    const electricityCentsTotal = normalizedLineItems
+      .filter((item) => {
+        const meta = item.meta as Record<string, unknown> | null | undefined;
+        const kind = String(meta?.kind || "").trim().toUpperCase();
+        const serviceCode = String(meta?.service_code || "").trim().toUpperCase();
+        const serviceName = String(meta?.service_name || "").trim().toLowerCase();
+        const description = String(item.description || "").toLowerCase();
+        return (
+          kind === "METER_ELECTRICITY" ||
+          serviceCode === "ELECTRICITY" ||
+          serviceName.includes("electric") ||
+          description.includes("electric")
+        );
+      })
+      .reduce((sum, item) => sum + item.total_cents, 0);
 
     const created: StoredInvoice = {
       id: savedInvoiceId,
@@ -1432,6 +1459,8 @@ export async function POST(req: NextRequest) {
       invoiceDate: invoiceDate.toISOString().slice(0, 10),
       total: Number((totalCents / 100).toFixed(2)),
       rentAmount: Number((rentCentsTotal / 100).toFixed(2)),
+      cleaningAmount: Number((cleaningCentsTotal / 100).toFixed(2)),
+      electricityAmount: Number((electricityCentsTotal / 100).toFixed(2)),
       outstanding: Number((totalCents / 100).toFixed(2)),
       status: "Unpaid",
       createdAt: now,

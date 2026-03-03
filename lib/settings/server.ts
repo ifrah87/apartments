@@ -257,17 +257,22 @@ function normalizeLeaseTemplate(input: unknown, strict: boolean): NormalizeResul
   const src = isRecord(input) ? input : {};
   const modeRaw = asString(src.mode, DEFAULT_LEASE_TEMPLATE.mode);
   const mode: LeaseTemplateSettings["mode"] =
-    modeRaw === "pdf" || modeRaw === "url" ? modeRaw : "html";
+    modeRaw === "docx" || modeRaw === "pdf" || modeRaw === "url" ? modeRaw : "html";
   const value: LeaseTemplateSettings = {
     mode,
     htmlTemplate: asString(src.htmlTemplate, DEFAULT_LEASE_TEMPLATE.htmlTemplate),
     pdfDataUrl: asOptionalString(src.pdfDataUrl),
     externalUrl: asOptionalString(src.externalUrl),
+    docxDataUrl: asOptionalString(src.docxDataUrl),
+    docxUrl: asString(src.docxUrl, DEFAULT_LEASE_TEMPLATE.docxUrl),
   };
 
   if (strict) {
     if (value.mode === "html" && !value.htmlTemplate.trim()) {
       errors.htmlTemplate = "HTML template is required.";
+    }
+    if (value.mode === "docx" && !value.docxDataUrl.trim() && !value.docxUrl.trim()) {
+      errors.docxUrl = "DOCX template is required.";
     }
     if (value.mode === "pdf" && !value.pdfDataUrl.trim()) {
       errors.pdfDataUrl = "PDF template is required.";

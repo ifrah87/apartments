@@ -64,7 +64,7 @@ const REPORT_GROUPS: { title: string; items: ReportTileItem[] }[] = [
       { name: "Vacancy & Occupancy", desc: "Track unit availability & days vacant.", href: "/reports/occupancy", Icon: Users2 },
       { name: "Lease Expiry", desc: "Leases expiring soon.", href: "/reports/lease-expiry", Icon: KeyRound },
       { name: "Lease Statements", desc: "Statements and exports for each lease.", href: "/reports/lease-statements", Icon: FileText },
-      { name: "Tenant Ledger", desc: "All tenant payments & notes.", href: "/reports/tenant-ledger", Icon: Users2 },
+      { name: "Tenant Statement", desc: "All tenant charges, invoices, and payments.", href: "/reports/tenant-ledger", Icon: Users2 },
       { name: "Unit Financials", desc: "Income vs expense per unit.", href: "/reports/unit-financials", Icon: CircleDollarSign },
       { name: "Maintenance", desc: "Tickets & resolution stats.", href: "/reports/maintenance", Icon: Wrench },
       { name: "Utility Charges", desc: "Water & electricity billing audit.", href: "/reports/utility-charges", Icon: Zap },

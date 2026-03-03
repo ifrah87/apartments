@@ -166,4 +166,6 @@ export const DEFAULT_LEASE_TEMPLATE: LeaseTemplateSettings = {
 </html>`,
   pdfDataUrl: "",
   externalUrl: "",
+  docxDataUrl: "",
+  docxUrl: "/templates/Heshiis Kiro Xafiis-2.docx",
 };

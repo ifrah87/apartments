@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Plus, Save, Shield, Trash2, UserRound, X } from "lucide-react";
+import { Clock3, Pencil, Plus, Save, Shield, Trash2, UserRound, X } from "lucide-react";
 import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
 
@@ -15,12 +15,37 @@ type UserRow = {
   updated_at: string;
 };
 
+type AttendanceRow = {
+  id: string;
+  userId: string;
+  name?: string | null;
+  phone?: string | null;
+  role?: "admin" | "reception" | null;
+  clockInAt: string;
+  clockOutAt?: string | null;
+  status: "signed_in" | "signed_out";
+};
+
+const dateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
+function formatAttendanceTime(value?: string | null) {
+  if (!value) return "Signed in";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return dateTimeFormatter.format(date);
+}
+
 export default function AdminSettingsPage() {
   const confirm = useConfirm();
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sessionRole, setSessionRole] = useState<"admin" | "reception" | null>(null);
+  const [sessionChecked, setSessionChecked] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<"add" | "edit">("add");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -69,24 +94,49 @@ export default function AdminSettingsPage() {
     setLoading(true);
     setError("");
     fetch("/api/admin/users", { cache: "no-store", credentials: "include" })
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to load users.");
-        return res.json();
+      .then(async (res) => {
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          if (res.status === 403) {
+            throw new Error("Log in as an admin to manage team members.");
+          }
+          throw new Error(data?.error || "Failed to load users.");
+        }
+        return data;
       })
-      .then((data) => setUsers(data.users || []))
+      .then((data) => {
+        setUsers(data.users || []);
+        setAttendance(data.attendance || []);
+      })
       .catch((err) => setError(err.message || "Failed to load users."))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    loadUsers();
-  }, []);
-
-  useEffect(() => {
     fetch("/api/auth/session", { cache: "no-store", credentials: "include" })
       .then((res) => res.json())
-      .then((data) => setSessionRole(data?.role ?? null))
-      .catch(() => setSessionRole(null));
+      .then((data) => {
+        const role = data?.role ?? null;
+        const authenticated = Boolean(data?.authenticated);
+        setSessionRole(role);
+        setSessionChecked(true);
+        if (role === "admin") {
+          loadUsers();
+          return;
+        }
+        setLoading(false);
+        setError(
+          authenticated
+            ? "Only admins can manage team members."
+            : "Log in as an admin to manage team members.",
+        );
+      })
+      .catch(() => {
+        setSessionRole(null);
+        setSessionChecked(true);
+        setLoading(false);
+        setError("Log in as an admin to manage team members.");
+      });
   }, []);
 
   const canEditSecurity = sessionRole === "admin";
@@ -239,10 +289,74 @@ export default function AdminSettingsPage() {
         </button>
       </header>
 
-      {!canEditSecurity ? (
+      {sessionChecked && !canEditSecurity ? (
         <p className="text-xs text-amber-600">Only admins can edit security levels.</p>
       ) : null}
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+      <SectionCard className="border border-slate-200 bg-white p-4">
+        <div className="flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-slate-900/5 text-slate-700">
+            <Clock3 className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">Attendance Log</h2>
+            <p className="text-sm text-slate-500">
+              Each team member signs in with their own login. Sign-in and sign-out times are recorded here.
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-500">
+                <th className="py-2 pr-4 font-medium">Member</th>
+                <th className="py-2 pr-4 font-medium">Role</th>
+                <th className="py-2 pr-4 font-medium">Sign In</th>
+                <th className="py-2 pr-4 font-medium">Sign Out</th>
+                <th className="py-2 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {attendance.length ? (
+                attendance.map((row) => {
+                  const role = row.role === "admin" ? "Admin" : "Reception";
+                  const displayName = (row.name || "").trim() || row.phone || "User";
+                  return (
+                    <tr key={row.id} className="border-b border-slate-100 last:border-b-0">
+                      <td className="py-3 pr-4 text-slate-900">
+                        <div className="font-medium">{displayName}</div>
+                        {row.phone ? <div className="text-xs text-slate-500">{row.phone}</div> : null}
+                      </td>
+                      <td className="py-3 pr-4 text-slate-600">{role}</td>
+                      <td className="py-3 pr-4 text-slate-600">{formatAttendanceTime(row.clockInAt)}</td>
+                      <td className="py-3 pr-4 text-slate-600">
+                        {row.clockOutAt ? formatAttendanceTime(row.clockOutAt) : "Still signed in"}
+                      </td>
+                      <td className="py-3">
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            row.status === "signed_in"
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {row.status === "signed_in" ? "Signed In" : "Signed Out"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={5} className="py-4 text-slate-500">
+                    No attendance records yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
       {loading ? (
         <p className="text-sm text-slate-500">Loading users…</p>
       ) : (

@@ -9,12 +9,68 @@ import { calculateRentSummary } from "@/lib/reports/rentReports";
 import { calculateOccupancySummary } from "@/lib/reports/occupancyReports";
 import { calculateBankSummary, fetchLedger, type Txn } from "@/lib/reports/ledger";
 import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
+import { query } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 type SearchParams = {
   propertyId?: string;
 };
+
+async function fetchLeaseSummary() {
+  try {
+    const { rows } = await query(`
+      SELECT
+        COUNT(*)                  AS active_count,
+        COALESCE(SUM(l.rent), 0) AS total_rent,
+        COALESCE(SUM(
+          CASE u.unit_type
+            WHEN '3bed'  THEN 750
+            WHEN '2bed'  THEN 650
+            ELSE 0
+          END
+        ), 0)                     AS full_occupancy_rent
+      FROM public.leases l
+      JOIN public.units u ON u.id = l.unit_id
+      WHERE l.status = 'active'
+    `);
+    const row = rows[0] ?? {};
+    return {
+      activeCount:       Number(row.active_count ?? 0),
+      totalRent:         Number(row.total_rent ?? 0),
+      fullOccupancyRent: Number(row.full_occupancy_rent ?? 0),
+    };
+  } catch {
+    return { activeCount: 0, totalRent: 0, fullOccupancyRent: 37350 };
+  }
+}
+
+async function fetchArrears() {
+  try {
+    const { rows } = await query(`
+      SELECT
+        COALESCE(SUM(CASE WHEN age_days <= 30  THEN total_amount ELSE 0 END), 0) AS current_30,
+        COALESCE(SUM(CASE WHEN age_days > 30 AND age_days <= 60 THEN total_amount ELSE 0 END), 0) AS days_30_60,
+        COALESCE(SUM(CASE WHEN age_days > 60  THEN total_amount ELSE 0 END), 0) AS days_60_plus
+      FROM (
+        SELECT
+          total_amount,
+          EXTRACT(EPOCH FROM (NOW() - COALESCE(due_date, invoice_date))) / 86400 AS age_days
+        FROM public.invoices
+        WHERE LOWER(status) NOT IN ('paid', 'partially_paid')
+          AND total_amount > 0
+      ) sub
+    `);
+    const row = rows[0] ?? {};
+    return {
+      current:    Number(Number(row.current_30   ?? 0).toFixed(2)),
+      days30to60: Number(Number(row.days_30_60   ?? 0).toFixed(2)),
+      days60plus: Number(Number(row.days_60_plus ?? 0).toFixed(2)),
+    };
+  } catch {
+    return { current: 0, days30to60: 0, days60plus: 0 };
+  }
+}
 
 async function fetchProperties() {
   const baseUrl = await getRequestBaseUrl();
@@ -36,11 +92,13 @@ export default async function DashboardPage({
   const selectedProperty = propertyId ? properties.find((p) => p.id === propertyId) : null;
   const propertyFilter = selectedProperty?.id || (propertyId || undefined);
 
-  const [rent, occupancy, bank, ledgerEntries] = await Promise.all([
+  const [rent, occupancy, bank, ledgerEntries, leaseSummary, arrears] = await Promise.all([
     calculateRentSummary(propertyFilter),
     calculateOccupancySummary(propertyFilter),
     calculateBankSummary({ propertyId: propertyFilter }),
     fetchLedger({ propertyId: propertyFilter }),
+    fetchLeaseSummary(),
+    fetchArrears(),
   ]);
 
   const cashflowSeries = buildMonthlyCashflow(ledgerEntries);
@@ -135,6 +193,18 @@ export default async function DashboardPage({
         ))}
       </div>
 
+      <RevenueTargetWidget
+        activeLeases={leaseSummary.activeCount}
+        actualRent={leaseSummary.totalRent}
+        targetRent={leaseSummary.fullOccupancyRent || 37350}
+      />
+
+      <ArrearsWidget
+        current={arrears.current}
+        days30to60={arrears.days30to60}
+        days60plus={arrears.days60plus}
+      />
+
       <CashflowWidget points={cashflowSeries} link="/reports/bank-summary" />
 
       <SectionCard className="p-0 overflow-hidden">
@@ -190,6 +260,109 @@ export default async function DashboardPage({
         </div>
       </SectionCard>
     </div>
+  );
+}
+
+function RevenueTargetWidget({
+  activeLeases,
+  actualRent,
+  targetRent,
+}: {
+  activeLeases: number;
+  actualRent: number;
+  targetRent: number;
+}) {
+  const pct = targetRent > 0 ? Math.min(100, Math.round((actualRent / targetRent) * 100)) : 0;
+  const gap = targetRent - actualRent;
+  const barColor = pct >= 95 ? "bg-emerald-400" : pct >= 70 ? "bg-yellow-400" : "bg-rose-400";
+
+  return (
+    <SectionCard className="p-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Monthly Revenue Target</p>
+          <p className="mt-1 text-sm text-slate-400">
+            {activeLeases} active {activeLeases === 1 ? "lease" : "leases"} · full occupancy target
+          </p>
+        </div>
+        <Link href="/bills" className="text-xs font-semibold text-accent hover:text-accent/80">
+          View bills
+        </Link>
+      </div>
+
+      <div className="mt-4 flex items-end justify-between gap-4">
+        <div>
+          <p className="text-xs text-slate-500">Actual (active leases)</p>
+          <p className="text-2xl font-semibold text-slate-100">{formatCurrency(actualRent)}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-slate-500">Target (100% occupancy)</p>
+          <p className="text-2xl font-semibold text-slate-400">{formatCurrency(targetRent)}</p>
+        </div>
+      </div>
+
+      <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/10">
+        <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
+      </div>
+
+      <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+        <span>{pct}% of target</span>
+        {gap > 0 ? (
+          <span className="text-rose-400">{formatCurrency(gap)} gap</span>
+        ) : (
+          <span className="text-emerald-400">Target met</span>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+function ArrearsWidget({
+  current,
+  days30to60,
+  days60plus,
+}: {
+  current: number;
+  days30to60: number;
+  days60plus: number;
+}) {
+  const total = current + days30to60 + days60plus;
+  return (
+    <SectionCard className="p-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Arrears Aging</p>
+          <p className="mt-1 text-sm text-slate-400">Outstanding unpaid invoices by age</p>
+        </div>
+        <Link href="/Reports/overdue-rent" className="text-xs font-semibold text-accent hover:text-accent/80">
+          Full report
+        </Link>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-4">
+        <div className="rounded-xl border border-white/10 bg-panel-2/60 px-4 py-3">
+          <p className="text-xs text-slate-500">0 – 30 days</p>
+          <p className="mt-1 text-lg font-semibold text-yellow-300">{formatCurrency(current)}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-panel-2/60 px-4 py-3">
+          <p className="text-xs text-slate-500">31 – 60 days</p>
+          <p className="mt-1 text-lg font-semibold text-orange-300">{formatCurrency(days30to60)}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-panel-2/60 px-4 py-3">
+          <p className="text-xs text-slate-500">60+ days</p>
+          <p className="mt-1 text-lg font-semibold text-rose-400">{formatCurrency(days60plus)}</p>
+        </div>
+      </div>
+
+      {total > 0 && (
+        <p className="mt-3 text-xs text-slate-500">
+          Total outstanding: <span className="font-semibold text-rose-300">{formatCurrency(total)}</span>
+        </p>
+      )}
+      {total === 0 && (
+        <p className="mt-3 text-xs text-emerald-400">No outstanding arrears.</p>
+      )}
+    </SectionCard>
   );
 }
 

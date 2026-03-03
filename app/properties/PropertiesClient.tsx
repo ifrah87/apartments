@@ -11,6 +11,7 @@ import type { PropertySummary } from "@/lib/repos/propertiesRepo";
 
 type Props = {
   summaries: PropertySummary[];
+  initialNotice?: string | null;
 };
 
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
@@ -19,7 +20,7 @@ function formatMoney(value: number) {
   return currency.format(value || 0);
 }
 
-export default function PropertiesClient({ summaries }: Props) {
+export default function PropertiesClient({ summaries, initialNotice = null }: Props) {
   const router = useRouter();
   const confirm = useConfirm();
   const [query, setQuery] = useState("");
@@ -27,7 +28,7 @@ export default function PropertiesClient({ summaries }: Props) {
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: "", code: "" });
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(initialNotice);
   const [saving, setSaving] = useState(false);
   const [isDeleting, startDelete] = useTransition();
 

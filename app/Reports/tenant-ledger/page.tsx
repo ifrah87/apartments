@@ -117,10 +117,10 @@ export default async function TenantLedgerPage({ searchParams }: { searchParams:
           <Link href="/reports" className="text-indigo-600 hover:underline">
             Reports
           </Link>{" "}
-          / Tenant Ledger
+          / Tenant Statement
         </p>
-        <h1 className="text-3xl font-semibold text-slate-900">Tenant Ledger</h1>
-        <p className="text-sm text-slate-500">Complete transaction history per tenant for reconciliation and audits.</p>
+        <h1 className="text-3xl font-semibold text-slate-900">Tenant Statement</h1>
+        <p className="text-sm text-slate-500">Complete tenant statement including all invoice charges and payments.</p>
       </header>
 
       <SectionCard className="p-4">

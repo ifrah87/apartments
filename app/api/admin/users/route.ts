@@ -3,6 +3,7 @@ import { query } from "@/lib/db";
 import { getAuthSecret, verifySession } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
 import { datasetsRepo } from "@/lib/repos";
+import { listStaffAttendance } from "@/lib/staffAttendance";
 
 export const runtime = "nodejs";
 
@@ -78,7 +79,11 @@ export async function GET(request: Request) {
         updated_at: string;
       }>("SELECT id, phone, role, created_at, updated_at FROM users ORDER BY created_at DESC");
 
-  const [permissionsMap, namesMap] = await Promise.all([getPermissionsMap(), getNamesMap()]);
+  const [permissionsMap, namesMap, attendance] = await Promise.all([
+    getPermissionsMap(),
+    getNamesMap(),
+    listStaffAttendance(100),
+  ]);
   const users = result.rows.map((row) => ({
     ...row,
     name:
@@ -88,7 +93,7 @@ export async function GET(request: Request) {
     permissions: permissionsMap[(row as { id: string }).id] || [],
   }));
 
-  return NextResponse.json({ users });
+  return NextResponse.json({ users, attendance });
 }
 
 export async function PATCH(request: Request) {

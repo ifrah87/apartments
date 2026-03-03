@@ -81,10 +81,12 @@ export type ExpenseCategoriesSettings = {
 };
 
 export type LeaseTemplateSettings = {
-  mode: "html" | "pdf" | "url";
+  mode: "docx" | "html" | "pdf" | "url";
   htmlTemplate: string;
   pdfDataUrl: string;
   externalUrl: string;
+  docxDataUrl: string;
+  docxUrl: string;
 };
 
 export type SettingsPayload =

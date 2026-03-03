@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ChargeEntry, PaymentEntry, StatementRow, createStatement, normalizeId } from "@/lib/reports/tenantStatement";
 import { listManualPayments } from "@/lib/reports/manualPayments";
 import { bankTransactionsRepo, tenantsRepo, RepoError } from "@/lib/repos";
+import { query } from "@/lib/db";
 
 function handleError(err: unknown) {
   const status = err instanceof RepoError ? err.status : 500;
@@ -21,6 +22,61 @@ function toISO(date: Date): string {
 
 function normalizeDay(date: Date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+type StoredInvoiceRow = {
+  id: string;
+  invoice_number: string | null;
+  invoice_date: string | Date | null;
+  line_items: unknown;
+};
+
+type StoredInvoiceLineItem = {
+  description?: string;
+  amount?: number | string | null;
+  meta?: Record<string, unknown> | null;
+};
+
+function normalizeInvoiceLineItems(value: unknown): StoredInvoiceLineItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as StoredInvoiceLineItem[];
+}
+
+async function loadInvoiceCharges(tenantId: string, start: Date, end: Date): Promise<ChargeEntry[]> {
+  const { rows } = await query<StoredInvoiceRow>(
+    `SELECT id, invoice_number, invoice_date, line_items
+     FROM public.invoices
+     WHERE tenant_id = $1
+       AND invoice_date >= $2
+       AND invoice_date <= $3
+     ORDER BY invoice_date ASC, created_at ASC, id ASC`,
+    [tenantId, toISO(start), toISO(end)],
+  );
+
+  return rows.flatMap((invoice) => {
+    const invoiceDate = parseDate(String(invoice.invoice_date || ""));
+    if (!invoiceDate) return [];
+    const normalizedDate = normalizeDay(invoiceDate);
+    if (normalizedDate < start || normalizedDate > end) return [];
+
+    const charges: ChargeEntry[] = [];
+    for (const item of normalizeInvoiceLineItems(invoice.line_items)) {
+      const amount = Number(item.amount || 0);
+      if (!Number.isFinite(amount) || amount === 0) continue;
+      charges.push({
+          date: toISO(normalizedDate),
+          amount,
+          description: item.description || "Invoice charge",
+          category: "invoice",
+          meta: {
+            invoice_id: invoice.id,
+            invoice_number: invoice.invoice_number,
+            ...(item.meta && typeof item.meta === "object" ? item.meta : {}),
+          },
+        });
+    }
+    return charges;
+  });
 }
 
 export async function GET(
@@ -108,7 +164,7 @@ export async function GET(
         return normalized >= start && normalized <= end;
       });
 
-    const additionalCharges: ChargeEntry[] = [];
+    const additionalCharges = await loadInvoiceCharges(tenant.id, start, end);
 
     const statementTenant = {
       id: tenant.id,
@@ -127,6 +183,7 @@ export async function GET(
       end,
       payments: [...payments, ...manualEntries],
       additionalCharges,
+      includeRentCharges: additionalCharges.length === 0,
     });
 
     const payload = {
