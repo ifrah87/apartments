@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
-import { ChevronDown, ChevronUp, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, X } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
 
 type BankAccount = {
@@ -23,7 +23,10 @@ type Property = { id: string; name: string };
 type Unit = { id: string; unit: string };
 type CodingForm = {
   who: string; account_code: string; property_id: string;
-  unit_id: string; notes: string; tax_rate: string;
+  unit_id: string; notes: string;
+};
+type SplitLine = {
+  key: string; amount: string; account_code: string; notes: string;
 };
 type ActiveTab = "reconcile" | "statements" | "transactions" | "summary";
 
@@ -33,8 +36,9 @@ const fmtDate = (d: string) =>
 function extractDesc(p: string) {
   return p?.match(/#EX:\d+#([^#]+)#/)?.[1]?.trim() ?? p ?? "";
 }
-const TAX_RATES = ["No Tax", "5% VAT", "10% VAT", "15% VAT", "20% VAT", "Exempt"];
-const EMPTY_FORM: CodingForm = { who: "", account_code: "4010", property_id: "", unit_id: "", notes: "", tax_rate: "No Tax" };
+const EMPTY_FORM: CodingForm = { who: "", account_code: "4010", property_id: "", unit_id: "", notes: "" };
+let splitKeyCounter = 0;
+const newKey = () => String(++splitKeyCounter);
 
 export default function BankReconciliationPage() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
@@ -49,6 +53,8 @@ export default function BankReconciliationPage() {
   const [subTab, setSubTab] = useState<"tocode" | "coded">("tocode");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [codingForm, setCodingForm] = useState<CodingForm>(EMPTY_FORM);
+  const [splitMode, setSplitMode] = useState(false);
+  const [splitLines, setSplitLines] = useState<SplitLine[]>([]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -93,26 +99,68 @@ export default function BankReconciliationPage() {
 
   useEffect(() => { loadTxns(); }, [loadTxns]);
 
-  function openRow(txn: Txn) {
-    if (expandedId === txn.id) { setExpandedId(null); return; }
+  async function openRow(txn: Txn) {
+    if (expandedId === txn.id) { setExpandedId(null); setSplitMode(false); return; }
     setExpandedId(txn.id);
+    setSplitMode(false);
     setCodingForm({
       who: txn.tenant_id ?? txn.payee ?? "",
       account_code: txn.account_code ?? "4010",
       property_id: txn.property_id ?? "",
       unit_id: txn.unit_id ?? "",
       notes: txn.alloc_notes ?? extractDesc(txn.raw_particulars),
-      tax_rate: "No Tax",
     });
+    // Load existing splits if this transaction was previously split
+    if (txn.alloc_notes?.startsWith("Split:")) {
+      try {
+        const res = await fetch(`/api/transactions/splits?transaction_id=${txn.id}`);
+        const p = await res.json();
+        if (p.ok && p.data.length > 0) {
+          setSplitLines(p.data.map((s: { id: string; amount: string; account_code: string; notes: string }) => ({
+            key: newKey(),
+            amount: String(Number(s.amount)),
+            account_code: s.account_code ?? "4010",
+            notes: s.notes ?? "",
+          })));
+          setSplitMode(true);
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  function initSplitMode(txn: Txn) {
+    setSplitLines([
+      { key: newKey(), amount: String(txn.amount), account_code: "4010", notes: "" },
+      { key: newKey(), amount: "0", account_code: "2010", notes: "" },
+    ]);
+    setSplitMode(true);
   }
 
   async function saveCoding(txn: Txn) {
     setSaving(true);
     try {
-      const res = await fetch("/api/transactions/allocate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      let body: Record<string, unknown>;
+
+      if (splitMode) {
+        const totalSplit = splitLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+        if (Math.abs(totalSplit - txn.amount) > 0.01) {
+          setTxnError(`Split lines total ${fmt.format(totalSplit)} must equal ${fmt.format(txn.amount)}`);
+          setSaving(false);
+          return;
+        }
+        body = {
+          id: txn.id,
+          splits: splitLines.map(l => ({
+            amount: parseFloat(l.amount) || 0,
+            account_code: l.account_code || null,
+            tenant_id: codingForm.who.trim() || null,
+            property_id: codingForm.property_id || null,
+            unit_id: codingForm.unit_id || null,
+            notes: l.notes.trim() || null,
+          })),
+        };
+      } else {
+        body = {
           id: txn.id,
           tenant_id: codingForm.who.trim() || null,
           property_id: codingForm.property_id || null,
@@ -120,23 +168,42 @@ export default function BankReconciliationPage() {
           account_code: codingForm.account_code || null,
           notes: codingForm.notes.trim() || null,
           status: "REVIEWED",
-        }),
+        };
+      }
+
+      const res = await fetch("/api/transactions/allocate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
       const payload = await res.json();
       if (!payload.ok) throw new Error(payload.error ?? "Failed");
+
+      const allocNotes = splitMode
+        ? `Split: ${splitLines.length} lines`
+        : codingForm.notes || null;
+
       setTxns(prev => prev.map(t => t.id !== txn.id ? t : {
         ...t, status: "REVIEWED",
-        tenant_id: codingForm.who || null, property_id: codingForm.property_id || null,
-        unit_id: codingForm.unit_id || null, account_code: codingForm.account_code || null,
-        alloc_notes: codingForm.notes || null,
+        tenant_id: codingForm.who || null,
+        property_id: codingForm.property_id || null,
+        unit_id: codingForm.unit_id || null,
+        account_code: splitMode ? null : (codingForm.account_code || null),
+        alloc_notes: allocNotes,
       }));
+
+      // Auto-advance to next uncoded transaction
       const idx = txns.findIndex(t => t.id === txn.id);
       const next = txns.slice(idx + 1).find(t => t.status === "UNREVIEWED");
-      if (next) {
+      if (next && subTab === "tocode") {
         setExpandedId(next.id);
-        setCodingForm({ who: next.tenant_id ?? next.payee ?? "", account_code: next.account_code ?? "4010", property_id: next.property_id ?? "", unit_id: next.unit_id ?? "", notes: next.alloc_notes ?? extractDesc(next.raw_particulars), tax_rate: "No Tax" });
-      } else { setExpandedId(null); }
-      setToast("Coded successfully");
+        setSplitMode(false);
+        setCodingForm({ who: next.tenant_id ?? next.payee ?? "", account_code: next.account_code ?? "4010", property_id: next.property_id ?? "", unit_id: next.unit_id ?? "", notes: next.alloc_notes ?? extractDesc(next.raw_particulars) });
+      } else {
+        setExpandedId(null);
+        setSplitMode(false);
+      }
+      setToast(splitMode ? `Coded as ${splitLines.length} lines` : "Coded");
       setTimeout(() => setToast(null), 2500);
     } catch (err) {
       setTxnError(err instanceof Error ? err.message : "Failed");
@@ -154,6 +221,7 @@ export default function BankReconciliationPage() {
       if (!payload.ok) throw new Error(payload.error);
       setTxns(prev => prev.map(t => t.id !== txn.id ? t : { ...t, status: "UNREVIEWED", tenant_id: null, property_id: null, unit_id: null, account_code: null, alloc_notes: null }));
       setExpandedId(null);
+      setSplitMode(false);
     } catch (err) { setTxnError(err instanceof Error ? err.message : "Failed"); }
     finally { setSaving(false); }
   }
@@ -162,11 +230,10 @@ export default function BankReconciliationPage() {
   const reviewed   = txns.filter(t => t.status !== "UNREVIEWED");
   const totalIn    = txns.reduce((s, t) => s + (t.deposit > 0 ? t.deposit : 0), 0);
   const totalOut   = txns.reduce((s, t) => s + (t.withdrawal > 0 ? t.withdrawal : 0), 0);
-  // txns are newest-first; oldest = last item; opening balance = that row's balance minus its own movement
-  const oldestTxn    = txns.length > 0 ? txns[txns.length - 1] : null;
-  const openingBal   = oldestTxn?.balance != null ? oldestTxn.balance - oldestTxn.deposit + oldestTxn.withdrawal : null;
-  const closingBal   = txns[0]?.balance ?? null;
-  const visibleTxns  = subTab === "tocode" ? unreviewed : reviewed;
+  const oldestTxn  = txns.length > 0 ? txns[txns.length - 1] : null;
+  const openingBal = oldestTxn?.balance != null ? oldestTxn.balance - oldestTxn.deposit + oldestTxn.withdrawal : null;
+  const closingBal = txns[0]?.balance ?? null;
+  const visibleTxns = subTab === "tocode" ? unreviewed : reviewed;
   const selectedAccount = bankAccounts.find(a => a.id === selectedAccountId);
   const propName = (id: string) => properties.find(p => p.id === id)?.name ?? id;
 
@@ -184,12 +251,12 @@ export default function BankReconciliationPage() {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
               {selectedAccount && (
-                <span className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: selectedAccount.color }} />
+                <span className="h-3 w-3 flex-shrink-0 rounded-full" style={{ backgroundColor: selectedAccount.color }} />
               )}
               <select
                 value={selectedAccountId}
                 onChange={e => setSelectedAccountId(e.target.value)}
-                className="rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:outline-none min-w-[200px]"
+                className="min-w-[200px] rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:outline-none"
               >
                 <option value="">All accounts</option>
                 {bankAccounts.length === 0 && <option disabled>No accounts — add in Settings</option>}
@@ -227,7 +294,7 @@ export default function BankReconciliationPage() {
           <Stat label="Opening balance" value={openingBal != null ? fmt.format(openingBal) : "—"} />
           <Stat label="Total in" value={fmt.format(totalIn)} color="text-emerald-400" />
           <Stat label="Total out" value={fmt.format(totalOut)} color="text-rose-400" />
-          <Stat label="Closing balance" value={closingBal != null ? fmt.format(closingBal) : "—"} color="text-slate-100" />
+          <Stat label="Closing balance" value={closingBal != null ? fmt.format(closingBal) : "—"} />
           <Stat label="Statement lines" value={String(txns.length)} />
           <Stat label="To code" value={String(unreviewed.length)} color={unreviewed.length > 0 ? "text-amber-400" : "text-slate-400"} />
         </div>
@@ -239,7 +306,11 @@ export default function BankReconciliationPage() {
           <button key={tab} type="button" onClick={() => setActiveTab(tab)}
             className={`-mb-px border-b-2 px-4 py-3 text-xs font-semibold capitalize transition ${activeTab === tab ? "border-accent text-accent" : "border-transparent text-slate-400 hover:text-slate-200"}`}
           >
-            {tab === "reconcile" ? <>Reconcile {unreviewed.length > 0 && <span className="ml-1 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-400">{unreviewed.length}</span>}</> : tab === "statements" ? "Bank Statements" : tab === "transactions" ? "Account Transactions" : "Summary"}
+            {tab === "reconcile"
+              ? <>Reconcile {unreviewed.length > 0 && <span className="ml-1 rounded-full bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-400">{unreviewed.length}</span>}</>
+              : tab === "statements" ? "Bank Statements"
+              : tab === "transactions" ? "Account Transactions"
+              : "Summary"}
           </button>
         ))}
       </div>
@@ -251,7 +322,10 @@ export default function BankReconciliationPage() {
         </div>
       )}
       {txnError && (
-        <div className="mx-6 mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-sm text-rose-400">{txnError}</div>
+        <div className="mx-6 mt-4 flex items-center justify-between rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-sm text-rose-400">
+          <span>{txnError}</span>
+          <button onClick={() => setTxnError(null)}><X className="h-3.5 w-3.5" /></button>
+        </div>
       )}
 
       {/* ── Reconcile Tab ── */}
@@ -259,11 +333,11 @@ export default function BankReconciliationPage() {
         <div className="px-6 py-4">
           <div className="mb-4 flex items-center gap-2">
             <button type="button" onClick={() => setSubTab("tocode")}
-              className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${subTab === "tocode" ? "bg-amber-500/20 text-amber-300" : "border border-white/10 text-slate-400 hover:text-slate-200"}`}>
-              To code ({unreviewed.length})
+              className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${subTab === "tocode" ? "bg-amber-500/20 text-amber-300" : "border border-white/10 text-slate-400 hover:text-slate-200"}`}>
+              Code ({unreviewed.length})
             </button>
             <button type="button" onClick={() => setSubTab("coded")}
-              className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${subTab === "coded" ? "bg-emerald-500/20 text-emerald-300" : "border border-white/10 text-slate-400 hover:text-slate-200"}`}>
+              className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${subTab === "coded" ? "bg-emerald-500/20 text-emerald-300" : "border border-white/10 text-slate-400 hover:text-slate-200"}`}>
               Coded ({reviewed.length})
             </button>
           </div>
@@ -278,6 +352,13 @@ export default function BankReconciliationPage() {
               const isExpanded = expandedId === txn.id;
               const desc = extractDesc(txn.raw_particulars);
               const isCoded = txn.status !== "UNREVIEWED";
+              const isSplit = txn.alloc_notes?.startsWith("Split:");
+              const splitTotal = splitMode && isExpanded
+                ? splitLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0)
+                : 0;
+              const remaining = txn.amount - splitTotal;
+              const splitBalanced = Math.abs(remaining) < 0.01;
+
               return (
                 <SectionCard key={txn.id} className="overflow-hidden p-0">
                   <button type="button" onClick={() => openRow(txn)} className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-white/5">
@@ -292,7 +373,10 @@ export default function BankReconciliationPage() {
                     <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5">
                       {isCoded ? (
                         <>
-                          {txn.account_code && <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-400">{txn.account_code}</span>}
+                          {isSplit
+                            ? <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-xs font-semibold text-purple-300">Split</span>
+                            : txn.account_code && <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-400">{txn.account_code}</span>
+                          }
                           {txn.property_id && <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300">{propName(txn.property_id)}</span>}
                           <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-400">Coded</span>
                         </>
@@ -345,29 +429,26 @@ export default function BankReconciliationPage() {
 
                       {/* Right: coding form */}
                       <div className="p-5 text-base">
-                        <p className="mb-3 text-sm font-semibold uppercase tracking-[0.15em] text-slate-500">Code This Transaction</p>
-                        <div className="space-y-3">
-                          <FormField label="Who">
+                        <div className="mb-3 flex items-center justify-between">
+                          <p className="text-sm font-semibold uppercase tracking-[0.15em] text-slate-500">
+                            {splitMode ? "Split Transaction" : "Code This Transaction"}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => splitMode ? setSplitMode(false) : initSplitMode(txn)}
+                            className={`rounded-full px-3 py-1 text-xs font-semibold transition ${splitMode ? "bg-purple-500/20 text-purple-300 hover:bg-purple-500/30" : "border border-white/10 text-slate-400 hover:border-purple-500/40 hover:text-purple-300"}`}
+                          >
+                            {splitMode ? "Single line" : "Split"}
+                          </button>
+                        </div>
+
+                        {/* Shared fields (who, property, unit) */}
+                        <div className="mb-4 grid grid-cols-2 gap-3">
+                          <FormField label="Who (tenant / payer)">
                             <input type="text" value={codingForm.who}
                               onChange={e => setCodingForm(f => ({ ...f, who: e.target.value }))}
-                              placeholder="Tenant name or payer"
+                              placeholder="Tenant name"
                               className="w-full rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:border-accent/50 focus:outline-none" />
-                          </FormField>
-                          <FormField label="What (account)">
-                            <select value={codingForm.account_code}
-                              onChange={e => setCodingForm(f => ({ ...f, account_code: e.target.value }))}
-                              className="w-full rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:border-accent/50 focus:outline-none">
-                              {coa.length === 0 && <option>Loading…</option>}
-                              {["INCOME", "LIABILITY", "ASSET", "EQUITY", "EXPENSE"].map(cat => {
-                                const entries = coa.filter(c => c.category === cat);
-                                if (!entries.length) return null;
-                                return (
-                                  <optgroup key={cat} label={cat}>
-                                    {entries.map(c => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
-                                  </optgroup>
-                                );
-                              })}
-                            </select>
                           </FormField>
                           <FormField label="Property">
                             <select value={codingForm.property_id}
@@ -387,27 +468,113 @@ export default function BankReconciliationPage() {
                               </select>
                             </FormField>
                           )}
-                          <FormField label="Why (description)">
-                            <input type="text" value={codingForm.notes}
-                              onChange={e => setCodingForm(f => ({ ...f, notes: e.target.value }))}
-                              placeholder="e.g. March rent — Unit 12"
-                              className="w-full rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:border-accent/50 focus:outline-none" />
-                          </FormField>
-                          <FormField label="Tax rate">
-                            <select value={codingForm.tax_rate}
-                              onChange={e => setCodingForm(f => ({ ...f, tax_rate: e.target.value }))}
-                              className="rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:border-accent/50 focus:outline-none">
-                              {TAX_RATES.map(r => <option key={r} value={r}>{r}</option>)}
-                            </select>
-                          </FormField>
                         </div>
-                        {codingForm.account_code && (
-                          <p className="mt-3 text-sm text-slate-500">
-                            {[coa.find(c => c.code === codingForm.account_code)?.name, codingForm.property_id ? propName(codingForm.property_id) : null].filter(Boolean).join(" · ")}
-                          </p>
+
+                        {/* Single-line mode */}
+                        {!splitMode && (
+                          <div className="space-y-3">
+                            <FormField label="Account">
+                              <select value={codingForm.account_code}
+                                onChange={e => setCodingForm(f => ({ ...f, account_code: e.target.value }))}
+                                className="w-full rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:border-accent/50 focus:outline-none">
+                                {coa.length === 0 && <option>Loading…</option>}
+                                {["INCOME", "LIABILITY", "ASSET", "EQUITY", "EXPENSE"].map(cat => {
+                                  const entries = coa.filter(c => c.category === cat);
+                                  if (!entries.length) return null;
+                                  return (
+                                    <optgroup key={cat} label={cat}>
+                                      {entries.map(c => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
+                                    </optgroup>
+                                  );
+                                })}
+                              </select>
+                            </FormField>
+                            <FormField label="Description">
+                              <input type="text" value={codingForm.notes}
+                                onChange={e => setCodingForm(f => ({ ...f, notes: e.target.value }))}
+                                placeholder="e.g. March rent — Unit 12"
+                                className="w-full rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:border-accent/50 focus:outline-none" />
+                            </FormField>
+                          </div>
                         )}
+
+                        {/* Split mode */}
+                        {splitMode && (
+                          <div>
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-left text-xs text-slate-500">
+                                  <th className="pb-2 pr-2">Amount</th>
+                                  <th className="pb-2 pr-2">Account</th>
+                                  <th className="pb-2 pr-2">Description</th>
+                                  <th className="pb-2 w-6"></th>
+                                </tr>
+                              </thead>
+                              <tbody className="space-y-2">
+                                {splitLines.map((line, idx) => (
+                                  <tr key={line.key}>
+                                    <td className="pr-2 pb-2">
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        value={line.amount}
+                                        onChange={e => setSplitLines(ls => ls.map((l, i) => i === idx ? { ...l, amount: e.target.value } : l))}
+                                        className="w-24 rounded-lg border border-white/10 bg-panel/80 px-2 py-1.5 text-sm text-slate-100 focus:border-accent/50 focus:outline-none tabular-nums"
+                                      />
+                                    </td>
+                                    <td className="pr-2 pb-2">
+                                      <select
+                                        value={line.account_code}
+                                        onChange={e => setSplitLines(ls => ls.map((l, i) => i === idx ? { ...l, account_code: e.target.value } : l))}
+                                        className="w-full rounded-lg border border-white/10 bg-panel/80 px-2 py-1.5 text-sm text-slate-100 focus:border-accent/50 focus:outline-none"
+                                      >
+                                        {["INCOME", "LIABILITY", "ASSET", "EQUITY", "EXPENSE"].map(cat => {
+                                          const entries = coa.filter(c => c.category === cat);
+                                          if (!entries.length) return null;
+                                          return (
+                                            <optgroup key={cat} label={cat}>
+                                              {entries.map(c => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
+                                            </optgroup>
+                                          );
+                                        })}
+                                      </select>
+                                    </td>
+                                    <td className="pr-2 pb-2">
+                                      <input
+                                        type="text"
+                                        value={line.notes}
+                                        onChange={e => setSplitLines(ls => ls.map((l, i) => i === idx ? { ...l, notes: e.target.value } : l))}
+                                        placeholder="e.g. March rent"
+                                        className="w-full rounded-lg border border-white/10 bg-panel/80 px-2 py-1.5 text-sm text-slate-100 focus:border-accent/50 focus:outline-none"
+                                      />
+                                    </td>
+                                    <td className="pb-2">
+                                      {splitLines.length > 2 && (
+                                        <button type="button" onClick={() => setSplitLines(ls => ls.filter((_, i) => i !== idx))}
+                                          className="text-slate-600 hover:text-rose-400">
+                                          <X className="h-4 w-4" />
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <div className="mt-2 flex items-center justify-between">
+                              <button type="button"
+                                onClick={() => setSplitLines(ls => [...ls, { key: newKey(), amount: "0", account_code: "4010", notes: "" }])}
+                                className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-200">
+                                <Plus className="h-3.5 w-3.5" /> Add line
+                              </button>
+                              <span className={`text-sm font-semibold tabular-nums ${splitBalanced ? "text-emerald-400" : "text-amber-400"}`}>
+                                {splitBalanced ? "✓ Balanced" : `Remaining: ${fmt.format(remaining)}`}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
                         <div className="mt-4 flex items-center gap-3">
-                          <button type="button" onClick={() => saveCoding(txn)} disabled={saving}
+                          <button type="button" onClick={() => saveCoding(txn)} disabled={saving || (splitMode && !splitBalanced)}
                             className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
                             {saving ? "Saving…" : "OK"}
                           </button>
@@ -415,7 +582,8 @@ export default function BankReconciliationPage() {
                             <button type="button" onClick={() => removeCoding(txn)} disabled={saving}
                               className="text-sm text-slate-500 hover:text-rose-300">Remove coding</button>
                           )}
-                          <button type="button" onClick={() => setExpandedId(null)} className="text-sm text-slate-500 hover:text-slate-300">▲ Close</button>
+                          <button type="button" onClick={() => { setExpandedId(null); setSplitMode(false); }}
+                            className="text-sm text-slate-500 hover:text-slate-300">▲ Close</button>
                         </div>
                       </div>
                     </div>
@@ -477,7 +645,11 @@ export default function BankReconciliationPage() {
                     <td className="px-4 py-3 text-slate-500">{fmtDate(txn.date)}</td>
                     <td className="px-4 py-3 text-slate-100">{txn.payee || "—"}</td>
                     <td className="px-4 py-3">
-                      {txn.account_code ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-400">{txn.account_code}</span> : <span className="text-slate-600">—</span>}
+                      {txn.account_code
+                        ? <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-400">{txn.account_code}</span>
+                        : txn.alloc_notes?.startsWith("Split:")
+                          ? <span className="rounded-full bg-purple-500/15 px-2 py-0.5 text-xs font-semibold text-purple-300">Split</span>
+                          : <span className="text-slate-600">—</span>}
                     </td>
                     <td className="px-4 py-3 text-xs text-slate-400">{txn.property_id ? propName(txn.property_id) : "—"}</td>
                     <td className="max-w-[180px] px-4 py-3"><span className="line-clamp-1 text-xs text-slate-400">{txn.alloc_notes || "—"}</span></td>
