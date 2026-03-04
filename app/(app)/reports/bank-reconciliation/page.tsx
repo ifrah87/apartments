@@ -172,21 +172,20 @@ export default function BankReconciliationPage() {
             <h1 className="mt-1 text-xl font-semibold text-slate-100">Bank Reconciliation</h1>
           </div>
           <div className="flex items-center gap-3">
-            {bankAccounts.length > 0 && (
-              <div className="flex items-center gap-2">
-                {selectedAccount && (
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: selectedAccount.color }} />
-                )}
-                <select
-                  value={selectedAccountId}
-                  onChange={e => setSelectedAccountId(e.target.value)}
-                  className="rounded-lg border border-white/10 bg-panel/80 px-3 py-1.5 text-sm text-slate-100 focus:outline-none"
-                >
-                  <option value="">All accounts</option>
-                  {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name} — {a.bank_name}</option>)}
-                </select>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              {selectedAccount && (
+                <span className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: selectedAccount.color }} />
+              )}
+              <select
+                value={selectedAccountId}
+                onChange={e => setSelectedAccountId(e.target.value)}
+                className="rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:outline-none min-w-[200px]"
+              >
+                <option value="">All accounts</option>
+                {bankAccounts.length === 0 && <option disabled>No accounts — add in Settings</option>}
+                {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name} — {a.bank_name}</option>)}
+              </select>
+            </div>
             <button
               type="button"
               disabled={syncing}
@@ -273,13 +272,13 @@ export default function BankReconciliationPage() {
               const isCoded = txn.status !== "UNREVIEWED";
               return (
                 <SectionCard key={txn.id} className="overflow-hidden p-0">
-                  <button type="button" onClick={() => openRow(txn)} className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-white/5">
-                    <div className="w-24 flex-shrink-0 text-xs text-slate-500">{fmtDate(txn.date)}</div>
+                  <button type="button" onClick={() => openRow(txn)} className="flex w-full items-center gap-4 px-4 py-4 text-left hover:bg-white/5">
+                    <div className="w-28 flex-shrink-0 text-sm text-slate-400">{fmtDate(txn.date)}</div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-100">{txn.payee || "—"}</p>
-                      <p className="truncate text-xs text-slate-500">{desc}</p>
+                      <p className="truncate text-base font-medium text-slate-100">{txn.payee || "—"}</p>
+                      <p className="truncate text-sm text-slate-500">{desc}</p>
                     </div>
-                    <div className={`flex-shrink-0 text-sm font-semibold tabular-nums ${txn.amount >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    <div className={`flex-shrink-0 text-base font-semibold tabular-nums ${txn.amount >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                       {txn.amount >= 0 ? "+" : ""}{fmt.format(txn.amount)}
                     </div>
                     <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5">
@@ -301,8 +300,8 @@ export default function BankReconciliationPage() {
                   {isExpanded && (
                     <div className="grid border-t border-white/10 lg:grid-cols-[2fr_3fr]">
                       {/* Left: statement details */}
-                      <div className="border-r border-white/10 p-5 text-sm">
-                        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Statement Line</p>
+                      <div className="border-r border-white/10 p-5 text-base">
+                        <p className="mb-3 text-sm font-semibold uppercase tracking-[0.15em] text-slate-500">Statement Line</p>
                         <div className="space-y-2 text-slate-300">
                           <Row label="Date" value={fmtDate(txn.date)} />
                           <Row label="Payee" value={txn.payee || "—"} bold />
@@ -311,19 +310,19 @@ export default function BankReconciliationPage() {
                           {txn.transaction_number && <Row label="TXN" value={txn.transaction_number} mono />}
                         </div>
                         <div className="mt-4 rounded-lg border border-white/10 bg-white/5 p-3">
-                          <div className="flex justify-between text-sm">
+                          <div className="flex justify-between text-base">
                             <div>
-                              <p className="text-xs text-slate-500">Received</p>
+                              <p className="text-sm text-slate-500">Received</p>
                               <p className="font-semibold text-emerald-400">{txn.deposit > 0 ? fmt.format(txn.deposit) : "—"}</p>
                             </div>
                             <div className="text-right">
-                              <p className="text-xs text-slate-500">Spent</p>
+                              <p className="text-sm text-slate-500">Spent</p>
                               <p className="font-semibold text-rose-400">{txn.withdrawal > 0 ? fmt.format(txn.withdrawal) : "—"}</p>
                             </div>
                           </div>
                           {txn.balance != null && (
                             <div className="mt-2 border-t border-white/10 pt-2 text-right">
-                              <p className="text-xs text-slate-500">Running balance</p>
+                              <p className="text-sm text-slate-500">Running balance</p>
                               <p className="font-semibold text-slate-200">{fmt.format(txn.balance)}</p>
                             </div>
                           )}
@@ -337,8 +336,8 @@ export default function BankReconciliationPage() {
                       </div>
 
                       {/* Right: coding form */}
-                      <div className="p-5 text-sm">
-                        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-slate-500">Code This Transaction</p>
+                      <div className="p-5 text-base">
+                        <p className="mb-3 text-sm font-semibold uppercase tracking-[0.15em] text-slate-500">Code This Transaction</p>
                         <div className="space-y-3">
                           <FormField label="Who">
                             <input type="text" value={codingForm.who}
@@ -395,7 +394,7 @@ export default function BankReconciliationPage() {
                           </FormField>
                         </div>
                         {codingForm.account_code && (
-                          <p className="mt-3 text-xs text-slate-500">
+                          <p className="mt-3 text-sm text-slate-500">
                             {[coa.find(c => c.code === codingForm.account_code)?.name, codingForm.property_id ? propName(codingForm.property_id) : null].filter(Boolean).join(" · ")}
                           </p>
                         )}
@@ -406,9 +405,9 @@ export default function BankReconciliationPage() {
                           </button>
                           {isCoded && (
                             <button type="button" onClick={() => removeCoding(txn)} disabled={saving}
-                              className="text-xs text-slate-500 hover:text-rose-300">Remove coding</button>
+                              className="text-sm text-slate-500 hover:text-rose-300">Remove coding</button>
                           )}
-                          <button type="button" onClick={() => setExpandedId(null)} className="text-xs text-slate-500 hover:text-slate-300">▲ Close</button>
+                          <button type="button" onClick={() => setExpandedId(null)} className="text-sm text-slate-500 hover:text-slate-300">▲ Close</button>
                         </div>
                       </div>
                     </div>
@@ -555,7 +554,7 @@ function Row({ label, value, bold, mono }: { label: string; value: string; bold?
 function FormField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs text-slate-400">{label}</span>
+      <span className="mb-1 block text-sm text-slate-400">{label}</span>
       {children}
     </label>
   );
