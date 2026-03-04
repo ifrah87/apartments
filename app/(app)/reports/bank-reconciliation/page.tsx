@@ -224,10 +224,10 @@ export default function BankReconciliationPage() {
           </div>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-6 text-sm">
-          {openingBal != null && <Stat label="Opening balance" value={fmt.format(openingBal)} />}
+          <Stat label="Opening balance" value={openingBal != null ? fmt.format(openingBal) : "—"} />
           <Stat label="Total in" value={fmt.format(totalIn)} color="text-emerald-400" />
           <Stat label="Total out" value={fmt.format(totalOut)} color="text-rose-400" />
-          {closingBal != null && <Stat label="Closing balance" value={fmt.format(closingBal)} color="text-slate-100" />}
+          <Stat label="Closing balance" value={closingBal != null ? fmt.format(closingBal) : "—"} color="text-slate-100" />
           <Stat label="Statement lines" value={String(txns.length)} />
           <Stat label="To code" value={String(unreviewed.length)} color={unreviewed.length > 0 ? "text-amber-400" : "text-slate-400"} />
         </div>
