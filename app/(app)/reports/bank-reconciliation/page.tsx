@@ -11,7 +11,7 @@ type BankAccount = {
 };
 type Txn = {
   id: string; date: string; payee: string; raw_particulars: string;
-  amount: number; deposit: number; withdrawal: number;
+  amount: number; deposit: number; withdrawal: number; balance: number | null;
   reference: string | null; transaction_number: string | null;
   status: string; category: string | null;
   tenant_id: string | null; property_id: string | null; unit_id: string | null;
@@ -295,6 +295,12 @@ export default function BankReconciliationPage() {
                               <p className="font-semibold text-rose-400">{txn.withdrawal > 0 ? fmt.format(txn.withdrawal) : "—"}</p>
                             </div>
                           </div>
+                          {txn.balance != null && (
+                            <div className="mt-2 border-t border-white/10 pt-2 text-right">
+                              <p className="text-xs text-slate-500">Running balance</p>
+                              <p className="font-semibold text-slate-200">{fmt.format(txn.balance)}</p>
+                            </div>
+                          )}
                         </div>
                         {txn.raw_particulars && (
                           <details className="mt-4">
