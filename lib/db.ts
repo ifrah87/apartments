@@ -18,9 +18,13 @@ const ca = caRaw.includes("\\n") ? caRaw.replace(/\\n/g, "\n") : caRaw;
 
 export const pool = new Pool({
   connectionString: normalizedConnectionString,
-  connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT_MS || 5000),
-  query_timeout: Number(process.env.PGQUERY_TIMEOUT_MS || 10000),
-  statement_timeout: Number(process.env.PGSTATEMENT_TIMEOUT_MS || 10000),
+  connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT_MS || 10000),
+  query_timeout: Number(process.env.PGQUERY_TIMEOUT_MS || 30000),
+  statement_timeout: Number(process.env.PGSTATEMENT_TIMEOUT_MS || 30000),
+  idleTimeoutMillis: 30000,
+  max: 10,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
   ssl: !isLocalDatabase && ca
     ? {
         ca,
