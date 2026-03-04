@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, Building2, Home, Gauge, Receipt, BarChart3, Wrench, FileText, Settings } from "lucide-react";
+import { LayoutGrid, Building2, Home, Gauge, Receipt, BarChart3, Wrench, FileText, Settings, Landmark } from "lucide-react";
 import { SidebarBrand } from "./SidebarBrand";
 import { useTranslations } from "@/components/LanguageProvider";
 
@@ -20,6 +20,7 @@ const NAV: NavItem[] = [
   // Tenants/Onboarding removed from main nav
   { href: "/readings", labelKey: "sidebar.nav.readings", icon: Gauge },
   { href: "/bills", labelKey: "sidebar.nav.bills", icon: Receipt },
+  { href: "/reports/bank-reconciliation", labelKey: "sidebar.nav.bank", icon: Landmark },
   { href: "/leases", labelKey: "sidebar.nav.leases", icon: FileText },
   { href: "/services", labelKey: "sidebar.nav.services", icon: Wrench },
   { href: "/reports", labelKey: "sidebar.nav.reports", icon: BarChart3 },

@@ -124,9 +124,11 @@ export default async function DashboardPage({
     {
       label: "Bank balance",
       value: formatCurrency(bank.bankBalance),
-      subtitle: `${bank.unreconciledCount} unreconciled · ${lastUpdatedText}`,
+      subtitle: bank.unreconciledCount > 0
+        ? `⚠ ${bank.unreconciledCount} items need coding`
+        : `All coded · ${lastUpdatedText}`,
       accent: "cyan" as const,
-      href: "/reports/bank-summary",
+      href: "/reports/bank-reconciliation",
     },
     {
       label: "Rent collected (MTD)",
