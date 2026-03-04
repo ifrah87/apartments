@@ -211,9 +211,6 @@ export default function BankReconciliationPage() {
             >
               {syncing ? "Syncing…" : "↓ Import from Spaces"}
             </button>
-            <Link href="/settings/bank" className="rounded-full border border-white/10 px-3 py-1.5 text-xs text-slate-400 hover:border-white/20 hover:text-slate-200">
-              Manage Account
-            </Link>
           </div>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-6 text-sm">
