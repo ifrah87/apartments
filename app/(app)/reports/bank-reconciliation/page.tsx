@@ -599,28 +599,43 @@ export default function BankReconciliationPage() {
       {activeTab === "statements" && (
         <div className="p-6">
           <SectionCard className="overflow-hidden p-0">
-            <table className="w-full text-sm">
-              <thead className="border-b border-white/10 text-left text-xs uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Date</th><th className="px-4 py-3">Payee</th>
-                  <th className="px-4 py-3">Particulars</th><th className="px-4 py-3">REF</th>
-                  <th className="px-4 py-3 text-right">Received</th><th className="px-4 py-3 text-right">Spent</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loadingTxns && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">Loading…</td></tr>}
-                {!loadingTxns && txns.map(txn => (
-                  <tr key={txn.id} className="border-t border-white/5 hover:bg-white/5">
-                    <td className="px-4 py-3 text-slate-500">{fmtDate(txn.date)}</td>
-                    <td className="px-4 py-3 text-slate-100">{txn.payee || "—"}</td>
-                    <td className="max-w-xs px-4 py-3"><span className="line-clamp-1 text-xs text-slate-400">{extractDesc(txn.raw_particulars)}</span></td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500">{txn.reference ?? "—"}</td>
-                    <td className="px-4 py-3 text-right text-emerald-400 tabular-nums">{txn.deposit > 0 ? fmt.format(txn.deposit) : ""}</td>
-                    <td className="px-4 py-3 text-right text-rose-400 tabular-nums">{txn.withdrawal > 0 ? fmt.format(txn.withdrawal) : ""}</td>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[800px] text-sm">
+                <thead className="border-b border-white/10 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3">Payee</th>
+                    <th className="px-4 py-3">Reference</th>
+                    <th className="px-4 py-3 text-right">Spent</th>
+                    <th className="px-4 py-3 text-right">Received</th>
+                    <th className="px-4 py-3 text-right">Balance</th>
+                    <th className="px-4 py-3">Source</th>
+                    <th className="px-4 py-3">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {loadingTxns && <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500">Loading…</td></tr>}
+                  {!loadingTxns && txns.map(txn => (
+                    <tr key={txn.id} className="border-t border-white/5 hover:bg-white/5">
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-400">{fmtDate(txn.date)}</td>
+                      <td className="px-4 py-3">
+                        {txn.deposit > 0
+                          ? <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-400">Credit</span>
+                          : <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-xs text-rose-400">Debit</span>}
+                      </td>
+                      <td className="px-4 py-3 font-medium text-slate-100">{txn.payee || "—"}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-500">{txn.reference ?? "—"}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-rose-400">{txn.withdrawal > 0 ? fmt.format(txn.withdrawal) : ""}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-emerald-400">{txn.deposit > 0 ? fmt.format(txn.deposit) : ""}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-300">{txn.balance != null ? fmt.format(txn.balance) : "—"}</td>
+                      <td className="px-4 py-3 text-xs text-slate-500">{txn.source_bank ?? "—"}</td>
+                      <td className="px-4 py-3"><StatusBadge status={txn.status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </SectionCard>
         </div>
       )}
