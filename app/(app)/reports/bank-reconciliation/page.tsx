@@ -51,6 +51,7 @@ export default function BankReconciliationPage() {
   const [codingForm, setCodingForm] = useState<CodingForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetch("/api/bank-accounts").then(r => r.json()).then(p => {
@@ -186,6 +187,31 @@ export default function BankReconciliationPage() {
                 </select>
               </div>
             )}
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={async () => {
+                setSyncing(true);
+                try {
+                  const res = await fetch("/api/admin/spaces-sync", { method: "POST" });
+                  const p = await res.json();
+                  if (p.ok) {
+                    const inserted = p.data?.results?.reduce((s: number, r: { inserted: number }) => s + (r.inserted ?? 0), 0) ?? 0;
+                    setToast(inserted > 0 ? `Imported ${inserted} new transaction(s)` : "No new transactions");
+                    loadTxns();
+                  } else {
+                    setTxnError(p.error ?? "Sync failed");
+                  }
+                } catch {
+                  setTxnError("Sync failed — check connection");
+                } finally {
+                  setSyncing(false);
+                }
+              }}
+              className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/20 disabled:opacity-50"
+            >
+              {syncing ? "Syncing…" : "↓ Import from Spaces"}
+            </button>
             <Link href="/settings/bank" className="rounded-full border border-white/10 px-3 py-1.5 text-xs text-slate-400 hover:border-white/20 hover:text-slate-200">
               Manage Account
             </Link>
