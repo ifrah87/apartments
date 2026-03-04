@@ -162,7 +162,11 @@ export default function BankReconciliationPage() {
   const reviewed   = txns.filter(t => t.status !== "UNREVIEWED");
   const totalIn    = txns.reduce((s, t) => s + (t.deposit > 0 ? t.deposit : 0), 0);
   const totalOut   = txns.reduce((s, t) => s + (t.withdrawal > 0 ? t.withdrawal : 0), 0);
-  const visibleTxns = subTab === "tocode" ? unreviewed : reviewed;
+  // txns are newest-first; oldest = last item; opening balance = that row's balance minus its own movement
+  const oldestTxn    = txns.length > 0 ? txns[txns.length - 1] : null;
+  const openingBal   = oldestTxn?.balance != null ? oldestTxn.balance - oldestTxn.deposit + oldestTxn.withdrawal : null;
+  const closingBal   = txns[0]?.balance ?? null;
+  const visibleTxns  = subTab === "tocode" ? unreviewed : reviewed;
   const selectedAccount = bankAccounts.find(a => a.id === selectedAccountId);
   const propName = (id: string) => properties.find(p => p.id === id)?.name ?? id;
 
@@ -220,11 +224,12 @@ export default function BankReconciliationPage() {
           </div>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-6 text-sm">
-          <Stat label="Statement lines" value={String(txns.length)} />
-          <Stat label="Coded" value={String(reviewed.length)} color="text-emerald-400" />
-          <Stat label="To code" value={String(unreviewed.length)} color={unreviewed.length > 0 ? "text-amber-400" : "text-slate-400"} />
+          {openingBal != null && <Stat label="Opening balance" value={fmt.format(openingBal)} />}
           <Stat label="Total in" value={fmt.format(totalIn)} color="text-emerald-400" />
           <Stat label="Total out" value={fmt.format(totalOut)} color="text-rose-400" />
+          {closingBal != null && <Stat label="Closing balance" value={fmt.format(closingBal)} color="text-slate-100" />}
+          <Stat label="Statement lines" value={String(txns.length)} />
+          <Stat label="To code" value={String(unreviewed.length)} color={unreviewed.length > 0 ? "text-amber-400" : "text-slate-400"} />
         </div>
       </div>
 
