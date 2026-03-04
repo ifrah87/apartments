@@ -21,8 +21,8 @@ export const pool = new Pool({
   connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT_MS || 10000),
   query_timeout: Number(process.env.PGQUERY_TIMEOUT_MS || 30000),
   statement_timeout: Number(process.env.PGSTATEMENT_TIMEOUT_MS || 30000),
-  idleTimeoutMillis: 30000,
-  max: 10,
+  idleTimeoutMillis: 20000,
+  max: 3,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
   ssl: !isLocalDatabase && ca

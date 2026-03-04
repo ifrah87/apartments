@@ -33,7 +33,8 @@ export async function GET(req: NextRequest) {
     }
     if (bankAccountId) {
       params.push(bankAccountId);
-      conditions.push(`bank_account_id = $${params.length}`);
+      // Also include unassigned transactions (bank_account_id IS NULL)
+      conditions.push(`(bank_account_id = $${params.length} OR bank_account_id IS NULL)`);
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
