@@ -33,8 +33,9 @@ const REPORT_GROUPS: { title: string; items: ReportTileItem[] }[] = [
       { name: "Bank Summary", desc: "Cash in/out overview", href: "/reports/bank-summary", Icon: Wallet },
       { name: "Account Transactions", desc: "Full ledger export", href: "/reports/account-transactions", Icon: LineChart },
       { name: "Profit & Loss", desc: "Income vs expense per property.", href: "/reports/pnl", Icon: CircleDollarSign },
-      { name: "Bank Imports", desc: "Matched vs unmatched statements.", href: "/reports/bank-import-summary", Icon: LineChart },
-      { name: "Bank Reconciliation", desc: "Book balance vs bank balance.", href: "/reports/bank-reconciliation", Icon: Wallet },
+      { name: "Bank Imports", desc: "Review and code imported bank statements.", href: "/reports/bank-imports", Icon: LineChart },
+      { name: "Bank Reconciliation", desc: "Xero-style statement coding.", href: "/reports/bank-reconciliation", Icon: Wallet },
+      { name: "Import Summary", desc: "Matched vs unmatched import log.", href: "/reports/bank-import-summary", Icon: LineChart },
     ],
   },
   {
