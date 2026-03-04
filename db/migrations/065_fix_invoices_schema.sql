@@ -39,6 +39,35 @@ CREATE TABLE IF NOT EXISTS public.invoice_lines (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 3b) Ensure invoice_lines.invoice_id type matches invoices.id before FK
+DO $$
+DECLARE
+  invoices_id_type text;
+  lines_invoice_id_type text;
+BEGIN
+  SELECT data_type INTO invoices_id_type
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'invoices'
+    AND column_name = 'id';
+
+  SELECT data_type INTO lines_invoice_id_type
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'invoice_lines'
+    AND column_name = 'invoice_id';
+
+  IF invoices_id_type = 'text' AND lines_invoice_id_type <> 'text' THEN
+    ALTER TABLE public.invoice_lines
+      ALTER COLUMN invoice_id TYPE text
+      USING invoice_id::text;
+  ELSIF invoices_id_type = 'uuid' AND lines_invoice_id_type <> 'uuid' THEN
+    ALTER TABLE public.invoice_lines
+      ALTER COLUMN invoice_id TYPE uuid
+      USING NULLIF(invoice_id::text, '')::uuid;
+  END IF;
+END $$;
+
 -- 4) Add FK only if it doesn't already exist
 DO $$
 BEGIN

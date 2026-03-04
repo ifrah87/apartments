@@ -5,7 +5,7 @@ import { datasetsRepo } from "@/lib/repos";
 
 type AttendanceUser = {
   id: string;
-  phone: string;
+  phone?: string | null;
   role: "admin" | "reception";
   name?: string | null;
 };

@@ -1,6 +1,7 @@
 import { tenantsRepo } from "./tenantsRepo";
 import { unitsRepo } from "./unitsRepo";
 import { bankTransactionsRepo } from "./bankTransactionsRepo";
+import { bankAccountsRepo } from "./bankAccountsRepo";
 import { meterReadingsRepo } from "./meterReadingsRepo";
 import { propertiesRepo } from "./propertiesRepo";
 import { datasetsRepo } from "./datasetsRepo";
@@ -14,6 +15,7 @@ export {
   tenantsRepo,
   unitsRepo,
   bankTransactionsRepo,
+  bankAccountsRepo,
   meterReadingsRepo,
   propertiesRepo,
   datasetsRepo,
@@ -23,6 +25,7 @@ export { RepoError, badRequest, notFound } from "./errors";
 export type { TenantRecord } from "./tenantsRepo";
 export type { UnitRecord } from "./unitsRepo";
 export type { BankTransaction } from "./bankTransactionsRepo";
+export type { BankAccount } from "./bankAccountsRepo";
 export type { MeterReading } from "./meterReadingsRepo";
 export type { PropertyRecord } from "./propertiesRepo";
 export type { DatasetKey } from "./datasetsRepo";

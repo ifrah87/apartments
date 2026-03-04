@@ -8,7 +8,7 @@ import SectionCard from "@/components/ui/SectionCard";
 type UserRow = {
   id: string;
   name?: string | null;
-  phone: string;
+  phone?: string | null;
   role: "admin" | "reception";
   permissions?: string[];
   created_at: string;
@@ -210,8 +210,12 @@ export default function AdminSettingsPage() {
     setError("");
     try {
       if (drawerMode === "add") {
-        if (!form.name.trim() || !form.phone.trim() || !form.password.trim()) {
-          setError("Name, phone, and password are required.");
+        if (!form.name.trim() || !form.password.trim()) {
+          setError("Login name and 4-digit PIN are required.");
+          return;
+        }
+        if (!/^\d{4}$/.test(form.password.trim())) {
+          setError("PIN must be exactly 4 digits.");
           return;
         }
         const res = await fetch("/api/admin/users", {
@@ -220,7 +224,7 @@ export default function AdminSettingsPage() {
           credentials: "include",
           body: JSON.stringify({
             name: form.name.trim(),
-            phone: form.phone.trim(),
+            phone: form.phone.trim() || null,
             password: form.password,
             role: form.role,
             permissions: form.permissions,
@@ -232,8 +236,12 @@ export default function AdminSettingsPage() {
         }
         setUsers((prev) => [data.user, ...prev.filter((user) => user.id !== data.user.id)]);
       } else if (editingId) {
-        if (!form.name.trim() || !form.phone.trim()) {
-          setError("Name and phone are required.");
+        if (!form.name.trim()) {
+          setError("Login name is required.");
+          return;
+        }
+        if (form.password.trim() && !/^\d{4}$/.test(form.password.trim())) {
+          setError("PIN must be exactly 4 digits.");
           return;
         }
         const res = await fetch("/api/admin/users", {
@@ -243,7 +251,8 @@ export default function AdminSettingsPage() {
           body: JSON.stringify({
             id: editingId,
             name: form.name.trim(),
-            phone: form.phone.trim(),
+            phone: form.phone.trim() || null,
+            password: form.password.trim() || undefined,
             role: form.role,
             permissions: form.permissions,
           }),
@@ -255,7 +264,7 @@ export default function AdminSettingsPage() {
         setUsers((prev) =>
           prev.map((user) =>
             user.id === editingId
-              ? { ...user, name: form.name.trim(), phone: form.phone.trim(), role: form.role, permissions: form.permissions }
+              ? { ...user, name: form.name.trim(), phone: form.phone.trim() || null, role: form.role, permissions: form.permissions }
               : user,
           ),
         );
@@ -274,7 +283,7 @@ export default function AdminSettingsPage() {
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Team Management</h1>
-          <p className="text-sm text-slate-500">Manage access roles for Admin and Customer Service staff.</p>
+          <p className="text-sm text-slate-500">Manage name-based logins and 4-digit PIN access for Admin and Customer Service staff.</p>
         </div>
         <button
           type="button"
@@ -382,7 +391,7 @@ export default function AdminSettingsPage() {
                       </span>
                     </div>
                     <p className="mt-1 text-sm text-slate-500">
-                      {user.phone ? `Phone: ${user.phone}` : "Phone: —"} · ID: #{user.id}
+                      {user.phone ? `Contact: ${user.phone}` : "No contact number"} · ID: #{user.id}
                     </p>
                   </div>
                 </div>
@@ -442,36 +451,52 @@ export default function AdminSettingsPage() {
 
           <div className="mt-6 space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-600">Name</label>
+              <label className="text-sm font-semibold text-slate-600">Login Name</label>
               <input
                 value={form.name}
                 onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
                 className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-300"
-                placeholder="e.g. Jame Smith"
+                placeholder="e.g. Ahmed"
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-600">Phone</label>
+              <label className="text-sm font-semibold text-slate-600">Phone (Optional)</label>
               <input
                 value={form.phone}
                 onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))}
                 className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-300"
-                placeholder="e.g. 613533329"
+                placeholder="Contact number for staff records"
               />
             </div>
             {drawerMode === "add" ? (
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-600">Password</label>
+                <label className="text-sm font-semibold text-slate-600">4-Digit PIN</label>
                 <input
                   value={form.password}
                   onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
                   type="password"
+                  inputMode="numeric"
+                  maxLength={4}
                   className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-300"
-                  placeholder="••••••••"
+                  placeholder="1234"
                 />
               </div>
             ) : (
-              <p className="text-xs text-slate-500">Password changes are handled separately.</p>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-slate-600">Reset 4-Digit PIN</label>
+                <input
+                  value={form.password}
+                  onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-300"
+                  placeholder="Leave blank to keep current PIN"
+                />
+                <p className="text-xs text-slate-500">
+                  Enter a new 4-digit PIN only if you want to reset this team member&apos;s login.
+                </p>
+              </div>
             )}
             <div className="space-y-2">
               <label className="text-sm font-semibold text-slate-600">Access Level</label>

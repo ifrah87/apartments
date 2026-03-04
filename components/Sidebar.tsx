@@ -26,17 +26,23 @@ const NAV: NavItem[] = [
   { href: "/settings", labelKey: "sidebar.nav.settings", icon: Settings },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({
+  className = "",
+  onNavigate,
+}: {
+  className?: string;
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
   const { t } = useTranslations();
 
   return (
-    <aside className="sticky top-0 z-40 flex h-screen w-64 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 lg:w-72">
+    <aside className={`sticky top-0 z-40 w-64 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 lg:w-72 ${className}`}>
       <div className="pt-0">
         <SidebarBrand />
         <div className="mx-5 mt-1 h-px bg-white/5" />
       </div>
-      <nav className="mt-2 flex flex-1 flex-col justify-evenly overflow-y-auto px-4 pb-4 pt-1" aria-label="Primary">
+      <nav className="mt-2 flex flex-1 flex-col gap-1 overflow-y-auto px-4 pb-4 pt-1" aria-label="Primary">
         {NAV.map(({ href, labelKey, icon: Icon, indent }) => {
           const active = pathname === href || (href !== "/" && pathname?.startsWith(href));
           const paddingClass = indent ? "pl-10" : "pl-3";
@@ -44,6 +50,7 @@ export default function Sidebar() {
             <Link
               key={href}
               href={href}
+              onClick={onNavigate}
               className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 ${paddingClass} text-base font-medium transition ${
                 active
                   ? "bg-accent/15 text-white"

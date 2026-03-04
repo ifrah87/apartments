@@ -15,7 +15,7 @@ const LANGUAGE_OPTIONS: { value: Language; labelKey: string }[] = [
 
 export default function HeaderActions() {
   const { t, language, setLanguage } = useTranslations();
-  const [auth, setAuth] = useState<{ authenticated: boolean; phone?: string } | null>(null);
+  const [auth, setAuth] = useState<{ authenticated: boolean; name?: string | null; phone?: string | null } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [properties, setProperties] = useState<Array<{ id: string; name: string; status?: string | null }>>([]);
@@ -26,6 +26,13 @@ export default function HeaderActions() {
   const router = useRouter();
   const showLogin = auth?.authenticated === false && pathname !== "/login";
   const hidePropertySelector = pathname === "/properties";
+
+  const loadSession = () => {
+    fetch("/api/auth/session", { cache: "no-store", credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => setAuth(data))
+      .catch(() => setAuth({ authenticated: false }));
+  };
 
   useEffect(() => {
     const stored = window.localStorage.getItem("theme");
@@ -39,10 +46,13 @@ export default function HeaderActions() {
   }, [theme]);
 
   useEffect(() => {
-    fetch("/api/auth/session", { cache: "no-store", credentials: "include" })
-      .then((res) => res.json())
-      .then((data) => setAuth(data))
-      .catch(() => setAuth({ authenticated: false }));
+    loadSession();
+  }, [pathname]);
+
+  useEffect(() => {
+    const handleFocus = () => loadSession();
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
   }, []);
 
   useEffect(() => {
@@ -103,14 +113,14 @@ export default function HeaderActions() {
   const activeProperties = properties.filter((p) => (p.status || "active") === "active");
 
   return (
-    <div className="flex flex-1 items-center justify-end gap-4">
+    <div className="flex w-full flex-wrap items-center justify-start gap-2 sm:justify-end sm:gap-4">
       {!hidePropertySelector && activeProperties.length ? (
-        <label className="flex items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm text-slate-200">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Property</span>
+        <label className="flex max-w-full items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm text-slate-200">
+          <span className="hidden text-xs font-semibold uppercase tracking-wide text-slate-400 sm:inline">Property</span>
           <select
             value={currentProperty || ""}
             onChange={(event) => handlePropertyChange(event.target.value)}
-            className="bg-transparent text-sm font-semibold text-slate-100 outline-none"
+            className="max-w-[9rem] bg-transparent text-sm font-semibold text-slate-100 outline-none sm:max-w-[14rem]"
           >
             {activeProperties.map((property) => (
               <option key={property.id} value={property.id}>
@@ -123,13 +133,13 @@ export default function HeaderActions() {
       <button
         type="button"
         onClick={toggleTheme}
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-surface/70 text-slate-200 transition hover:border-white/20 hover:text-white"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-surface/70 text-slate-200 transition hover:border-white/20 hover:text-white"
         aria-label="Toggle theme"
       >
         {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </button>
-      <label className="flex items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm text-slate-200">
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t("language.label")}</span>
+      <label className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm text-slate-200">
+        <span className="hidden text-xs font-semibold uppercase tracking-wide text-slate-400 sm:inline">{t("language.label")}</span>
         <select
           value={language}
           onChange={(event) => setLanguage(event.target.value as Language)}
@@ -147,7 +157,7 @@ export default function HeaderActions() {
           <button
             type="button"
             onClick={() => setMenuOpen((prev) => !prev)}
-            className="flex items-center gap-2 rounded-full border border-white/10 bg-surface/70 px-3 py-1 text-sm font-semibold text-slate-100 hover:border-white/20"
+            className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-surface/70 px-3 py-1 text-sm font-semibold text-slate-100 hover:border-white/20"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
           >
@@ -173,39 +183,16 @@ export default function HeaderActions() {
           ) : null}
         </div>
       ) : auth?.authenticated ? (
-        <div ref={menuRef} className="relative">
-          <button
-            type="button"
-            onClick={() => setMenuOpen((prev) => !prev)}
-            className="flex items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-          >
-            <span className="font-semibold text-slate-100">
-              {auth.phone ? auth.phone.slice(-2).toUpperCase() : "IA"}
-            </span>
-            <span className="text-slate-400">{auth.phone || "User"}</span>
-            <span className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-surface/80 text-slate-200">
-              <LogOut className="h-4 w-4" />
-            </span>
-          </button>
-          {menuOpen ? (
-            <div
-              role="menu"
-              className="absolute right-0 mt-2 w-40 rounded-lg border border-white/10 bg-surface/95 py-1 text-sm shadow-lg"
-            >
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-slate-100 hover:bg-white/5"
-                role="menuitem"
-              >
-                Log out
-                <LogOut className="h-4 w-4 text-slate-400" />
-              </button>
-            </div>
-          ) : null}
-        </div>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-surface/70 px-3 py-1 text-sm font-semibold text-slate-100 hover:border-white/20"
+        >
+          Log out
+          <span className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-surface/80 text-slate-200">
+            <LogOut className="h-4 w-4" />
+          </span>
+        </button>
       ) : null}
     </div>
   );

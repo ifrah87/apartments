@@ -1,7 +1,8 @@
 type SessionPayload = {
   sub: string;
   role: "admin" | "reception";
-  phone: string;
+  name?: string | null;
+  phone?: string | null;
   exp: number;
 };
 
@@ -46,6 +47,11 @@ export async function verifySession(token: string, secret: string) {
 
 export function getAuthSecret() {
   const secret = process.env.AUTH_SECRET;
-  if (!secret) throw new Error("AUTH_SECRET is not set");
+  if (!secret) {
+    if (process.env.NODE_ENV !== "production") {
+      return "dev-auth-secret-local-only";
+    }
+    throw new Error("AUTH_SECRET is not set");
+  }
   return secret;
 }

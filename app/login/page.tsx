@@ -1,12 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
-  const router = useRouter();
-  const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -18,7 +16,7 @@ export default function LoginPage() {
     const res = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone, password }),
+      body: JSON.stringify({ name, pin }),
     });
 
     if (!res.ok) {
@@ -28,7 +26,7 @@ export default function LoginPage() {
       return;
     }
 
-    router.replace("/dashboard");
+    window.location.href = "/dashboard";
   };
 
   return (
@@ -36,26 +34,28 @@ export default function LoginPage() {
       <form onSubmit={handleSubmit} className="w-full space-y-4 rounded-xl border border-slate-200 bg-white p-6">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">Sign in</h1>
-          <p className="text-sm text-slate-500">Use your phone number and password.</p>
+          <p className="text-sm text-slate-500">Use your login name and 4-digit PIN.</p>
         </div>
         <div className="space-y-2">
-          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Phone</label>
+          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Login Name</label>
           <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-300"
-            placeholder="+252..."
+            placeholder="e.g. Ahmed"
             required
           />
         </div>
         <div className="space-y-2">
-          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Password</label>
+          <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">4-Digit PIN</label>
           <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            value={pin}
+            onChange={(e) => setPin(e.target.value)}
             type="password"
+            inputMode="numeric"
+            maxLength={4}
             className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-300"
-            placeholder="••••••••"
+            placeholder="1234"
             required
           />
         </div>

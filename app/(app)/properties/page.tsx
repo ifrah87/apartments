@@ -12,7 +12,7 @@ export default async function PropertiesPage() {
     return (
       <PropertiesClient
         summaries={[]}
-        initialNotice="Properties are temporarily unavailable because the database connection timed out."
+        initialNotice="We couldn't load properties right now. Please try again shortly."
       />
     );
   }

@@ -32,6 +32,10 @@ const SECURITY_KEYS = new Set([
   "settings",
 ]);
 
+function normalizeLoginName(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 function normalizePermissions(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value
@@ -55,29 +59,68 @@ async function setNamesMap(map: Record<string, string>) {
   await datasetsRepo.setDataset(NAME_DATASET_KEY, map);
 }
 
+async function usersHaveNameColumn() {
+  const columnCheck = await query(
+    "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'name' LIMIT 1",
+  );
+  return columnCheck.rows.length > 0;
+}
+
+async function ensureUsersAuthSchema() {
+  await query("ALTER TABLE public.users ADD COLUMN IF NOT EXISTS name TEXT");
+  await query("ALTER TABLE public.users ALTER COLUMN phone DROP NOT NULL");
+}
+
+async function ensureUniqueLoginName(name: string, excludeId?: string) {
+  await ensureUsersAuthSchema();
+  const normalizedName = normalizeLoginName(name);
+  if (!normalizedName) {
+    throw new Error("Login name is required.");
+  }
+
+  const hasName = await usersHaveNameColumn();
+  if (hasName) {
+    const params: string[] = [normalizedName];
+    let sql = `
+      SELECT id
+      FROM users
+      WHERE lower(regexp_replace(trim(coalesce(name, '')), '\s+', ' ', 'g')) = $1
+    `;
+    if (excludeId) {
+      params.push(excludeId);
+      sql += ` AND id <> $2`;
+    }
+    sql += " LIMIT 1";
+    const result = await query<{ id: string }>(sql, params);
+    if (result.rows.length > 0) {
+      throw new Error("A team member with this login name already exists.");
+    }
+    return;
+  }
+
+  const namesMap = await getNamesMap();
+  const duplicate = Object.entries(namesMap).find(
+    ([userId, storedName]) => userId !== excludeId && normalizeLoginName(storedName) === normalizedName,
+  );
+  if (duplicate) {
+    throw new Error("A team member with this login name already exists.");
+  }
+}
+
 export async function GET(request: Request) {
   const session = await requireAdmin(request);
   if (!session) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const columnCheck = await query("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'name' LIMIT 1");
-  const hasName = columnCheck.rows.length > 0;
+  await ensureUsersAuthSchema();
 
-  const result = hasName
-    ? await query<{
-        id: string;
-        name: string | null;
-        phone: string;
-        role: "admin" | "reception";
-        created_at: string;
-        updated_at: string;
-      }>("SELECT id, name, phone, role, created_at, updated_at FROM users ORDER BY created_at DESC")
-    : await query<{
-        id: string;
-        phone: string;
-        role: "admin" | "reception";
-        created_at: string;
-        updated_at: string;
-      }>("SELECT id, phone, role, created_at, updated_at FROM users ORDER BY created_at DESC");
+  const result = await query<{
+    id: string;
+    name: string | null;
+    phone: string | null;
+    role: "admin" | "reception";
+    created_at: string;
+    updated_at: string;
+  }>("SELECT id, name, phone, role, created_at, updated_at FROM users ORDER BY created_at DESC");
 
   const [permissionsMap, namesMap, attendance] = await Promise.all([
     getPermissionsMap(),
@@ -86,11 +129,8 @@ export async function GET(request: Request) {
   ]);
   const users = result.rows.map((row) => ({
     ...row,
-    name:
-      ("name" in row ? (row as { name: string | null }).name : null) ||
-      namesMap[(row as { id: string }).id] ||
-      null,
-    permissions: permissionsMap[(row as { id: string }).id] || [],
+    name: row.name || namesMap[row.id] || null,
+    permissions: permissionsMap[row.id] || [],
   }));
 
   return NextResponse.json({ users, attendance });
@@ -104,32 +144,48 @@ export async function PATCH(request: Request) {
   const id = String(payload?.id || "").trim();
   const role = payload?.role === "admin" || payload?.role === "reception" ? payload.role : null;
   const name = typeof payload?.name === "string" ? payload.name.trim() : null;
-  const phone = typeof payload?.phone === "string" ? payload.phone.trim() : null;
+  const hasPhoneField = Object.prototype.hasOwnProperty.call(payload, "phone");
+  const phone = typeof payload?.phone === "string" ? payload.phone.trim() : payload?.phone === null ? null : undefined;
+  const password = typeof payload?.password === "string" ? payload.password.trim() : "";
   const hasPermissions = Array.isArray(payload?.permissions);
   const permissions = normalizePermissions(payload?.permissions);
 
   if (!id) {
     return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   }
+  if (!name) {
+    return NextResponse.json({ error: "Login name is required." }, { status: 400 });
+  }
+  if (password && !/^\d{4}$/.test(password)) {
+    return NextResponse.json({ error: "PIN must be exactly 4 digits." }, { status: 400 });
+  }
+
+  try {
+    await ensureUniqueLoginName(name, id);
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid login name." }, { status: 409 });
+  }
+
+  await ensureUsersAuthSchema();
 
   const updates: string[] = [];
-  const values: string[] = [];
+  const values: Array<string | null> = [];
   let index = 1;
 
   if (role) {
     updates.push(`role = $${index++}`);
     values.push(role);
   }
-  if (phone) {
+  if (hasPhoneField) {
     updates.push(`phone = $${index++}`);
-    values.push(phone);
+    values.push(phone ?? null);
+  }
+  if (password) {
+    updates.push(`password_hash = $${index++}`);
+    values.push(hashPassword(password));
   }
 
-  const columnCheck = await query(
-    "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'name' LIMIT 1",
-  );
-  const hasName = columnCheck.rows.length > 0;
-  if (hasName && name !== null) {
+  if (name !== null) {
     updates.push(`name = $${index++}`);
     values.push(name);
   }
@@ -146,15 +202,13 @@ export async function PATCH(request: Request) {
     await setPermissionsMap(permissionsMap);
   }
 
-  if (!hasName && name !== null) {
-    const namesMap = await getNamesMap();
-    if (name) {
-      namesMap[id] = name;
-    } else {
-      delete namesMap[id];
-    }
-    await setNamesMap(namesMap);
+  const namesMap = await getNamesMap();
+  if (name) {
+    namesMap[id] = name;
+  } else {
+    delete namesMap[id];
   }
+  await setNamesMap(namesMap);
 
   return NextResponse.json({ ok: true });
 }
@@ -165,45 +219,40 @@ export async function POST(request: Request) {
 
   const payload = await request.json().catch(() => ({}));
   const name = String(payload?.name || "").trim();
-  const phone = String(payload?.phone || "").trim();
+  const phone = typeof payload?.phone === "string" ? payload.phone.trim() : "";
   const password = String(payload?.password || "").trim();
   const role = payload?.role === "admin" ? "admin" : "reception";
   const permissions = normalizePermissions(payload?.permissions);
 
-  if (!phone || !password) {
-    return NextResponse.json({ error: "Phone and password are required." }, { status: 400 });
+  if (!name || !password) {
+    return NextResponse.json({ error: "Login name and 4-digit PIN are required." }, { status: 400 });
   }
+  if (!/^\d{4}$/.test(password)) {
+    return NextResponse.json({ error: "PIN must be exactly 4 digits." }, { status: 400 });
+  }
+
+  try {
+    await ensureUniqueLoginName(name);
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid login name." }, { status: 409 });
+  }
+
+  await ensureUsersAuthSchema();
 
   const passwordHash = hashPassword(password);
 
-  const columnCheck = await query(
-    "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'name' LIMIT 1",
-  );
-  const hasName = columnCheck.rows.length > 0;
-
   try {
-    const result = hasName
-      ? await query<{
-          id: string;
-          name: string | null;
-          phone: string;
-          role: "admin" | "reception";
-          created_at: string;
-          updated_at: string;
-        }>(
-          "INSERT INTO users (name, phone, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, phone, role, created_at, updated_at",
-          [name || null, phone, passwordHash, role],
-        )
-      : await query<{
-          id: string;
-          phone: string;
-          role: "admin" | "reception";
-          created_at: string;
-          updated_at: string;
-        }>(
-          "INSERT INTO users (phone, password_hash, role) VALUES ($1, $2, $3) RETURNING id, phone, role, created_at, updated_at",
-          [phone, passwordHash, role],
-        );
+    const result = await query<{
+      id: string;
+      name: string | null;
+      phone: string | null;
+      role: "admin" | "reception";
+      created_at: string;
+      updated_at: string;
+    }>(
+      "INSERT INTO users (name, phone, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, phone, role, created_at, updated_at",
+      [name || null, phone || null, passwordHash, role],
+    );
 
     const row = result.rows[0];
     const userId = (row as { id: string }).id;
@@ -212,20 +261,18 @@ export async function POST(request: Request) {
       permissionsMap[userId] = permissions;
       await setPermissionsMap(permissionsMap);
     }
-    if (!hasName && name) {
-      const namesMap = await getNamesMap();
-      namesMap[userId] = name;
-      await setNamesMap(namesMap);
-    }
+    const namesMap = await getNamesMap();
+    namesMap[userId] = name;
+    await setNamesMap(namesMap);
     const user = {
       ...row,
-      name: "name" in row ? (row as { name: string | null }).name : name || null,
+      name: row.name ?? (name || null),
       permissions,
     };
     return NextResponse.json({ ok: true, user });
   } catch (err: any) {
     if (err?.code === "23505") {
-      return NextResponse.json({ error: "A user with this phone already exists." }, { status: 409 });
+      return NextResponse.json({ error: "A team member with this login already exists." }, { status: 409 });
     }
     console.error("Failed to create user", err);
     return NextResponse.json({ error: "Failed to create user." }, { status: 500 });

@@ -6,10 +6,11 @@ export const runtime = "nodejs";
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const status   = searchParams.get("status") ?? "UNREVIEWED";
-    const start    = searchParams.get("start") ?? undefined;
-    const end      = searchParams.get("end") ?? undefined;
-    const accountId = searchParams.get("account_id") ?? undefined;
+    const status         = searchParams.get("status") ?? "UNREVIEWED";
+    const start          = searchParams.get("start") ?? undefined;
+    const end            = searchParams.get("end") ?? undefined;
+    const accountId      = searchParams.get("account_id") ?? undefined;
+    const bankAccountId  = searchParams.get("bank_account_id") ?? undefined;
 
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -30,6 +31,10 @@ export async function GET(req: NextRequest) {
       params.push(accountId);
       conditions.push(`account_id = $${params.length}`);
     }
+    if (bankAccountId) {
+      params.push(bankAccountId);
+      conditions.push(`bank_account_id = $${params.length}`);
+    }
 
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -47,6 +52,7 @@ export async function GET(req: NextRequest) {
          transaction_number,
          source_bank,
          account_id,
+         bank_account_id,
          category,
          status,
          tenant_id,

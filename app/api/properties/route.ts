@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/lib/db";
+import { createProperty, listProperties } from "@/lib/repos/propertiesRepo";
 
 function handleError(err: unknown) {
   const message = err instanceof Error ? err.message : "Unexpected error.";
@@ -10,14 +10,8 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const includeArchived = searchParams.get("includeArchived") === "1";
-    const where = includeArchived ? "" : "WHERE status <> 'archived'";
-    const { rows } = await query(
-      `SELECT id, name, code, status
-       FROM public.properties
-       ${where}
-       ORDER BY created_at DESC`,
-    );
-    return NextResponse.json({ ok: true, data: rows });
+    const data = await listProperties(includeArchived);
+    return NextResponse.json({ ok: true, data });
   } catch (err) {
     console.error("❌ /api/properties failed:", err);
     return handleError(err);
@@ -35,14 +29,8 @@ export async function POST(req: NextRequest) {
     const address = payload?.address ? String(payload.address).trim() : null;
     const city = payload?.city ? String(payload.city).trim() : null;
     const country = payload?.country ? String(payload.country).trim() : null;
-
-    const { rows } = await query(
-      `INSERT INTO public.properties (name, code, address, city, country)
-       VALUES ($1,$2,$3,$4,$5)
-       RETURNING id, name, code, status`,
-      [name, code, address, city, country],
-    );
-    return NextResponse.json({ ok: true, data: rows[0] }, { status: 201 });
+    const data = await createProperty({ name, code, address, city, country });
+    return NextResponse.json({ ok: true, data }, { status: 201 });
   } catch (err) {
     console.error("❌ /api/properties POST failed:", err);
     return handleError(err);

@@ -66,9 +66,16 @@ begin
 end $$;
 
 -- Now the FK will work (uuid -> uuid)
-alter table public.invoice_lines
-  add constraint invoice_lines_invoice_id_fkey
-  foreign key (invoice_id) references public.invoices(id)
-  on delete cascade;
+do $$
+begin
+  if to_regclass('public.invoices') is null or to_regclass('public.invoice_lines') is null then
+    return;
+  end if;
+
+  alter table public.invoice_lines
+    add constraint invoice_lines_invoice_id_fkey
+    foreign key (invoice_id) references public.invoices(id)
+    on delete cascade;
+end $$;
 
 commit;

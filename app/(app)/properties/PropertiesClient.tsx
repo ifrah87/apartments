@@ -41,6 +41,7 @@ export default function PropertiesClient({ summaries, initialNotice = null }: Pr
       return name.includes(q) || code.includes(q);
     });
   }, [query, items]);
+  const hasSearchQuery = query.trim().length > 0;
 
   const generateCode = (name: string) =>
     name
@@ -227,7 +228,7 @@ export default function PropertiesClient({ summaries, initialNotice = null }: Pr
 
         {!filtered.length && (
           <SectionCard className="p-6 text-center text-sm text-slate-400">
-            No properties match your search.
+            {hasSearchQuery ? "No properties match your search." : "No properties available right now."}
           </SectionCard>
         )}
       </div>

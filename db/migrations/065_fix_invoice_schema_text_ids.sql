@@ -4,6 +4,10 @@ DECLARE
   invoices_id_type text;
   lines_invoice_id_type text;
 BEGIN
+  IF to_regclass('public.invoices') IS NULL OR to_regclass('public.invoice_lines') IS NULL THEN
+    RETURN;
+  END IF;
+
   SELECT data_type INTO invoices_id_type
   FROM information_schema.columns
   WHERE table_schema='public' AND table_name='invoices' AND column_name='id';
@@ -19,10 +23,17 @@ BEGIN
 END $$;
 
 -- Re-add FK (idempotent)
-ALTER TABLE public.invoice_lines
-  DROP CONSTRAINT IF EXISTS invoice_lines_invoice_id_fkey;
+DO $$
+BEGIN
+  IF to_regclass('public.invoices') IS NULL OR to_regclass('public.invoice_lines') IS NULL THEN
+    RETURN;
+  END IF;
 
-ALTER TABLE public.invoice_lines
-  ADD CONSTRAINT invoice_lines_invoice_id_fkey
-  FOREIGN KEY (invoice_id) REFERENCES public.invoices(id)
-  ON DELETE CASCADE;
+  ALTER TABLE public.invoice_lines
+    DROP CONSTRAINT IF EXISTS invoice_lines_invoice_id_fkey;
+
+  ALTER TABLE public.invoice_lines
+    ADD CONSTRAINT invoice_lines_invoice_id_fkey
+    FOREIGN KEY (invoice_id) REFERENCES public.invoices(id)
+    ON DELETE CASCADE;
+END $$;

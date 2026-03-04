@@ -5,6 +5,7 @@
  *   npx tsx scripts/import-bank.ts ./statements/march-2026.csv
  *   npx tsx scripts/import-bank.ts ./statements/march-2026.csv --dry-run
  *   npx tsx scripts/import-bank.ts ./statements/march-2026.csv --account "Current Account"
+ *   npx tsx scripts/import-bank.ts ./statements/march-2026.csv --bank-account-id <uuid>
  *
  * CSV format (Salaam Bank):
  *   TRANDATE,ACCOUNTTYPE,TRAN_NO,BRANCH,PARTICULARS,CHEQUENO,WITHDRAWAL,DEPOSIT,BALANCE
@@ -119,10 +120,11 @@ Usage:
   npx tsx scripts/import-bank.ts <csv-file> [options]
 
 Options:
-  --dry-run            Preview rows without writing to DB
-  --account <name>     Tag the bank account (e.g. "Current Account")
-  --source <bank>      Tag the source bank (default: "salaam")
-  --help               Show this help
+  --dry-run                Preview rows without writing to DB
+  --account <name>         Look up bank account by name from DB and tag UUID
+  --bank-account-id <uuid> Tag a specific bank account UUID directly
+  --source <bank>          Tag the source bank (default: "salaam")
+  --help                   Show this help
     `.trim());
     process.exit(0);
   }
@@ -136,7 +138,9 @@ Options:
 
   const dryRun = args.includes("--dry-run");
   const accountIdx = args.indexOf("--account");
-  const account = accountIdx !== -1 ? args[accountIdx + 1] : null;
+  const accountName = accountIdx !== -1 ? args[accountIdx + 1] : null;
+  const bankAccountIdIdx = args.indexOf("--bank-account-id");
+  const bankAccountIdArg = bankAccountIdIdx !== -1 ? args[bankAccountIdIdx + 1] : null;
   const sourceIdx = args.indexOf("--source");
   const sourceBank = sourceIdx !== -1 ? args[sourceIdx + 1] : "salaam";
 
@@ -178,7 +182,7 @@ Options:
     balance: number | null;
     amount: number;
     source_bank: string;
-    account_id: string | null;
+    bank_account_id: string | null;
     raw: Record<string, string>;
   };
 
@@ -211,7 +215,7 @@ Options:
         balance,
         amount,
         source_bank: sourceBank,
-        account_id: account,
+        bank_account_id: null, // resolved below
         raw: { ...row },
       });
     } catch (err) {
@@ -225,7 +229,7 @@ Options:
     skippedParse.forEach((m) => console.warn(`   ${m}`));
   }
 
-  // Dry run: just print the table
+  // Dry run: just print the table (no DB needed)
   if (dryRun) {
     console.log(`\n📋 Dry run — ${records.length} rows would be imported:\n`);
     console.log(
@@ -239,12 +243,13 @@ Options:
       );
     }
     console.log(`\n✅ Dry run complete. ${records.length} rows ready to import.`);
-    if (account) console.log(`   Account tag: ${account}`);
+    if (bankAccountIdArg) console.log(`   Bank account ID: ${bankAccountIdArg}`);
+    if (accountName) console.log(`   Account name (will be looked up): ${accountName}`);
     console.log("   Run without --dry-run to write to DB.\n");
     process.exit(0);
   }
 
-  // Connect and insert
+  // Connect to DB
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     console.error("❌ DATABASE_URL not set. Add it to .env.local");
@@ -256,6 +261,26 @@ Options:
     ssl: databaseUrl.includes("localhost") ? false : { rejectUnauthorized: false },
   });
 
+  // Resolve bank_account_id UUID
+  let resolvedBankAccountId: string | null = bankAccountIdArg ?? null;
+
+  if (!resolvedBankAccountId && accountName) {
+    const { rows: acctRows } = await pool.query<{ id: string }>(
+      `SELECT id FROM public.bank_accounts WHERE name = $1 AND is_active = true LIMIT 1`,
+      [accountName],
+    );
+    if (!acctRows.length) {
+      console.error(`❌ No active bank account found with name: "${accountName}"`);
+      await pool.end();
+      process.exit(1);
+    }
+    resolvedBankAccountId = acctRows[0].id;
+    console.log(`  Resolved "${accountName}" → ${resolvedBankAccountId}`);
+  }
+
+  // Stamp all records
+  for (const r of records) r.bank_account_id = resolvedBankAccountId;
+
   let imported = 0;
   let skipped = 0;
 
@@ -264,7 +289,7 @@ Options:
       const result = await pool.query(
         `INSERT INTO public.bank_transactions
            (txn_date, ref, branch, particulars, withdrawal, deposit, balance,
-            fingerprint, source_bank, account_id, payee, transaction_number, raw)
+            fingerprint, source_bank, bank_account_id, payee, transaction_number, raw)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT (fingerprint) WHERE fingerprint IS NOT NULL
          DO NOTHING`,
@@ -278,7 +303,7 @@ Options:
           r.balance,
           r.fingerprint,
           r.source_bank,
-          r.account_id,
+          r.bank_account_id,
           r.payee,
           r.transaction_number,
           JSON.stringify(r.raw),
@@ -296,7 +321,7 @@ Options:
 
   console.log(`\n✓ Imported: ${imported} new transactions`);
   if (skipped > 0) console.log(`⚠ Skipped:  ${skipped} duplicates`);
-  if (account) console.log(`  Account:   ${account}`);
+  if (resolvedBankAccountId) console.log(`  Bank account: ${accountName ?? resolvedBankAccountId}`);
   console.log();
 }
 
