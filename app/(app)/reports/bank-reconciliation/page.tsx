@@ -334,11 +334,11 @@ export default function BankReconciliationPage() {
           <div className="mb-4 flex items-center gap-2">
             <button type="button" onClick={() => setSubTab("tocode")}
               className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${subTab === "tocode" ? "bg-amber-500/20 text-amber-300" : "border border-white/10 text-slate-400 hover:text-slate-200"}`}>
-              Code ({unreviewed.length})
+              Unreconciled ({unreviewed.length})
             </button>
             <button type="button" onClick={() => setSubTab("coded")}
               className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${subTab === "coded" ? "bg-emerald-500/20 text-emerald-300" : "border border-white/10 text-slate-400 hover:text-slate-200"}`}>
-              Coded ({reviewed.length})
+              Reconciled ({reviewed.length})
             </button>
           </div>
           {loadingTxns && <p className="py-8 text-center text-sm text-slate-500">Loading transactions…</p>}
