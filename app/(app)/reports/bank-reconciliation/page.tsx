@@ -80,7 +80,13 @@ export default function BankReconciliationPage() {
     const params = new URLSearchParams({ status: "all" });
     if (selectedAccountId) params.set("bank_account_id", selectedAccountId);
     fetch(`/api/transactions?${params}`).then(r => r.json()).then(p => {
-      if (p.ok) setTxns(p.data ?? []);
+      if (p.ok) setTxns((p.data ?? []).map((t: Txn) => ({
+        ...t,
+        amount: Number(t.amount),
+        deposit: Number(t.deposit),
+        withdrawal: Number(t.withdrawal),
+        balance: t.balance != null ? Number(t.balance) : null,
+      })));
       else setTxnError(p.error ?? "Failed to load");
     }).catch(() => setTxnError("Network error")).finally(() => setLoadingTxns(false));
   }, [selectedAccountId]);
