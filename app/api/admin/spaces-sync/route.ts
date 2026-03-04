@@ -151,12 +151,13 @@ async function runSync(dryRun: boolean, prefix: string) {
       for (const r of records) {
         const res = await query(
           `INSERT INTO public.bank_transactions
-             (txn_date, particulars, payee, ref, deposit, withdrawal,
+             (txn_date, particulars, payee, ref, deposit, withdrawal, balance,
               fingerprint, source_bank, source_key, transaction_number,
               status, category)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,'spaces-sync',$8,$9,'UNREVIEWED','SUSPENSE')
-           ON CONFLICT (fingerprint) WHERE fingerprint IS NOT NULL DO NOTHING`,
-          [r.txn_date, r.particulars, r.payee, r.reference, r.deposit, r.withdrawal,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'spaces-sync',$9,$10,'UNREVIEWED','SUSPENSE')
+           ON CONFLICT (fingerprint) WHERE fingerprint IS NOT NULL
+           DO UPDATE SET balance = EXCLUDED.balance WHERE public.bank_transactions.balance IS NULL`,
+          [r.txn_date, r.particulars, r.payee, r.reference, r.deposit, r.withdrawal, r.balance,
            r.fingerprint, file.key, r.transaction_number],
         );
         if (res.rowCount && res.rowCount > 0) inserted++; else skippedDupes++;
