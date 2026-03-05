@@ -575,15 +575,6 @@ export default function AdminSettingsPage() {
                 placeholder="e.g. Ahmed"
               />
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-600">Phone (Optional)</label>
-              <input
-                value={form.phone}
-                onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-300"
-                placeholder="Contact number for staff records"
-              />
-            </div>
             {drawerMode === "add" ? (
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-600">4-Digit PIN</label>
