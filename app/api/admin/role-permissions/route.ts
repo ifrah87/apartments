@@ -32,7 +32,6 @@ const DEFAULT_PERMISSIONS: RolePermissions = {
   manager: ["dashboard", "properties", "units", "readings", "bills", "bank", "leases", "services", "reports"],
   accountant: ["dashboard", "bills", "bank", "reports"],
   reception: ["dashboard", "units", "readings", "bills"],
-  maintenance: ["dashboard", "units", "readings"],
 };
 
 async function requireAdmin(req: NextRequest) {

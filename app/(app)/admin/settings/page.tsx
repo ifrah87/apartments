@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Clock3, Pencil, Plus, Save, Shield, Trash2, UserRound, X, ShieldCheck, Calculator, Hammer } from "lucide-react";
+import { Clock3, Pencil, Plus, Save, Shield, Trash2, UserRound, X, ShieldCheck, Calculator } from "lucide-react";
 import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
 
-type AppRole = "admin" | "manager" | "accountant" | "reception" | "maintenance";
+type AppRole = "admin" | "manager" | "accountant" | "reception";
 
 type UserRow = {
   id: string;
@@ -43,10 +43,9 @@ const ALL_SECTIONS = [
 ] as const;
 
 const ROLES: { id: AppRole; label: string }[] = [
-  { id: "manager",     label: "Manager" },
-  { id: "accountant",  label: "Accountant" },
-  { id: "reception",   label: "Reception" },
-  { id: "maintenance", label: "Maintenance" },
+  { id: "manager",    label: "Manager" },
+  { id: "accountant", label: "Accountant" },
+  { id: "reception",  label: "Reception" },
 ];
 
 const dateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -89,7 +88,6 @@ export default function AdminSettingsPage() {
       manager:     { label: "Manager",     badge: "bg-purple-500/15 text-purple-300 border border-purple-500/30", stripe: "border-purple-400", icon: ShieldCheck },
       accountant:  { label: "Accountant",  badge: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30", stripe: "border-emerald-400", icon: Calculator },
       reception:   { label: "Reception",   badge: "bg-amber-500/15 text-amber-300 border border-amber-500/30",  stripe: "border-amber-400",  icon: UserRound },
-      maintenance: { label: "Maintenance", badge: "bg-orange-500/15 text-orange-300 border border-orange-500/30", stripe: "border-orange-400", icon: Hammer },
     }),
     []
   );
@@ -377,7 +375,7 @@ export default function AdminSettingsPage() {
             <tbody>
               {attendance.length ? (
                 attendance.map((row) => {
-                  const roleLabels: Record<string, string> = { admin: "Admin", manager: "Manager", accountant: "Accountant", reception: "Reception", maintenance: "Maintenance" };
+                  const roleLabels: Record<string, string> = { admin: "Admin", manager: "Manager", accountant: "Accountant", reception: "Reception" };
                   const role = roleLabels[row.role ?? ""] ?? (row.role ?? "—");
                   const displayName = (row.name || "").trim() || row.phone || "User";
                   return (
@@ -628,7 +626,6 @@ export default function AdminSettingsPage() {
                 <option value="manager">Manager</option>
                 <option value="accountant">Accountant</option>
                 <option value="reception">Reception</option>
-                <option value="maintenance">Maintenance</option>
               </select>
               <p className="text-xs text-slate-400">Permissions for each role are set in the Roles & Permissions tab.</p>
             </div>
