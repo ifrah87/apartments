@@ -4,20 +4,11 @@ import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import { ChevronDown, ChevronUp, Plus, X } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
+import type { TxnDTO } from "@/src/types/transactions";
 
 type BankAccount = {
   id: string; name: string; bank_name: string; account_number: string | null;
   currency: string; color: string; is_default: boolean;
-};
-type Txn = {
-  id: string; date: string; payee: string; raw_particulars: string;
-  amount: number; deposit: number; withdrawal: number; balance: number | null;
-  reference: string | null; transaction_number: string | null;
-  source_bank: string | null;
-  status: string; category: string | null;
-  tenant_id: string | null; property_id: string | null; unit_id: string | null;
-  account_code: string | null; alloc_notes: string | null;
-  bank_account_id: string | null;
 };
 type CoaEntry = { code: string; name: string; category: string };
 type Property = { id: string; name: string };
@@ -30,6 +21,7 @@ type CodingForm = {
 type SplitLine = {
   key: string; amount: string; account_code: string; unit_id: string; notes: string;
 };
+type TxnWithBalance = TxnDTO & { displayBalance: number };
 type ActiveTab = "reconcile" | "statements" | "transactions" | "summary";
 
 const fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -45,7 +37,7 @@ const newKey = () => String(++splitKeyCounter);
 export default function BankReconciliationPage() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
-  const [txns, setTxns] = useState<Txn[]>([]);
+  const [txns, setTxns] = useState<TxnDTO[]>([]);
   const [loadingTxns, setLoadingTxns] = useState(false);
   const [txnError, setTxnError] = useState<string | null>(null);
   const [coa, setCoa] = useState<CoaEntry[]>([]);
@@ -117,21 +109,26 @@ export default function BankReconciliationPage() {
     setLoadingTxns(true); setTxnError(null);
     const params = new URLSearchParams({ status: "all" });
     if (selectedAccountId) params.set("bank_account_id", selectedAccountId);
-    fetch(`/api/transactions?${params}`).then(r => r.json()).then(p => {
-      if (p.ok) setTxns((p.data ?? []).map((t: Txn) => ({
-        ...t,
-        amount: Number(t.amount),
-        deposit: Number(t.deposit),
-        withdrawal: Number(t.withdrawal),
-        balance: t.balance != null ? Number(t.balance) : null,
-      })));
-      else setTxnError(p.error ?? "Failed to load");
-    }).catch(() => setTxnError("Network error")).finally(() => setLoadingTxns(false));
+    fetch(`/api/transactions?${params}`)
+      .then(r => r.json())
+      .then((p) => {
+        if (!p?.ok) throw new Error(p?.error ?? "Failed to load transactions");
+        const rows: TxnDTO[] = Array.isArray(p.data) ? p.data : [];
+        setTxns(rows.map((t) => ({
+          ...t,
+          amount: Number(t.amount),
+          deposit: Number(t.deposit),
+          withdrawal: Number(t.withdrawal),
+          balance: t.balance != null ? Number(t.balance) : null,
+        })));
+      })
+      .catch((err) => setTxnError(err instanceof Error ? err.message : "Network error"))
+      .finally(() => setLoadingTxns(false));
   }, [selectedAccountId]);
 
   useEffect(() => { loadTxns(); }, [loadTxns]);
 
-  async function openRow(txn: Txn) {
+  async function openRow(txn: TxnDTO) {
     if (expandedId === txn.id) { setExpandedId(null); setSplitMode(false); return; }
     setExpandedId(txn.id);
     setSplitMode(false);
@@ -162,7 +159,7 @@ export default function BankReconciliationPage() {
     }
   }
 
-  function initSplitMode(txn: Txn) {
+  function initSplitMode(txn: TxnDTO) {
     setSplitLines([
       { key: newKey(), amount: String(txn.amount), account_code: "4010", unit_id: codingForm.unit_id, notes: "" },
       { key: newKey(), amount: "0", account_code: "2010", unit_id: codingForm.unit_id, notes: "" },
@@ -170,7 +167,7 @@ export default function BankReconciliationPage() {
     setSplitMode(true);
   }
 
-  async function saveCoding(txn: Txn) {
+  async function saveCoding(txn: TxnDTO) {
     setSaving(true);
     try {
       let body: Record<string, unknown>;
@@ -254,7 +251,7 @@ export default function BankReconciliationPage() {
     } finally { setSaving(false); }
   }
 
-  async function removeCoding(txn: Txn) {
+  async function removeCoding(txn: TxnDTO) {
     setSaving(true);
     try {
       const res = await fetch("/api/transactions/allocate", {
@@ -273,7 +270,7 @@ export default function BankReconciliationPage() {
   // Compute running balance for every transaction.
   // Use the real `balance` column if populated; otherwise compute a cumulative
   // running total starting from 0 (oldest → newest).
-  const txnsWithBal = (() => {
+  const txnsWithBal: TxnWithBalance[] = (() => {
     const asc = [...txns].reverse(); // oldest first
     let running = 0;
     const mapped = asc.map(t => {
@@ -455,7 +452,7 @@ export default function BankReconciliationPage() {
                       <p className={`text-base font-semibold tabular-nums ${txn.amount >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                         {txn.amount >= 0 ? "+" : ""}{fmt.format(txn.amount)}
                       </p>
-                      <p className="text-xs tabular-nums text-slate-500">{fmt.format((txn as Txn & { displayBalance: number }).displayBalance)}</p>
+                      <p className="text-xs tabular-nums text-slate-500">{fmt.format(txn.displayBalance)}</p>
                     </div>
                     <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5">
                       {isCoded ? (
@@ -758,7 +755,7 @@ export default function BankReconciliationPage() {
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{txn.reference ?? "—"}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-rose-400">{txn.withdrawal > 0 ? fmt.format(txn.withdrawal) : ""}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-emerald-400">{txn.deposit > 0 ? fmt.format(txn.deposit) : ""}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-slate-300">{fmt.format((txn as Txn & { displayBalance: number }).displayBalance)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-300">{fmt.format(txn.displayBalance)}</td>
                       <td className="px-4 py-3 text-xs text-slate-500">{txn.source_bank ?? "—"}</td>
                       <td className="px-4 py-3"><StatusBadge status={txn.status} /></td>
                     </tr>

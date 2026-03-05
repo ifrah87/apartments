@@ -117,7 +117,7 @@ function extractMeterSnapshot(meta: Record<string, any> | null | undefined): Met
 }
 
 export async function GET(_req: NextRequest, context: { params: RouteParams }) {
-  const { id } = await Promise.resolve(context.params);
+  const { id } = await context.params;
   const invoiceRes = await query(
     `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, period, line_items, meter_snapshot
      FROM public.invoices
@@ -180,7 +180,7 @@ function normalizeInvoiceStatus(value: unknown): "draft" | "unpaid" | "paid" | "
 }
 
 export async function PATCH(req: NextRequest, context: { params: RouteParams }) {
-  const { id } = await Promise.resolve(context.params);
+  const { id } = await context.params;
   try {
     const body = await req.json();
 

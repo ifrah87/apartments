@@ -1,13 +1,11 @@
 import { assertAdminDelete } from "@/lib/adminDelete";
 import { query } from "@/lib/db";
 
-type ParamsMaybePromise = { id: string } | Promise<{ id: string }>;
-
-export async function DELETE(req: Request, context: { params: ParamsMaybePromise }) {
+export async function DELETE(req: Request, context: { params: Promise<{ id: string }> }) {
   const auth = assertAdminDelete(req);
   if (!auth.ok) return auth.res;
 
-  const { id } = await Promise.resolve(context.params);
+  const { id } = await context.params;
 
   await query("BEGIN");
   try {

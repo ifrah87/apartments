@@ -20,6 +20,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "id is required" }, { status: 400 });
     }
 
+    const { rows: statusRows } = await query<{ status: string }>(
+      "SELECT status FROM public.bank_transactions WHERE id = $1",
+      [id],
+    );
+    if (!statusRows.length) {
+      return NextResponse.json({ ok: false, error: "Transaction not found" }, { status: 404 });
+    }
+
+    const currentStatus = String(statusRows[0].status ?? "").toUpperCase();
+    const requestedStatus = String(body.status ?? "REVIEWED").toUpperCase();
+    const isExplicitUncode =
+      requestedStatus === "UNREVIEWED" &&
+      !Array.isArray(body.splits) &&
+      (body.tenant_id == null || body.tenant_id === "") &&
+      (body.property_id == null || body.property_id === "") &&
+      (body.unit_id == null || body.unit_id === "") &&
+      (body.account_code == null || body.account_code === "") &&
+      (body.notes == null || body.notes === "");
+
+    if (currentStatus === "CODED" && !isExplicitUncode) {
+      return NextResponse.json(
+        { ok: false, error: "Transaction is CODED. Uncode it first before making changes." },
+        { status: 409 },
+      );
+    }
+
     // ── Split mode ──────────────────────────────────────────────────────────
     if (Array.isArray(body.splits) && body.splits.length > 0) {
       const splits: SplitPayload[] = body.splits;
@@ -70,7 +96,7 @@ export async function POST(req: NextRequest) {
 
     // ── Single-line coding ───────────────────────────────────────────────────
     const { tenant_id, property_id, unit_id, account_code, notes } = body;
-    const status = (body.status ?? "REVIEWED").toUpperCase();
+    const status = requestedStatus;
 
     // Remove any existing splits when re-coding as single line
     await query("DELETE FROM public.bank_transaction_splits WHERE transaction_id = $1", [id]);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import type { TxnDTO } from "@/src/types/transactions";
 
 export const runtime = "nodejs";
 
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
 
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const { rows } = await query(
+    const { rows } = await query<TxnDTO>(
       `SELECT
          id,
          txn_date                                    AS date,
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
          balance,
          ref                                         AS reference,
          transaction_number,
-         source_bank,
+         COALESCE(source_bank, '')::text             AS source_bank,
          account_id,
          bank_account_id,
          category,

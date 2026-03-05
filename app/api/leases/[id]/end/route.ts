@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 
-type ParamsMaybePromise = { id: string } | Promise<{ id: string }>;
-
 export async function PATCH(
   req: NextRequest,
-  context: { params: ParamsMaybePromise },
+  context: { params: Promise<{ id: string }> },
 ) {
-  const { id } = await Promise.resolve(context.params);
+  const { id } = await context.params;
   const body = await req.json().catch(() => ({}));
   const endDate = body.endDate || new Date().toISOString().slice(0, 10);
 
