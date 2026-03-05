@@ -635,7 +635,7 @@ export default function AdminSettingsPage() {
             <div className="space-y-3">
               <label className="text-sm font-semibold text-slate-600">Security Access</label>
               <div className="grid grid-cols-1 gap-2">
-                {securityTypes.map((item) => {
+                {ALL_SECTIONS.map((item) => {
                   const checked = form.permissions.includes(item.id);
                   return (
                     <label
