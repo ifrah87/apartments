@@ -13,16 +13,28 @@ function normalizeLoginName(value: string) {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+const VALID_ROLES = ["admin", "manager", "accountant", "reception"] as const;
+type AppRole = (typeof VALID_ROLES)[number];
+
+function normalizeAppRole(value: unknown): AppRole {
+  const normalized = String(value ?? "").trim().toLowerCase() as AppRole;
+  return VALID_ROLES.includes(normalized) ? normalized : "reception";
+}
+
+let _usersHasNameColumn: boolean | null = null;
 async function usersHaveNameColumn() {
+  if (_usersHasNameColumn !== null) return _usersHasNameColumn;
   const result = await query(
     `SELECT 1
-     FROM information_schema.columns
-     WHERE table_schema = 'public'
-       AND table_name = 'users'
-       AND column_name = 'name'
+     FROM pg_catalog.pg_attribute a
+     JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relname = 'users' AND a.attname = 'name'
+       AND a.attnum > 0 AND NOT a.attisdropped
      LIMIT 1`,
   );
-  return result.rows.length > 0;
+  _usersHasNameColumn = result.rows.length > 0;
+  return _usersHasNameColumn;
 }
 
 export async function POST(request: Request) {
@@ -44,7 +56,7 @@ export async function POST(request: Request) {
           name: string | null;
           phone: string | null;
           password_hash: string;
-          role: "admin" | "reception";
+          role: string | null;
         }
       | undefined;
 
@@ -54,7 +66,7 @@ export async function POST(request: Request) {
         name: string | null;
         phone: string | null;
         password_hash: string;
-        role: "admin" | "reception";
+        role: string | null;
       }>(
         `SELECT id, name, phone, password_hash, role
          FROM users
@@ -72,7 +84,7 @@ export async function POST(request: Request) {
           name: string | null;
           phone: string | null;
           password_hash: string;
-          role: "admin" | "reception";
+          role: string | null;
         }>(
           "SELECT id, NULL::text as name, phone, password_hash, role FROM users WHERE id = $1 LIMIT 1",
           [matchedUserId],
@@ -85,17 +97,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid credentials." }, { status: 401 });
     }
 
+    const appRole = normalizeAppRole(user.role);
+
     await clockInUser({
       id: user.id,
       phone: user.phone,
-      role: user.role,
+      role: appRole,
       name: "name" in user ? (user as { name: string | null }).name : null,
     });
 
     const session = await signSession(
       {
         sub: user.id,
-        role: user.role,
+        role: appRole,
         name: user.name ?? null,
         phone: user.phone ?? null,
         exp: Date.now() + 1000 * 60 * 60 * 12,
@@ -103,7 +117,7 @@ export async function POST(request: Request) {
       getAuthSecret()
     );
 
-    const response = NextResponse.json({ ok: true, role: user.role });
+    const response = NextResponse.json({ ok: true, role: appRole });
     response.cookies.set("session", session, {
       httpOnly: true,
       sameSite: "lax",

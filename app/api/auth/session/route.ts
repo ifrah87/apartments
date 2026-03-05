@@ -3,6 +3,14 @@ import { getAuthSecret, verifySession } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
+const VALID_ROLES = ["admin", "manager", "accountant", "reception"] as const;
+type AppRole = (typeof VALID_ROLES)[number];
+
+function normalizeAppRole(value: unknown): AppRole {
+  const normalized = String(value ?? "").trim().toLowerCase() as AppRole;
+  return VALID_ROLES.includes(normalized) ? normalized : "reception";
+}
+
 export async function GET(request: Request) {
   const cookie = request.headers.get("cookie") || "";
   const match = cookie.match(/(?:^|; )session=([^;]+)/);
@@ -13,7 +21,6 @@ export async function GET(request: Request) {
   return NextResponse.json({
     authenticated: true,
     name: session.name ?? null,
-    phone: session.phone ?? null,
-    role: session.role,
+    role: normalizeAppRole(session.role),
   });
 }
