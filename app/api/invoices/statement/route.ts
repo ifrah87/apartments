@@ -236,7 +236,7 @@ export async function GET(req: NextRequest) {
     const filename = `statement_${safeName}.pdf`;
     const disposition = mode === "download" ? `attachment; filename="${filename}"` : `inline; filename="${filename}"`;
 
-    return new NextResponse(pdf, {
+    return new NextResponse(new Uint8Array(pdf), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",

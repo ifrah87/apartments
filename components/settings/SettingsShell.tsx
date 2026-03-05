@@ -7,7 +7,7 @@ type Toast = { type: "success" | "error"; message: string } | null;
 type Props = {
   title: string;
   description: string;
-  onSave: () => void;
+  onSave?: () => void;
   onReset?: () => void;
   saving?: boolean;
   toast?: Toast;
@@ -43,14 +43,16 @@ export default function SettingsShell({
               Reset to defaults
             </button>
           ) : null}
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={saving}
-            className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900 shadow-[0_10px_20px_rgba(56,189,248,0.25)] hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {saving ? "Saving..." : "Save"}
-          </button>
+          {onSave ? (
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving}
+              className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900 shadow-[0_10px_20px_rgba(56,189,248,0.25)] hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          ) : null}
         </div>
       </div>
 

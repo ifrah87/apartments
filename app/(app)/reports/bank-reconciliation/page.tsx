@@ -13,6 +13,7 @@ type Txn = {
   id: string; date: string; payee: string; raw_particulars: string;
   amount: number; deposit: number; withdrawal: number; balance: number | null;
   reference: string | null; transaction_number: string | null;
+  source_bank: string | null;
   status: string; category: string | null;
   tenant_id: string | null; property_id: string | null; unit_id: string | null;
   account_code: string | null; alloc_notes: string | null;
