@@ -200,6 +200,39 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
       return NextResponse.json({ ok: true, data: { id, status: nextStatus } });
     }
 
+    // Fast path: record a payment against this invoice (accumulates amount_paid, auto-sets status)
+    if (body?.add_payment !== undefined && Object.keys(body).length === 1) {
+      const paymentAmount = Number(body.add_payment || 0);
+      if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+        return NextResponse.json({ ok: false, error: "add_payment must be a positive number." }, { status: 400 });
+      }
+      const res = await query(
+        `UPDATE public.invoices
+            SET amount_paid = LEAST(amount_paid + $1, total_amount),
+                status = CASE
+                  WHEN amount_paid + $1 >= total_amount THEN 'paid'
+                  ELSE 'partially_paid'
+                END
+          WHERE id = $2
+          RETURNING id, status, total_amount, amount_paid`,
+        [paymentAmount, id],
+      );
+      if (!res.rowCount) {
+        return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
+      }
+      const row = res.rows[0] as { id: string; status: string; total_amount: number; amount_paid: number };
+      return NextResponse.json({
+        ok: true,
+        data: {
+          id: row.id,
+          status: row.status,
+          total: Number(row.total_amount),
+          amount_paid: Number(row.amount_paid),
+          outstanding: Math.max(0, Number(row.total_amount) - Number(row.amount_paid)),
+        },
+      });
+    }
+
     const existingInvoiceRes = await query(
       `SELECT id, unit_id, invoice_date, due_date, period
        FROM public.invoices

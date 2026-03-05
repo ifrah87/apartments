@@ -69,39 +69,50 @@ export default function Sidebar({
     ? NAV
     : NAV.filter(item => allowedPerms.has(item.permission));
 
+  const settingsItem = visibleNav.find(item => item.permission === "settings");
+  const mainNav = visibleNav.filter(item => item.permission !== "settings");
+
+  const renderLink = ({ href, labelKey, icon: Icon, indent }: NavItem) => {
+    const active = pathname === href || (href !== "/" && pathname?.startsWith(href));
+    const paddingClass = indent ? "pl-10" : "pl-3";
+    return (
+      <Link
+        key={href}
+        href={href}
+        onClick={onNavigate}
+        className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 ${paddingClass} text-base font-medium transition ${
+          active
+            ? "bg-accent/15 text-white"
+            : "text-slate-400 hover:bg-white/5 hover:text-white"
+        }`}
+      >
+        <span
+          className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
+            active ? "bg-accent/20 text-accent" : "text-slate-400 group-hover:text-slate-200"
+          }`}
+        >
+          <Icon className="h-5 w-5" />
+        </span>
+        <span className="truncate">{t(labelKey)}</span>
+      </Link>
+    );
+  };
+
   return (
-    <aside className={`z-40 w-64 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 lg:w-72 ${className}`}>
+    <aside className={`z-40 flex w-64 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 lg:w-72 ${className}`}>
       <div className="pt-0">
         <SidebarBrand />
         <div className="mx-5 mt-1 h-px bg-white/5" />
       </div>
-      <nav className="mt-2 flex flex-1 flex-col gap-1 overflow-y-auto px-4 pb-4 pt-1 lg:flex-none lg:overflow-visible" aria-label="Primary">
-        {visibleNav.map(({ href, labelKey, icon: Icon, indent }) => {
-          const active = pathname === href || (href !== "/" && pathname?.startsWith(href));
-          const paddingClass = indent ? "pl-10" : "pl-3";
-          return (
-            <Link
-              key={href}
-              href={href}
-              onClick={onNavigate}
-              className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 ${paddingClass} text-base font-medium transition ${
-                active
-                  ? "bg-accent/15 text-white"
-                  : "text-slate-400 hover:bg-white/5 hover:text-white"
-              }`}
-            >
-              <span
-                className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
-                  active ? "bg-accent/20 text-accent" : "text-slate-400 group-hover:text-slate-200"
-                }`}
-              >
-                <Icon className="h-5 w-5" />
-              </span>
-              <span className="truncate">{t(labelKey)}</span>
-            </Link>
-          );
-        })}
+      <nav className="mt-2 flex flex-col gap-1 overflow-y-auto px-4 pt-1" aria-label="Primary">
+        {mainNav.map(renderLink)}
       </nav>
+      {settingsItem && (
+        <div className="mt-auto px-4 pb-4">
+          <div className="mb-2 h-px bg-white/5" />
+          {renderLink(settingsItem)}
+        </div>
+      )}
     </aside>
   );
 }

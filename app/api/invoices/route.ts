@@ -37,6 +37,7 @@ export async function GET(req: NextRequest) {
          i.invoice_date,
          i.due_date,
          i.total_amount,
+         COALESCE(i.amount_paid, 0) AS amount_paid,
          i.status,
          i.period,
          i.tenant_id,
@@ -59,12 +60,16 @@ export async function GET(req: NextRequest) {
         }
       }
       if (!period && r.period) period = String(r.period);
+      const total = Number(r.total_amount || 0);
+      const amount_paid = Number(r.amount_paid || 0);
       return {
         id: String(r.id),
         invoiceNumber: String(r.invoice_number || r.id).slice(0, 20),
         invoiceDate: r.invoice_date ? String(r.invoice_date).slice(0, 10) : null,
         dueDate: r.due_date ? String(r.due_date).slice(0, 10) : null,
-        total: Number(r.total_amount || 0),
+        total,
+        amount_paid,
+        outstanding: Math.max(0, total - amount_paid),
         status: String(r.status || "Unpaid"),
         period,
         tenantId: r.tenant_id ? String(r.tenant_id) : null,

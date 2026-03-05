@@ -6,7 +6,7 @@ import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { DEFAULT_LEASES, type LeaseAgreement } from "@/lib/leases";
-import { FileDown, Search, Eye } from "lucide-react";
+import { FileDown, Search, Eye, Trash2 } from "lucide-react";
 
 const STATUS_VARIANTS: Record<string, "success" | "warning" | "danger" | "info"> = {
   Active: "success",
@@ -159,6 +159,21 @@ export default function LeaseStatementsReportPage() {
       })
       .catch(() => setLeases(DEFAULT_LEASES));
   }, []);
+
+  async function deleteLease(lease: LeaseAgreement) {
+    if (!confirm(`Delete lease for ${lease.tenantName} (Unit ${lease.unit})?`)) return;
+    const res = await fetch("/api/lease-agreements", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: lease.id }),
+    });
+    const p = await res.json().catch(() => null);
+    if (p?.ok && Array.isArray(p.data)) {
+      setLeases(p.data);
+    } else {
+      setLeases((prev) => prev.filter((l) => l.id !== lease.id));
+    }
+  }
 
   useEffect(() => {
     fetch("/api/properties", { cache: "no-store" })
@@ -343,13 +358,22 @@ export default function LeaseStatementsReportPage() {
                   <td className="px-4 py-3">{lease.cycle}</td>
                   <td className="px-4 py-3 text-slate-100">{formatCurrency(lease.rent)}</td>
                   <td className="px-4 py-3 text-right">
-                    <Link
-                      href={`/reports/lease-statements/${lease.id}`}
-                      className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-white/20"
-                    >
-                      <Eye className="h-4 w-4" />
-                      View Statement
-                    </Link>
+                    <div className="flex items-center justify-end gap-2">
+                      <Link
+                        href={`/reports/lease-statements/${lease.id}`}
+                        className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-white/20"
+                      >
+                        <Eye className="h-4 w-4" />
+                        View Statement
+                      </Link>
+                      <button
+                        onClick={() => deleteLease(lease)}
+                        className="rounded-lg border border-white/10 p-1.5 text-slate-500 hover:border-red-500/30 hover:text-red-400"
+                        title="Delete lease"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

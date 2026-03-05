@@ -13,13 +13,13 @@ type BankAccount = {
 type CoaEntry = { code: string; name: string; category: string };
 type Property = { id: string; name: string };
 type Unit = { id: string; unit: string };
-type InvoiceOption = { id: string; period: string; total: number; status: string; invoiceNumber: string };
+type InvoiceOption = { id: string; period: string; total: number; outstanding: number; status: string; invoiceNumber: string };
 type CodingForm = {
   who: string; account_code: string; property_id: string;
   unit_id: string; notes: string; invoice_id: string;
 };
 type SplitLine = {
-  key: string; amount: string; account_code: string; unit_id: string; notes: string;
+  key: string; amount: string; account_code: string; unit_id: string; notes: string; invoice_id: string;
 };
 type TxnWithBalance = TxnDTO & { displayBalance: number };
 type ActiveTab = "reconcile" | "statements" | "transactions" | "summary";
@@ -54,6 +54,7 @@ export default function BankReconciliationPage() {
   const [syncing, setSyncing] = useState(false);
   const [invoiceOptions, setInvoiceOptions] = useState<InvoiceOption[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
+  const [splitInvoiceOptions, setSplitInvoiceOptions] = useState<Record<string, InvoiceOption[]>>({});
 
   useEffect(() => {
     fetch("/api/bank-accounts").then(r => r.json()).then(p => {
@@ -73,7 +74,12 @@ export default function BankReconciliationPage() {
   useEffect(() => {
     if (!codingForm.property_id) { setUnits([]); return; }
     fetch(`/api/units?property_id=${codingForm.property_id}`).then(r => r.json()).then(p => {
-      setUnits(p.ok ? p.data : Array.isArray(p) ? p : []);
+      const arr: Unit[] = p.ok ? p.data : Array.isArray(p) ? p : [];
+      arr.sort((a, b) => {
+        const na = parseInt(a.unit, 10), nb = parseInt(b.unit, 10);
+        return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.unit.localeCompare(b.unit);
+      });
+      setUnits(arr);
     }).catch(() => {});
   }, [codingForm.property_id]);
 
@@ -91,13 +97,19 @@ export default function BankReconciliationPage() {
     fetch(fetchUrl)
       .then(r => r.json())
       .then(p => {
-        const rows: InvoiceOption[] = (p.ok ? p.data : []).map((r: any) => ({
-          id: r.id,
-          period: r.period || "—",
-          total: r.total,
-          status: r.status,
-          invoiceNumber: r.invoiceNumber,
-        }));
+        const rows: InvoiceOption[] = (p.ok ? p.data : []).map((r: any) => {
+          const total = Number(r.total || 0);
+          const amountPaid = Number(r.amount_paid || 0);
+          const outstanding = Math.max(0, total - amountPaid);
+          return {
+            id: r.id,
+            period: r.period || "—",
+            total,
+            outstanding,
+            status: r.status,
+            invoiceNumber: r.invoiceNumber,
+          };
+        });
         setInvoiceOptions(rows);
       })
       .catch(() => setInvoiceOptions([]))
@@ -147,13 +159,16 @@ export default function BankReconciliationPage() {
         const res = await fetch(`/api/transactions/splits?transaction_id=${txn.id}`);
         const p = await res.json();
         if (p.ok && p.data.length > 0) {
-          setSplitLines(p.data.map((s: { id: string; amount: string; account_code: string; unit_id: string | null; notes: string }) => ({
+          const lines = p.data.map((s: { id: string; amount: string; account_code: string; unit_id: string | null; notes: string }) => ({
             key: newKey(),
             amount: String(Number(s.amount)),
             account_code: s.account_code ?? "4010",
             unit_id: s.unit_id ?? "",
             notes: s.notes ?? "",
-          })));
+            invoice_id: "",
+          }));
+          setSplitLines(lines);
+          setSplitInvoiceOptions({});
           setSplitMode(true);
         }
       } catch { /* ignore */ }
@@ -162,10 +177,22 @@ export default function BankReconciliationPage() {
 
   function initSplitMode(txn: TxnDTO) {
     setSplitLines([
-      { key: newKey(), amount: String(txn.amount), account_code: "4010", unit_id: codingForm.unit_id, notes: "" },
-      { key: newKey(), amount: "0", account_code: "2010", unit_id: codingForm.unit_id, notes: "" },
+      { key: newKey(), amount: String(txn.amount), account_code: "4010", unit_id: codingForm.unit_id, notes: "", invoice_id: "" },
+      { key: newKey(), amount: "0", account_code: "2010", unit_id: codingForm.unit_id, notes: "", invoice_id: "" },
     ]);
+    setSplitInvoiceOptions({});
     setSplitMode(true);
+  }
+
+  async function loadSplitInvoices(lineKey: string, unitId: string) {
+    if (!unitId) { setSplitInvoiceOptions(prev => ({ ...prev, [lineKey]: [] })); return; }
+    const res = await fetch(`/api/invoices?unit_id=${encodeURIComponent(unitId)}`).then(r => r.json()).catch(() => ({ ok: false }));
+    const rows: InvoiceOption[] = (res.ok ? res.data : []).map((r: any) => {
+      const total = Number(r.total || 0);
+      const amountPaid = Number(r.amount_paid || 0);
+      return { id: r.id, period: r.period || "—", total, outstanding: Math.max(0, total - amountPaid), status: r.status, invoiceNumber: r.invoiceNumber };
+    });
+    setSplitInvoiceOptions(prev => ({ ...prev, [lineKey]: rows }));
   }
 
   async function saveCoding(txn: TxnDTO) {
@@ -189,6 +216,7 @@ export default function BankReconciliationPage() {
             property_id: codingForm.property_id || null,
             unit_id: l.unit_id || null,
             notes: l.notes.trim() || null,
+            invoice_id: l.invoice_id || null,
           })),
         };
       } else {
@@ -199,6 +227,7 @@ export default function BankReconciliationPage() {
           unit_id: codingForm.unit_id || null,
           account_code: codingForm.account_code || null,
           notes: codingForm.notes.trim() || null,
+          invoice_id: codingForm.invoice_id || null,
           status: "REVIEWED",
         };
       }
@@ -211,14 +240,43 @@ export default function BankReconciliationPage() {
       const payload = await res.json();
       if (!payload.ok) throw new Error(payload.error ?? "Failed");
 
-      // If an invoice was linked, mark it as Paid
-      if (codingForm.invoice_id) {
-        await fetch(`/api/invoices/${codingForm.invoice_id}`, {
+      // Update invoice status when linked (single-line mode).
+      if (!splitMode && codingForm.invoice_id) {
+        const linked = invoiceOptions.find(inv => inv.id === codingForm.invoice_id);
+        const owed = linked ? (linked.status === "partially_paid" ? linked.outstanding : linked.total) : txn.amount;
+        const invoiceStatus = txn.amount < owed - 0.01 ? "partially_paid" : "paid";
+        const invoiceRes = await fetch(`/api/invoices/${codingForm.invoice_id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "Paid" }),
-        }).catch(() => {});
-        setInvoiceOptions(prev => prev.map(inv => inv.id === codingForm.invoice_id ? { ...inv, status: "Paid" } : inv));
+          body: JSON.stringify({ status: invoiceStatus }),
+        });
+        const invoicePayload = await invoiceRes.json().catch(() => null);
+        if (!invoiceRes.ok || invoicePayload?.ok === false) {
+          throw new Error(invoicePayload?.error || "Failed to update invoice status.");
+        }
+        setInvoiceOptions((prev) =>
+          prev.map((inv) => inv.id === codingForm.invoice_id ? { ...inv, status: invoiceStatus } : inv),
+        );
+      }
+
+      // Update invoice status for each split line's linked invoice.
+      if (splitMode) {
+        for (const line of splitLines) {
+          if (!line.invoice_id) continue;
+          const splitInv = (splitInvoiceOptions[line.key] ?? []).find(inv => inv.id === line.invoice_id);
+          const splitAmount = parseFloat(line.amount) || 0;
+          const splitOwed = splitInv ? (splitInv.status === "partially_paid" ? splitInv.outstanding : splitInv.total) : splitAmount;
+          const splitStatus = splitAmount < splitOwed - 0.01 ? "partially_paid" : "paid";
+          const invoiceRes = await fetch(`/api/invoices/${line.invoice_id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: splitStatus }),
+          });
+          const invoicePayload = await invoiceRes.json().catch(() => null);
+          if (!invoiceRes.ok || invoicePayload?.ok === false) {
+            throw new Error(invoicePayload?.error || `Failed to update invoice for unit ${line.unit_id}.`);
+          }
+        }
       }
 
       const allocNotes = splitMode
@@ -234,7 +292,7 @@ export default function BankReconciliationPage() {
         alloc_notes: allocNotes,
       }));
 
-      // Auto-advance to next uncoded transaction
+      // Auto-advance to next unreconciled transaction
       const idx = txns.findIndex(t => t.id === txn.id);
       const next = txns.slice(idx + 1).find(t => t.status === "UNREVIEWED");
       if (next && subTab === "tocode") {
@@ -245,7 +303,7 @@ export default function BankReconciliationPage() {
         setExpandedId(null);
         setSplitMode(false);
       }
-      setToast(splitMode ? `Coded as ${splitLines.length} lines` : "Coded");
+      setToast(splitMode ? `Reconcile as ${splitLines.length} lines` : "Reconcile");
       setTimeout(() => setToast(null), 2500);
     } catch (err) {
       setTxnError(err instanceof Error ? err.message : "Failed");
@@ -378,7 +436,7 @@ export default function BankReconciliationPage() {
           <Stat label="Total out" value={fmt.format(totalOut)} color="text-rose-400" />
           <Stat label="Closing balance" value={closingBal != null ? fmt.format(closingBal) : "—"} />
           <Stat label="Statement lines" value={String(txns.length)} />
-          <Stat label="To code" value={String(unreviewed.length)} color={unreviewed.length > 0 ? "text-amber-400" : "text-slate-400"} />
+          <Stat label="Unreconciled" value={String(unreviewed.length)} color={unreviewed.length > 0 ? "text-amber-400" : "text-slate-400"} />
         </div>
       </div>
 
@@ -420,13 +478,13 @@ export default function BankReconciliationPage() {
             </button>
             <button type="button" onClick={() => setSubTab("coded")}
               className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${subTab === "coded" ? "bg-emerald-500/20 text-emerald-300" : "border border-white/10 text-slate-400 hover:text-slate-200"}`}>
-              Reconciled ({reviewed.length})
+              Reconcile ({reviewed.length})
             </button>
           </div>
           {loadingTxns && <p className="py-8 text-center text-sm text-slate-500">Loading transactions…</p>}
           {!loadingTxns && !visibleTxns.length && (
             <SectionCard className="p-8 text-center text-sm text-slate-500">
-              {subTab === "tocode" ? "All transactions are coded. Great work!" : "No coded transactions yet."}
+              {subTab === "tocode" ? "All transactions are Reconcile. Great work!" : "No Reconcile transactions yet."}
             </SectionCard>
           )}
           <div className="space-y-2">
@@ -463,10 +521,10 @@ export default function BankReconciliationPage() {
                             : txn.account_code && <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-400">{txn.account_code}</span>
                           }
                           {txn.property_id && <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300">{propName(txn.property_id)}</span>}
-                          <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">Reconciled</span>
+                          <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">Reconcile</span>
                         </>
                       ) : (
-                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">To code</span>
+                        <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">Unreconciled</span>
                       )}
                     </div>
                     <div className="flex-shrink-0 text-slate-500">
@@ -516,7 +574,7 @@ export default function BankReconciliationPage() {
                       <div className="p-5 text-base">
                         <div className="mb-3 flex items-center justify-between">
                           <p className="text-sm font-semibold uppercase tracking-[0.15em] text-slate-500">
-                            {splitMode ? "Split Transaction" : "Code This Transaction"}
+                            {splitMode ? "Split Transaction" : "Reconcile This Transaction"}
                           </p>
                           <button
                             type="button"
@@ -572,16 +630,40 @@ export default function BankReconciliationPage() {
                                 className="w-full rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:border-indigo-400/50 focus:outline-none"
                               >
                                 <option value="">— Don't link to an invoice —</option>
-                                {invoiceOptions.map(inv => (
-                                  <option key={inv.id} value={inv.id}>
-                                    {inv.period} · {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(inv.total)} · {inv.status}
-                                  </option>
-                                ))}
+                                {invoiceOptions.map(inv => {
+                                  const isPartial = inv.status === "partially_paid";
+                                  const displayAmt = isPartial ? inv.outstanding : inv.total;
+                                  const label = isPartial
+                                    ? `${inv.period} · ${fmt.format(displayAmt)} outstanding of ${fmt.format(inv.total)} · Partial`
+                                    : `${inv.period} · ${fmt.format(inv.total)} · ${inv.status}`;
+                                  return <option key={inv.id} value={inv.id}>{label}</option>;
+                                })}
                               </select>
                             )}
-                            {codingForm.invoice_id && (
-                              <p className="mt-1.5 text-xs text-indigo-300">✓ This invoice will be marked as <strong>Paid</strong> when you save.</p>
-                            )}
+                            {codingForm.invoice_id && (() => {
+                              const linked = invoiceOptions.find(inv => inv.id === codingForm.invoice_id);
+                              const owed = linked ? (linked.status === "partially_paid" ? linked.outstanding : linked.total) : 0;
+                              const diff = linked ? txn.amount - owed : 0;
+                              const overpaid = diff > 0.01;
+                              const underpaid = diff < -0.01;
+                              return (
+                                <>
+                                  {overpaid && (
+                                    <p className="mt-1.5 rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1.5 text-xs font-semibold text-rose-300">
+                                      🚫 Payment is <strong>{fmt.format(diff)} more</strong> than the outstanding balance ({fmt.format(owed)}). Use <strong>Split</strong> to separate the excess — e.g. send it to 2050 Suspense or 2010 Deposits.
+                                    </p>
+                                  )}
+                                  {underpaid && (
+                                    <p className="mt-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-300">
+                                      ⚠ Payment covers {fmt.format(txn.amount)} of {fmt.format(owed)} outstanding. Invoice will be marked <strong>Partially Paid</strong> — {fmt.format(Math.abs(diff))} still owed.
+                                    </p>
+                                  )}
+                                  {!overpaid && !underpaid && (
+                                    <p className="mt-1.5 text-xs text-indigo-300">✓ Amount matches — invoice will be marked <strong>Paid</strong> when you save.</p>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
                         )}
 
@@ -622,6 +704,7 @@ export default function BankReconciliationPage() {
                                   <th className="pb-2 pr-2">Amount</th>
                                   <th className="pb-2 pr-2">Account</th>
                                   {codingForm.property_id && <th className="pb-2 pr-2">Unit</th>}
+                                  <th className="pb-2 pr-2">Invoice</th>
                                   <th className="pb-2 pr-2">Description</th>
                                   <th className="pb-2 w-6"></th>
                                 </tr>
@@ -659,7 +742,11 @@ export default function BankReconciliationPage() {
                                       <td className="pr-2 pb-2">
                                         <select
                                           value={line.unit_id}
-                                          onChange={e => setSplitLines(ls => ls.map((l, i) => i === idx ? { ...l, unit_id: e.target.value } : l))}
+                                          onChange={e => {
+                                            const uid = e.target.value;
+                                            setSplitLines(ls => ls.map((l, i) => i === idx ? { ...l, unit_id: uid, invoice_id: "" } : l));
+                                            loadSplitInvoices(line.key, uid);
+                                          }}
                                           className="w-28 rounded-lg border border-white/10 bg-panel/80 px-2 py-1.5 text-sm text-slate-100 focus:border-accent/50 focus:outline-none"
                                         >
                                           <option value="">— Any —</option>
@@ -667,6 +754,20 @@ export default function BankReconciliationPage() {
                                         </select>
                                       </td>
                                     )}
+                                    <td className="pr-2 pb-2">
+                                      <select
+                                        value={line.invoice_id}
+                                        onChange={e => setSplitLines(ls => ls.map((l, i) => i === idx ? { ...l, invoice_id: e.target.value } : l))}
+                                        className="w-40 rounded-lg border border-white/10 bg-panel/80 px-2 py-1.5 text-sm text-slate-100 focus:border-indigo-400/50 focus:outline-none"
+                                      >
+                                        <option value="">— No invoice —</option>
+                                        {(splitInvoiceOptions[line.key] ?? []).map(inv => (
+                                          <option key={inv.id} value={inv.id}>
+                                            {inv.period} · ${inv.total} · {inv.status}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </td>
                                     <td className="pr-2 pb-2">
                                       <input
                                         type="text"
@@ -690,7 +791,7 @@ export default function BankReconciliationPage() {
                             </table>
                             <div className="mt-2 flex items-center justify-between">
                               <button type="button"
-                                onClick={() => setSplitLines(ls => [...ls, { key: newKey(), amount: "0", account_code: "4010", unit_id: "", notes: "" }])}
+                                onClick={() => setSplitLines(ls => [...ls, { key: newKey(), amount: "0", account_code: "4010", unit_id: "", notes: "", invoice_id: "" }])}
                                 className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-200">
                                 <Plus className="h-3.5 w-3.5" /> Add line
                               </button>
@@ -702,13 +803,27 @@ export default function BankReconciliationPage() {
                         )}
 
                         <div className="mt-4 flex items-center gap-3">
-                          <button type="button" onClick={() => saveCoding(txn)} disabled={saving || (splitMode && !splitBalanced)}
-                            className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60">
-                            {saving ? "Saving…" : "OK"}
-                          </button>
+                          {(() => {
+                            const linked = !splitMode && codingForm.invoice_id
+                              ? invoiceOptions.find(inv => inv.id === codingForm.invoice_id)
+                              : null;
+                            const owed = linked ? (linked.status === "partially_paid" ? linked.outstanding : linked.total) : 0;
+                            const overpaid = linked ? txn.amount - owed > 0.01 : false;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => saveCoding(txn)}
+                                disabled={saving || (splitMode && !splitBalanced) || overpaid}
+                                title={overpaid ? "Split the overpayment before saving" : undefined}
+                                className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {saving ? "Saving…" : "OK"}
+                              </button>
+                            );
+                          })()}
                           {isCoded && (
                             <button type="button" onClick={() => removeCoding(txn)} disabled={saving}
-                              className="text-sm text-slate-500 hover:text-rose-300">Remove coding</button>
+                              className="text-sm text-slate-500 hover:text-rose-300">Mark Unreconciled</button>
                           )}
                           <button type="button" onClick={() => { setExpandedId(null); setSplitMode(false); }}
                             className="text-sm text-slate-500 hover:text-slate-300">▲ Close</button>
@@ -814,8 +929,8 @@ export default function BankReconciliationPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <KpiCard label="Total In" value={fmt.format(totalIn)} color="text-emerald-400" />
             <KpiCard label="Total Out" value={fmt.format(totalOut)} color="text-rose-400" />
-            <KpiCard label="Coded" value={String(reviewed.length)} color="text-emerald-400" />
-            <KpiCard label="To Code" value={String(unreviewed.length)} color={unreviewed.length > 0 ? "text-amber-400" : "text-slate-400"} />
+            <KpiCard label="Reconcile" value={String(reviewed.length)} color="text-emerald-400" />
+            <KpiCard label="Unreconciled" value={String(unreviewed.length)} color={unreviewed.length > 0 ? "text-amber-400" : "text-slate-400"} />
           </div>
           <SectionCard className="overflow-hidden p-0">
             <div className="border-b border-white/10 px-5 py-3">
@@ -847,7 +962,7 @@ export default function BankReconciliationPage() {
                   );
                 })}
                 {txns.filter(t => t.account_code).length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-600">No coded transactions yet.</td></tr>
+                  <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-600">No Reconcile transactions yet.</td></tr>
                 )}
               </tbody>
             </table>
@@ -891,7 +1006,7 @@ function KpiCard({ label, value, color }: { label: string; value: string; color:
   );
 }
 function StatusBadge({ status }: { status: string }) {
-  if (status === "REVIEWED") return <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-400">Coded</span>;
-  if (status === "RECONCILED") return <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-semibold text-blue-400">Reconciled</span>;
-  return <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">To code</span>;
+  if (status === "REVIEWED") return <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-400">Reconcile</span>;
+  if (status === "RECONCILED") return <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs font-semibold text-blue-400">Reconcile</span>;
+  return <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">Unreconciled</span>;
 }

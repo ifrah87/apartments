@@ -10,6 +10,7 @@ type SplitPayload = {
   property_id?: string | null;
   unit_id?: string | null;
   notes?: string | null;
+  invoice_id?: string | null;
 };
 
 export async function POST(req: NextRequest) {
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
 
     if (currentStatus === "CODED" && !isExplicitUncode) {
       return NextResponse.json(
-        { ok: false, error: "Transaction is CODED. Uncode it first before making changes." },
+        { ok: false, error: "Transaction is RECONCILE. Mark it UNRECONCILE first before making changes." },
         { status: 409 },
       );
     }
@@ -64,10 +65,10 @@ export async function POST(req: NextRequest) {
           const s = splits[i];
           await client.query(
             `INSERT INTO public.bank_transaction_splits
-               (transaction_id, amount, account_code, tenant_id, property_id, unit_id, notes, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+               (transaction_id, amount, account_code, tenant_id, property_id, unit_id, notes, sort_order, invoice_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [id, s.amount, s.account_code ?? null, s.tenant_id ?? null,
-             s.property_id ?? null, s.unit_id ?? null, s.notes ?? null, i],
+             s.property_id ?? null, s.unit_id ?? null, s.notes ?? null, i, s.invoice_id ?? null],
           );
         }
 
@@ -95,7 +96,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Single-line coding ───────────────────────────────────────────────────
-    const { tenant_id, property_id, unit_id, account_code, notes } = body;
+    const { tenant_id, property_id, unit_id, account_code, notes, invoice_id } = body;
     const status = requestedStatus;
 
     // Remove any existing splits when re-coding as single line
@@ -108,16 +109,17 @@ export async function POST(req: NextRequest) {
               unit_id      = $4,
               account_code = $5,
               alloc_notes  = $6,
-              status       = $7
+              status       = $7,
+              invoice_id   = $8
         WHERE id = $1
         RETURNING
           id,
           txn_date AS date,
           CASE WHEN deposit > 0 THEN deposit ELSE -withdrawal END AS amount,
           payee, particulars, status,
-          tenant_id, property_id, unit_id, account_code, alloc_notes`,
+          tenant_id, property_id, unit_id, account_code, alloc_notes, invoice_id`,
       [id, tenant_id ?? null, property_id ?? null, unit_id ?? null,
-       account_code ?? null, notes ?? null, status],
+       account_code ?? null, notes ?? null, status, invoice_id ?? null],
     );
 
     if (!rows.length) {

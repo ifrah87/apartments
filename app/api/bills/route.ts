@@ -167,7 +167,7 @@ type ResolvedLease = {
   start_date: string;
   end_date: string | null;
   status: string;
-  source: "db" | "dataset";
+  source: "db" | "dataset" | "occupied";
 };
 
 function normalizeServiceList(value: unknown): ServiceRecord[] {
@@ -225,6 +225,12 @@ function isElectricityService(service: ServiceRecord) {
   const code = String(service.code || "").trim().toUpperCase();
   if (code === "ELECTRICITY") return true;
   return String(service.name || "").toLowerCase().includes("electric");
+}
+
+function isCleaningService(service: ServiceRecord) {
+  const code = String(service.code || "").trim().toUpperCase();
+  if (code.includes("CLEAN")) return true;
+  return String(service.name || "").toLowerCase().includes("clean");
 }
 
 function normalizeMeterSnapshotInput(input: unknown): MeterSnapshot | null {
@@ -570,7 +576,7 @@ async function buildAssignedServiceLineItems(input: {
     .filter((entry) => entry.unitId === input.unitId && isEffective(entry.startDate))
     .forEach((entry) => {
       const service = services.find((item) => String(item.id) === String(entry.serviceId));
-      if (!service || isElectricityService(service)) return;
+      if (!service || isElectricityService(service) || isCleaningService(service)) return;
       selected.set(String(service.id), { service, source: "unit" });
     });
 
@@ -579,7 +585,7 @@ async function buildAssignedServiceLineItems(input: {
       .filter((entry) => String(entry.propertyId || "") === String(input.propertyId || "") && isEffective(entry.startDate))
       .forEach((entry) => {
         const service = services.find((item) => String(item.id) === String(entry.serviceId));
-        if (!service || isElectricityService(service)) return;
+        if (!service || isElectricityService(service) || isCleaningService(service)) return;
         if (!selected.has(String(service.id))) {
           selected.set(String(service.id), { service, source: "building" });
         }
@@ -674,6 +680,50 @@ function normalizeStoredInvoiceStatus(value: unknown): StoredInvoice["status"] {
   return "Unpaid";
 }
 
+function toInvoiceSortTs(invoice: Pick<StoredInvoice, "invoiceDate" | "updatedAt" | "createdAt">) {
+  return (
+    dateOnlyToUtcTimestamp(invoice.invoiceDate) ||
+    dateOnlyToUtcTimestamp(invoice.updatedAt) ||
+    dateOnlyToUtcTimestamp(invoice.createdAt) ||
+    0
+  );
+}
+
+function normalizeLegacyStoredInvoice(raw: unknown): StoredInvoice | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const row = raw as Record<string, unknown>;
+  const id = String(row.id || "").trim();
+  if (!id) return null;
+  const total = Number(row.total ?? 0);
+  const rentAmount = Number(row.rentAmount ?? 0);
+  const cleaningAmount = Number(row.cleaningAmount ?? 0);
+  const electricityAmount = Number(row.electricityAmount ?? 0);
+  const status = normalizeStoredInvoiceStatus(row.status);
+  return {
+    id,
+    tenantId: String(row.tenantId ?? row.tenant_id ?? ""),
+    tenantName: String(row.tenantName ?? row.tenant ?? "Tenant"),
+    unitId: String(row.unitId ?? row.unit_id ?? ""),
+    unitLabel: String(row.unitLabel ?? row.unit ?? "Unit"),
+    invoiceDate: String(row.invoiceDate ?? row.invoice_date ?? ""),
+    total: Number.isFinite(total) ? total : 0,
+    rentAmount: Number.isFinite(rentAmount) ? rentAmount : 0,
+    cleaningAmount: Number.isFinite(cleaningAmount) ? cleaningAmount : 0,
+    electricityAmount: Number.isFinite(electricityAmount) ? electricityAmount : 0,
+    outstanding:
+      status === "Paid"
+        ? 0
+        : Number.isFinite(Number(row.outstanding))
+          ? Number(row.outstanding)
+          : Number.isFinite(total)
+            ? total
+            : 0,
+    status,
+    createdAt: String(row.createdAt ?? row.created_at ?? row.invoiceDate ?? row.invoice_date ?? ""),
+    updatedAt: String(row.updatedAt ?? row.updated_at ?? row.invoiceDate ?? row.invoice_date ?? ""),
+  };
+}
+
 function deriveLineItemAmount(item: Record<string, unknown>) {
   return (
     ("amount" in item ? toNumberOrNull(item.amount) : null) ??
@@ -746,6 +796,7 @@ async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
   return rows.map((row) => {
     const amounts = deriveStoredInvoiceAmounts(row.line_items);
     const total = toNumberOrNull(row.total_amount) ?? (toNumberOrNull(row.total_cents) ?? 0) / 100;
+    const normalizedStatus = normalizeStoredInvoiceStatus(row.status);
     const invoiceDate = toDateOnlyString(row.invoice_date || "") || "";
     const updatedAt = invoiceDate;
     const createdAt = toDateOnlyString(row.created_at || row.invoice_date || "") || invoiceDate;
@@ -763,8 +814,8 @@ async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
       rentAmount: amounts.rentAmount,
       cleaningAmount: amounts.cleaningAmount,
       electricityAmount: amounts.electricityAmount,
-      outstanding: Number(total.toFixed(2)),
-      status: normalizeStoredInvoiceStatus(row.status),
+      outstanding: normalizedStatus === "Paid" ? 0 : Number(total.toFixed(2)),
+      status: normalizedStatus,
       createdAt,
       updatedAt,
     };
@@ -912,18 +963,30 @@ function buildLeaseIndex(leases: LeaseAgreement[]) {
 
 export async function GET() {
   try {
-    // Always prefer real DB invoices — dataset was legacy storage
+    // Return DB + legacy dataset invoices so older records remain visible.
+    let dbData: StoredInvoice[] = [];
     try {
-      const dbData = await listStoredInvoicesFromDb();
-      if (dbData.length) {
-        return NextResponse.json({ ok: true, data: dbData });
-      }
+      dbData = await listStoredInvoicesFromDb();
     } catch (err) {
-      console.warn("⚠️ failed to load bills from invoices table; falling back to dataset", err);
+      console.warn("⚠️ failed to load bills from invoices table; using dataset-only fallback", err);
     }
 
-    const data = await datasetsRepo.getDataset<StoredInvoice[]>(INVOICES_KEY, []);
-    return NextResponse.json({ ok: true, data: Array.isArray(data) ? data : [] });
+    const rawLegacy = await datasetsRepo.getDataset<StoredInvoice[]>(INVOICES_KEY, []);
+    const legacyData = (Array.isArray(rawLegacy) ? rawLegacy : [])
+      .map((item) => normalizeLegacyStoredInvoice(item))
+      .filter((item): item is StoredInvoice => item !== null);
+
+    const merged = new Map<string, StoredInvoice>();
+    legacyData.forEach((invoice) => merged.set(invoice.id, invoice));
+    dbData.forEach((invoice) => merged.set(invoice.id, invoice));
+
+    const data = Array.from(merged.values()).sort((a, b) => {
+      const diff = toInvoiceSortTs(b) - toInvoiceSortTs(a);
+      if (diff !== 0) return diff;
+      return String(b.id).localeCompare(String(a.id));
+    });
+
+    return NextResponse.json({ ok: true, data });
   } catch (err) {
     console.error("❌ failed to load bills", err);
     return handleError(err);
@@ -1030,6 +1093,8 @@ export async function POST(req: NextRequest) {
     }
 
     let lease: ResolvedLease | null = null;
+    const propertyKey = String(unit.property_id || "").trim().toLowerCase();
+    const unitKey = String(unit.unit || "").trim().toLowerCase();
     try {
       const leaseRes = await query(
         `SELECT id, tenant_id, rent, start_date, end_date, status
@@ -1052,16 +1117,15 @@ export async function POST(req: NextRequest) {
 
     if (!lease) {
       const leaseIndex = buildLeaseIndex(Array.isArray(leasesData) ? leasesData : []);
-      const propertyKey = String(unit.property_id || "").toLowerCase();
       const datasetLease =
-        leaseIndex.get(`${propertyKey}::${unit.unit}`.toLowerCase()) ||
-        leaseIndex.get(`::${unit.unit}`.toLowerCase()) ||
+        leaseIndex.get(`${propertyKey}::${unitKey}`.toLowerCase()) ||
+        leaseIndex.get(`::${unitKey}`.toLowerCase()) ||
         null;
 
       if (datasetLease && coerceLeaseStatus(datasetLease.status) === "active") {
         const tenant =
-          tenantIndex.get(`${propertyKey}::${unit.unit}`.toLowerCase()) ||
-          tenantIndex.get(`::${unit.unit}`.toLowerCase()) ||
+          tenantIndex.get(`${propertyKey}::${unitKey}`.toLowerCase()) ||
+          tenantIndex.get(`::${unitKey}`.toLowerCase()) ||
           tenants.find((row) => {
             const tenantUnit = String(row.unit || "").trim().toLowerCase();
             const tenantProperty = String(row.property_id || row.building || "").trim().toLowerCase();
@@ -1085,15 +1149,38 @@ export async function POST(req: NextRequest) {
     }
 
     if (!lease) {
+      const fallbackTenant =
+        tenantIndex.get(`${propertyKey}::${unitKey}`.toLowerCase()) ||
+        tenantIndex.get(`::${unitKey}`.toLowerCase()) ||
+        null;
+      const unitStatus = String((unit as any).status || "").trim().toLowerCase();
+      const isOccupied = unitStatus === "occupied" || unitStatus.startsWith("occ");
+      if (isOccupied && fallbackTenant) {
+        lease = {
+          id: `occupied-${unit.id}-${fallbackTenant.id}`,
+          tenant_id: String(fallbackTenant.id),
+          rent: toNumberOrNull((fallbackTenant as any).monthly_rent) ?? toNumberOrNull((unit as any).rent),
+          start_date: toDateOnlyString(start) || reference.toISOString().slice(0, 10),
+          end_date: null,
+          status: "occupied",
+          source: "occupied",
+        };
+      }
+    }
+
+    if (!lease) {
       const response: Record<string, unknown> = {
         ok: false,
-        error: "Unit is not ready: no active lease.",
+        error:
+          String((unit as any).status || "").trim().toLowerCase().startsWith("occ")
+            ? "Unit is occupied in Units but no tenant is linked. Link a tenant to this unit first."
+            : "Unit is not ready: no active lease.",
         unit: { id: unit.id, unit: unit.unit },
         reason: "no active lease",
       };
       if (debugEnabled) {
         console.info("Bills debug", response);
-        return NextResponse.json({ ...response, debug: { lease: null, lease_sources: ["db", "dataset"] } }, { status: 400 });
+        return NextResponse.json({ ...response, debug: { lease: null, lease_sources: ["db", "dataset", "occupied"] } }, { status: 400 });
       }
       return NextResponse.json(response, { status: 400 });
     }
