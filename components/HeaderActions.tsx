@@ -28,10 +28,16 @@ export default function HeaderActions() {
   const hidePropertySelector = pathname === "/properties";
 
   const loadSession = () => {
+    // Optimistically assume logged in if session cookie is present
+    const hasCookie = document.cookie.includes("session=");
+    if (hasCookie && auth === null) setAuth({ authenticated: true });
+
     fetch("/api/auth/session", { cache: "no-store", credentials: "include" })
       .then((res) => res.json())
       .then((data) => setAuth(data))
-      .catch(() => setAuth({ authenticated: false }));
+      .catch(() => {
+        // Keep whatever state we have; don't flip to "logged out" on network error
+      });
   };
 
   useEffect(() => {
