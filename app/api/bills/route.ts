@@ -734,7 +734,7 @@ function deriveStoredInvoiceAmounts(lineItems: unknown) {
 async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
   const { rows } = await query<StoredInvoiceDbRow>(
     `SELECT i.id, i.tenant_id, i.unit_id, i.invoice_date, i.due_date, i.status, i.total_amount, i.total_cents,
-            i.line_items, i.created_at, i.updated_at,
+            i.line_items, i.created_at,
             t.name AS tenant_name, t.unit AS tenant_unit,
             u.unit_number
      FROM public.invoices i
@@ -747,7 +747,7 @@ async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
     const amounts = deriveStoredInvoiceAmounts(row.line_items);
     const total = toNumberOrNull(row.total_amount) ?? (toNumberOrNull(row.total_cents) ?? 0) / 100;
     const invoiceDate = toDateOnlyString(row.invoice_date || "") || "";
-    const updatedAt = toDateOnlyString(row.updated_at || row.invoice_date || "") || invoiceDate;
+    const updatedAt = invoiceDate;
     const createdAt = toDateOnlyString(row.created_at || row.invoice_date || "") || invoiceDate;
     const unitNumber = row.unit_number !== undefined && row.unit_number !== null ? String(row.unit_number).trim() : "";
     const tenantUnit = row.tenant_unit ? String(row.tenant_unit).trim() : "";
@@ -912,11 +912,7 @@ function buildLeaseIndex(leases: LeaseAgreement[]) {
 
 export async function GET() {
   try {
-    const data = await datasetsRepo.getDataset<StoredInvoice[]>(INVOICES_KEY, []);
-    if (Array.isArray(data) && data.length) {
-      return NextResponse.json({ ok: true, data });
-    }
-
+    // Always prefer real DB invoices — dataset was legacy storage
     try {
       const dbData = await listStoredInvoicesFromDb();
       if (dbData.length) {
@@ -926,7 +922,8 @@ export async function GET() {
       console.warn("⚠️ failed to load bills from invoices table; falling back to dataset", err);
     }
 
-    return NextResponse.json({ ok: true, data });
+    const data = await datasetsRepo.getDataset<StoredInvoice[]>(INVOICES_KEY, []);
+    return NextResponse.json({ ok: true, data: Array.isArray(data) ? data : [] });
   } catch (err) {
     console.error("❌ failed to load bills", err);
     return handleError(err);
