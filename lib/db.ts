@@ -18,7 +18,7 @@ const ca = caRaw.includes("\\n") ? caRaw.replace(/\\n/g, "\n") : caRaw;
 
 const poolConfig = {
   connectionString: normalizedConnectionString,
-  connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT_MS || 10000),
+  connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT_MS || 20000),
   query_timeout: Number(process.env.PGQUERY_TIMEOUT_MS || 30000),
   statement_timeout: Number(process.env.PGSTATEMENT_TIMEOUT_MS || 30000),
   idleTimeoutMillis: 30000,
@@ -47,7 +47,8 @@ export async function query<T extends QueryResultRow = any>(
   } catch (err) {
     // Retry once on stale-connection errors (idle connection was closed by server)
     const msg = err instanceof Error ? err.message : "";
-    if (msg.includes("Connection terminated") || msg.includes("connection timeout") || msg.includes("ECONNRESET") || msg.includes("EPIPE")) {
+    // Only retry on stale-connection errors, not pool exhaustion timeouts
+    if (msg.includes("ECONNRESET") || msg.includes("EPIPE") || msg === "Connection terminated unexpectedly") {
       return await pool.query<T>(text, params);
     }
     throw err;
