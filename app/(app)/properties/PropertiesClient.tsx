@@ -132,7 +132,7 @@ export default function PropertiesClient({ summaries, initialNotice = null }: Pr
           <button
             type="button"
             onClick={() => setShowModal(true)}
-            className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900"
+            className="w-full rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900 sm:w-auto"
           >
             Add Property
           </button>
@@ -153,16 +153,16 @@ export default function PropertiesClient({ summaries, initialNotice = null }: Pr
 
       <SectionCard className="p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex min-w-[240px] flex-1 items-center gap-3 rounded-xl border border-white/10 bg-panel/60 px-4 py-3 text-sm text-slate-400">
+          <div className="flex min-w-0 w-full flex-1 items-center gap-3 rounded-xl border border-white/10 bg-panel/60 px-4 py-3 text-sm text-slate-400 sm:min-w-[240px]">
             <Search className="h-4 w-4" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search building, unit, or tenant"
+              placeholder="Search property name or code"
               className="w-full bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-500"
             />
           </div>
-          <p className="text-xs text-slate-400">{items.length} properties loaded</p>
+          <p className="w-full text-xs text-slate-400 sm:w-auto">{items.length} properties loaded</p>
         </div>
       </SectionCard>
 
@@ -176,7 +176,7 @@ export default function PropertiesClient({ summaries, initialNotice = null }: Pr
                   {summary.totalUnits} units • {summary.occupiedUnits} occupied • {summary.vacantUnits} vacant
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                 <Link
                   href={`/properties/${summary.id}`}
                   className="rounded-full border border-white/10 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-white/20"

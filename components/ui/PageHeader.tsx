@@ -8,12 +8,12 @@ type Props = {
 
 export function PageHeader({ title, subtitle, actions }: Props) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
       <div className="space-y-1">
-        <h1 className="text-2xl font-semibold text-slate-100">{title}</h1>
+        <h1 className="text-xl font-semibold text-slate-100 sm:text-2xl">{title}</h1>
         {subtitle ? <p className="text-sm text-slate-400">{subtitle}</p> : null}
       </div>
-      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">{actions}</div> : null}
     </div>
   );
 }

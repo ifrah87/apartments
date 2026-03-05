@@ -289,10 +289,11 @@ Options:
       const result = await pool.query(
         `INSERT INTO public.bank_transactions
            (txn_date, ref, branch, particulars, withdrawal, deposit, balance,
-            fingerprint, source_bank, bank_account_id, payee, transaction_number, raw)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            fingerprint, source_bank, bank_account_id, payee, transaction_number)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          ON CONFLICT (fingerprint) WHERE fingerprint IS NOT NULL
-         DO NOTHING`,
+         DO UPDATE SET balance = EXCLUDED.balance
+           WHERE public.bank_transactions.balance IS NULL`,
         [
           r.txn_date,
           r.reference,
@@ -306,7 +307,6 @@ Options:
           r.bank_account_id,
           r.payee,
           r.transaction_number,
-          JSON.stringify(r.raw),
         ]
       );
       if (result.rowCount && result.rowCount > 0) {

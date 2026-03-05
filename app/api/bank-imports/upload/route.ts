@@ -23,7 +23,7 @@ async function requireAuth(req: NextRequest) {
 function keyTimestamp(): string {
   return new Date()
     .toISOString()
-    .replace(/[-:T]/g, "")
+    .replace(/-|:|T/g, "")
     .slice(0, 15)
     .replace(/(\d{8})(\d{6})/, "$1-$2");
 }

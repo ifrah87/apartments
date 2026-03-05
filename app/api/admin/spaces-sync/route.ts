@@ -121,19 +121,19 @@ function parseCSV(csv: string) {
 // GET /api/admin/spaces-sync?dry_run=1&prefix=bank-imports/
 // POST /api/admin/spaces-sync  (triggers actual import)
 // ---------------------------------------------------------------------------
-async function runSync(dryRun: boolean, prefix: string) {
+async function runSync(dryRun: boolean, prefix: string, force = false) {
   const bucket = process.env.SPACES_BUCKET ?? "orfanerealestate";
   const spaces = makeSpacesClient();
 
   const allFiles = await listSpacesCSVs(spaces, bucket, prefix);
 
-  // Get already-processed keys
+  // Get already-processed keys (ignored when force=true to allow balance backfill)
   const { rows: logRows } = await query<{ key: string }>(
     `SELECT key FROM public.bank_import_log WHERE status = 'ok'`,
     [],
   );
   const processed = new Set(logRows.map((r) => r.key));
-  const newFiles = allFiles.filter((f) => !processed.has(f.key));
+  const newFiles = force ? allFiles : allFiles.filter((f) => !processed.has(f.key));
 
   const results: { key: string; rows: number; inserted: number; skippedDupes: number; skippedParse: number; error?: string }[] = [];
 
@@ -201,7 +201,8 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const dryRun = searchParams.get("dry_run") === "1" || searchParams.get("dry_run") === "true";
     const prefix = searchParams.get("prefix") ?? "bank-imports/";
-    const data = await runSync(dryRun, prefix);
+    const force  = searchParams.get("force") === "1" || searchParams.get("force") === "true";
+    const data = await runSync(dryRun, prefix, force);
     return NextResponse.json({ ok: true, data });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Sync failed";
@@ -213,7 +214,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const prefix = (body.prefix as string) ?? "bank-imports/";
-    const data = await runSync(false, prefix);
+    const force  = body.force === true;
+    const data = await runSync(false, prefix, force);
     return NextResponse.json({ ok: true, data });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Sync failed";

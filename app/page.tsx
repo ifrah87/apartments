@@ -30,11 +30,11 @@ export default async function RootPage() {
     return (
       <div className="min-h-screen bg-white text-slate-900">
         <header className="border-b border-slate-100 bg-white">
-          <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+          <div className="mx-auto flex min-h-16 max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <span className="text-lg font-bold tracking-tight text-slate-900">Orfane Real Estate</span>
             <a
               href="https://app.orfanerealestate.so"
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              className="w-full rounded-lg bg-slate-900 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-slate-700 sm:w-auto"
             >
               Tenant portal
             </a>

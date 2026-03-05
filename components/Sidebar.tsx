@@ -38,12 +38,12 @@ export default function Sidebar({
   const { t } = useTranslations();
 
   return (
-    <aside className={`sticky top-0 z-40 w-64 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 lg:w-72 ${className}`}>
+    <aside className={`z-40 w-64 shrink-0 flex-col border-r border-white/10 bg-app-surface text-slate-200 lg:w-72 ${className}`}>
       <div className="pt-0">
         <SidebarBrand />
         <div className="mx-5 mt-1 h-px bg-white/5" />
       </div>
-      <nav className="mt-2 flex flex-1 flex-col gap-1 overflow-y-auto px-4 pb-4 pt-1" aria-label="Primary">
+      <nav className="mt-2 flex flex-1 flex-col gap-1 overflow-y-auto px-4 pb-4 pt-1 lg:flex-none lg:overflow-visible" aria-label="Primary">
         {NAV.map(({ href, labelKey, icon: Icon, indent }) => {
           const active = pathname === href || (href !== "/" && pathname?.startsWith(href));
           const paddingClass = indent ? "pl-10" : "pl-3";

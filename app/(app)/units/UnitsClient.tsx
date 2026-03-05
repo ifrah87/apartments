@@ -437,16 +437,16 @@ export default function UnitsClient() {
   const vacantCount = Math.max(propertyUnitsCount - occupiedCount, 0);
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-6 px-2 sm:px-3 lg:px-4">
+    <div className="mx-auto w-full max-w-7xl space-y-6 px-0 sm:px-2 lg:px-4">
       <PageHeader
         title="Units"
         subtitle="Manage your property inventory"
         actions={
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
             <button
               type="button"
               onClick={() => window.print()}
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-panel/60 px-4 py-2 text-xs font-semibold text-slate-200"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/10 bg-panel/60 px-4 py-2 text-xs font-semibold text-slate-200 sm:w-auto"
             >
               <FileText className="h-3.5 w-3.5" />
               Export PDF
@@ -454,7 +454,7 @@ export default function UnitsClient() {
             <button
               type="button"
               onClick={openModal}
-              className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900"
+              className="w-full rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900 sm:w-auto"
             >
               Add Apartment
             </button>
@@ -469,7 +469,7 @@ export default function UnitsClient() {
         <StatCard label="Gross Target" value={formatCurrency(grossTarget)} tone="warning" />
       </div>
 
-      <SectionCard className="p-6">
+      <SectionCard className="p-4 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Units</h2>
@@ -479,11 +479,103 @@ export default function UnitsClient() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search unit, tenant, or type"
-            className="w-full rounded-full border border-white/10 bg-panel-2/60 px-3 py-2 text-xs text-slate-100 sm:w-64"
+            className="w-full rounded-full border border-white/10 bg-panel-2/60 px-3 py-2 text-xs text-slate-100 sm:w-72"
           />
         </div>
 
-        <div className="mt-4 overflow-x-auto">
+        <div className="mt-4 space-y-3 md:hidden">
+          {filteredUnits.map((unit) => {
+            const propertyId = unit.property_id || selectedPropertyId || "";
+            const tenantKey = `${propertyId}::${unit.unit}`.toLowerCase();
+            const tenant = tenantIndex.get(tenantKey) || tenantIndex.get(`::${unit.unit}`.toLowerCase());
+            const lease = hasLeaseData ? findActiveLease(unit) : null;
+            const occupied = hasLeaseData ? Boolean(lease) : Boolean(tenant);
+            const unitCount = unitServiceCounts.get(unit.id) || 0;
+            const buildingCount = propertyId ? buildingServiceCounts.get(propertyId) || 0 : 0;
+            const serviceCount = unitCount + buildingCount;
+            return (
+              <div key={unit.id} className="rounded-2xl border border-white/10 bg-panel/60 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Unit</p>
+                    <p className="text-lg font-semibold text-slate-100">{unit.unit}</p>
+                  </div>
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      occupied ? "bg-emerald-500/15 text-emerald-200" : "bg-rose-500/15 text-rose-200"
+                    }`}
+                  >
+                    {occupied ? "Occupied" : "Vacant"}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <p className="text-slate-500">Type</p>
+                    <p className="mt-1 text-sm text-slate-200">{unit.type || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-slate-500">Rent</p>
+                    <p className="mt-1 text-sm text-slate-100">
+                      {lease?.rent
+                        ? `$${Number(lease.rent).toLocaleString()}`
+                        : tenant?.monthly_rent
+                        ? `$${Number(tenant.monthly_rent).toLocaleString()}`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="col-span-2">
+                    <p className="text-slate-500">Tenant</p>
+                    <p className="mt-1 text-sm text-slate-100">{lease?.tenantName || tenant?.name || "No Tenant"}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => startEdit(unit)}
+                    className="rounded-full border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-white/20"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteUnit(unit, occupied)}
+                    disabled={deletingId === unit.id}
+                    className="rounded-full border border-rose-400/40 px-3 py-1.5 text-xs font-semibold text-rose-200 hover:border-rose-400/70 disabled:opacity-60"
+                  >
+                    {deletingId === unit.id ? "Deleting..." : "Delete"}
+                  </button>
+                  <Link
+                    href={`/units/${unit.id}/services`}
+                    className="rounded-full border border-white/10 px-3 py-1.5 text-center text-xs font-semibold text-slate-200 hover:border-white/20"
+                  >
+                    Services{serviceCount ? ` (${serviceCount})` : ""}
+                  </Link>
+                  {!occupied ? (
+                    <Link
+                      href={`/leases?open=1&property=${encodeURIComponent(propertyId)}&unit=${encodeURIComponent(unit.unit)}`}
+                      className="rounded-full bg-accent px-3 py-1.5 text-center text-xs font-semibold text-slate-900"
+                    >
+                      Lease
+                    </Link>
+                  ) : (
+                    <span className="rounded-full border border-white/10 px-3 py-1.5 text-center text-xs font-semibold text-slate-500">
+                      Occupied
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {!filteredUnits.length ? (
+            <p className="rounded-xl border border-white/10 bg-panel/40 px-4 py-6 text-center text-sm text-slate-400">
+              No units found yet.
+            </p>
+          ) : null}
+        </div>
+
+        <div className="mt-4 hidden overflow-x-auto md:block">
           <table className="w-full text-left text-sm">
             <thead className="text-xs uppercase tracking-wide text-slate-400">
               <tr>
@@ -505,7 +597,6 @@ export default function UnitsClient() {
                 const unitCount = unitServiceCounts.get(unit.id) || 0;
                 const buildingCount = propertyId ? buildingServiceCounts.get(propertyId) || 0 : 0;
                 const serviceCount = unitCount + buildingCount;
-                const propertyLabel = propertyLabels.get(propertyId) || propertyId;
                 return (
                   <tr key={unit.id} className="border-t border-white/10">
                     <td className="py-3 text-slate-100">{unit.unit}</td>
@@ -547,7 +638,7 @@ export default function UnitsClient() {
                       </div>
                     </td>
                     <td className="py-3 text-right">
-                      <div className="flex justify-end gap-2">
+                      <div className="flex flex-wrap justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => startEdit(unit)}
@@ -598,7 +689,7 @@ export default function UnitsClient() {
 
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 py-8">
-          <SectionCard className="w-full max-w-2xl space-y-4 p-6">
+          <SectionCard className="w-full max-w-2xl space-y-4 p-4 sm:p-6">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-slate-100">
@@ -646,11 +737,11 @@ export default function UnitsClient() {
               </label>
             </div>
             {error ? <p className="text-xs text-rose-300">{error}</p> : null}
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
               <button
                 type="button"
                 onClick={closeModal}
-                className="flex-1 rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200"
+                className="w-full rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 sm:flex-1"
               >
                 Cancel
               </button>
@@ -658,7 +749,7 @@ export default function UnitsClient() {
                 type="button"
                 onClick={saveUnit}
                 disabled={saving}
-                className="flex-1 rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900 disabled:opacity-60"
+                className="w-full rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900 disabled:opacity-60 sm:flex-1"
               >
                 {saving ? "Saving..." : mode === "edit" ? "Save Changes" : "Save"}
               </button>
@@ -692,7 +783,7 @@ function StatCard({
   const style = tones[tone];
   return (
     <div
-      className={`min-w-[200px] rounded-2xl border bg-panel/60 px-6 py-3.5 shadow-card-soft ${style.border}`}
+      className={`w-full rounded-2xl border bg-panel/60 px-5 py-3.5 shadow-card-soft sm:px-6 ${style.border}`}
     >
       <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{label}</p>
       <p className={`mt-2 text-2xl font-semibold ${style.text}`}>{value}</p>

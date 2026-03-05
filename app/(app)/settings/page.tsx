@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Settings, Building2, Landmark, CreditCard, Layers, Gauge, Wallet, Users, FileText } from "lucide-react";
+import { Settings, Building2, Landmark, CreditCard, Layers, Gauge, Wallet, Users, FileText, BookOpen } from "lucide-react";
 import SectionCard from "@/components/ui/SectionCard";
 
 const SETTINGS_CARDS = [
@@ -50,6 +50,12 @@ const SETTINGS_CARDS = [
     description: "Upload and manage lease agreement templates.",
     icon: FileText,
     href: "/settings/lease-template",
+  },
+  {
+    title: "Chart of Accounts",
+    description: "Add, edit, or remove accounting accounts.",
+    icon: BookOpen,
+    href: "/settings/chart-of-accounts",
   },
   {
     title: "Team Management",

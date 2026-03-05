@@ -113,14 +113,14 @@ export default function HeaderActions() {
   const activeProperties = properties.filter((p) => (p.status || "active") === "active");
 
   return (
-    <div className="flex w-full flex-wrap items-center justify-start gap-2 sm:justify-end sm:gap-4">
+    <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
       {!hidePropertySelector && activeProperties.length ? (
-        <label className="flex max-w-full items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm text-slate-200">
+        <label className="flex w-full min-w-0 items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm text-slate-200 sm:w-auto sm:max-w-full">
           <span className="hidden text-xs font-semibold uppercase tracking-wide text-slate-400 sm:inline">Property</span>
           <select
             value={currentProperty || ""}
             onChange={(event) => handlePropertyChange(event.target.value)}
-            className="max-w-[9rem] bg-transparent text-sm font-semibold text-slate-100 outline-none sm:max-w-[14rem]"
+            className="min-w-0 w-full bg-transparent text-sm font-semibold text-slate-100 outline-none sm:w-auto sm:max-w-[14rem]"
           >
             {activeProperties.map((property) => (
               <option key={property.id} value={property.id}>
@@ -133,17 +133,17 @@ export default function HeaderActions() {
       <button
         type="button"
         onClick={toggleTheme}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-surface/70 text-slate-200 transition hover:border-white/20 hover:text-white"
+        className="flex h-9 w-9 shrink-0 items-center justify-center self-start rounded-full border border-white/10 bg-surface/70 text-slate-200 transition hover:border-white/20 hover:text-white sm:self-auto"
         aria-label="Toggle theme"
       >
         {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </button>
-      <label className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm text-slate-200">
+      <label className="flex w-full min-w-0 items-center gap-2 rounded-full border border-white/10 bg-surface/60 px-3 py-1 text-sm text-slate-200 sm:w-auto">
         <span className="hidden text-xs font-semibold uppercase tracking-wide text-slate-400 sm:inline">{t("language.label")}</span>
         <select
           value={language}
           onChange={(event) => setLanguage(event.target.value as Language)}
-          className="bg-transparent text-sm font-semibold text-slate-100 outline-none"
+          className="min-w-0 w-full bg-transparent text-sm font-semibold text-slate-100 outline-none sm:w-auto"
         >
           {LANGUAGE_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -153,11 +153,11 @@ export default function HeaderActions() {
         </select>
       </label>
       {showLogin ? (
-        <div ref={menuRef} className="relative">
+        <div ref={menuRef} className="relative w-full sm:w-auto">
           <button
             type="button"
             onClick={() => setMenuOpen((prev) => !prev)}
-            className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-surface/70 px-3 py-1 text-sm font-semibold text-slate-100 hover:border-white/20"
+            className="flex w-full items-center justify-between gap-2 rounded-full border border-white/10 bg-surface/70 px-3 py-1 text-sm font-semibold text-slate-100 hover:border-white/20 sm:w-auto sm:justify-start"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
           >
@@ -186,7 +186,7 @@ export default function HeaderActions() {
         <button
           type="button"
           onClick={handleLogout}
-          className="flex shrink-0 items-center gap-2 rounded-full border border-white/10 bg-surface/70 px-3 py-1 text-sm font-semibold text-slate-100 hover:border-white/20"
+          className="flex w-full items-center justify-between gap-2 rounded-full border border-white/10 bg-surface/70 px-3 py-1 text-sm font-semibold text-slate-100 hover:border-white/20 sm:w-auto sm:justify-start"
         >
           Log out
           <span className="flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-surface/80 text-slate-200">
