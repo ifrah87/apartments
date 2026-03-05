@@ -34,6 +34,8 @@ type UnitCard = {
 
 type BillingUnit = UnitCard & {
   status: "ready" | "already_billed" | "waiting";
+  hasCurrentMeterReading: boolean;
+  wasAlreadyBilled?: boolean;
 };
 
 type InvoiceRow = {
@@ -81,6 +83,7 @@ type UnitRecord = {
   id: string;
   unit: string;
   property_id: string | null;
+  status?: string | null;
 };
 
 type ServiceRecord = {
@@ -278,6 +281,17 @@ function monthYearToPeriod(month: string, year: string) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function shiftPeriodMonths(period: string, offset: number) {
+  const normalized = normalizePeriodInput(period);
+  if (!normalized) return "";
+  const [yearText, monthText] = normalized.split("-");
+  const year = Number(yearText);
+  const monthIndex = Number(monthText) - 1;
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11) return "";
+  const shifted = new Date(Date.UTC(year, monthIndex + offset, 1));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
 function getInvoicePeriodLabel(invoice: InvoiceRow) {
   return formatInvoicePeriod(invoice.invoiceDate) || invoice.period || "";
 }
@@ -332,6 +346,7 @@ export default function BillsPage() {
   const [showGenerator, setShowGenerator] = useState(false);
   const [generatorQuery, setGeneratorQuery] = useState("");
   const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
+  const [allowMeterBypass, setAllowMeterBypass] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatorMonth, setGeneratorMonth] = useState(() =>
     new Date().toLocaleString("en-GB", { month: "long" })
@@ -462,22 +477,30 @@ export default function BillsPage() {
         const nextUnits: UnitCard[] = Array.isArray(unitsData)
           ? unitsData.flatMap((unit: UnitRecord) => {
               const propertyId = String(unit.property_id || "").toLowerCase();
+              const unitNumber = String(unit.unit || "").trim();
               const unitLabel = unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`;
               const lease =
-                leaseIndex.get(`${propertyId}::${unit.unit}`.toLowerCase()) ||
-                leaseIndex.get(`::${unit.unit}`.toLowerCase());
-              if (!lease) return [];
+                leaseIndex.get(`${propertyId}::${unitNumber}`.toLowerCase()) ||
+                leaseIndex.get(`::${unitNumber}`.toLowerCase());
+              const tenantFromIndex =
+                tenantIndex.get(`${propertyId}::${unitNumber}`.toLowerCase()) ||
+                tenantIndex.get(`::${unitNumber}`.toLowerCase()) ||
+                null;
+              const unitStatus = String(unit.status || "").trim().toLowerCase();
+              const occupiedFromUnits = unitStatus === "occupied" || unitStatus.startsWith("occ");
+              const shouldInclude = occupiedFromUnits || Boolean(lease) || Boolean(tenantFromIndex);
+              if (!shouldInclude) return [];
               const tenant =
-                lease.tenantName ||
-                tenantIndex.get(`${propertyId}::${unit.unit}`.toLowerCase())?.name ||
+                lease?.tenantName ||
+                tenantFromIndex?.name ||
                 "No tenant";
               return [
                 {
                   id: unit.id,
                   unit: unitLabel,
-                  unitNumber: String(unit.unit || ""),
+                  unitNumber,
                   tenant,
-                  hasTenant: true,
+                  hasTenant: Boolean(lease?.tenantName || tenantFromIndex),
                   propertyKey: propertyId,
                 },
               ];
@@ -837,16 +860,19 @@ export default function BillsPage() {
         const hasCurrentMeterReading = readyMeterKeys.has(
           `${String(unit.propertyKey || "").toLowerCase()}::${normalizeUnitValue(unit.unitNumber || unit.unit)}`,
         );
+        const isAlreadyBilled = billedUnitIds.has(unit.id) || billedUnitKeys.has(key);
         const nextStatus: BillingUnit["status"] = !unit.hasTenant
           ? "waiting"
-          : billedUnitIds.has(unit.id) || billedUnitKeys.has(key)
+          : isAlreadyBilled && !allowMeterBypass
             ? "already_billed"
-            : !hasCurrentMeterReading
+            : !hasCurrentMeterReading && !allowMeterBypass
               ? "waiting"
               : "ready";
         const nextUnit: BillingUnit = {
           ...unit,
           status: nextStatus,
+          hasCurrentMeterReading,
+          wasAlreadyBilled: isAlreadyBilled,
         };
         const existing = map.get(key);
         if (!existing) {
@@ -858,7 +884,14 @@ export default function BillsPage() {
         return map;
       }, new Map<string, BillingUnit>()).values(),
     );
-  }, [units, invoices, billingPeriod, generatorMonth, generatorYear, meterReadings]);
+  }, [units, invoices, billingPeriod, generatorMonth, generatorYear, meterReadings, allowMeterBypass]);
+
+  useEffect(() => {
+    setSelectedUnits((prev) => {
+      const next = prev.filter((id) => billingUnits.some((unit) => unit.id === id && (unit.status === "ready" || (allowMeterBypass && unit.wasAlreadyBilled))));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [billingUnits]);
 
   const rentBilled = useMemo(
     () =>
@@ -952,11 +985,13 @@ export default function BillsPage() {
     setShowGenerator(true);
     setGeneratorQuery("");
     setSelectedUnits([]);
+    setAllowMeterBypass(false);
     setGenerating(false);
   };
 
   const closeGenerator = () => {
     setShowGenerator(false);
+    setAllowMeterBypass(false);
     setGenerating(false);
   };
 
@@ -1055,10 +1090,13 @@ export default function BillsPage() {
     setGenerating(true);
     try {
       const requestedPeriod = monthYearToPeriod(generatorMonth, generatorYear);
+      const requestedElectricityPeriod = allowMeterBypass
+        ? shiftPeriodMonths(requestedPeriod, -1) || requestedPeriod
+        : requestedPeriod;
       await loadDraftPreview({
         unitId: selectedUnits[0],
         period: requestedPeriod,
-        electricityPeriod: requestedPeriod,
+        electricityPeriod: requestedElectricityPeriod,
       });
       setShowGenerator(false);
       setSelectedUnits([]);
@@ -1438,7 +1476,11 @@ export default function BillsPage() {
                 </span>
                 <div>
                   <h2 className="text-sm font-semibold text-slate-100">Bill Generator</h2>
-                  <p className="text-xs text-slate-400">Select units ready for {generatorMonth} {generatorYear}.</p>
+                  <p className="text-xs text-slate-400">
+                    {allowMeterBypass
+                      ? `Bypass is on. Already-billed and unread units can be selected for ${generatorMonth} ${generatorYear}.`
+                      : `Select units ready for ${generatorMonth} ${generatorYear}.`}
+                  </p>
                 </div>
               </div>
               <button
@@ -1501,29 +1543,56 @@ export default function BillsPage() {
                   onClick={selectAllReady}
                   className="rounded-full border border-white/10 bg-panel/60 px-3 py-1 text-xs font-semibold text-slate-200 hover:border-white/20"
                 >
-                  Select All Ready
+                  {allowMeterBypass ? "Select All Available" : "Select All Ready"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllowMeterBypass((prev) => !prev)}
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                    allowMeterBypass
+                      ? "border-amber-300/60 bg-amber-500/15 text-amber-200"
+                      : "border-white/10 bg-panel/60 text-slate-200 hover:border-white/20"
+                  }`}
+                >
+                  {allowMeterBypass ? "Bypass: ON" : "Bypass: OFF"}
                 </button>
               </div>
             </div>
 
+            {allowMeterBypass ? (
+              <div className="mt-3 rounded-lg border border-amber-300/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                Bypass is on — already-billed units (orange) and units without a meter reading can be selected. Electricity period defaults to the previous month. Re-billing a unit will create a second invoice for the same period.
+              </div>
+            ) : null}
+
             <div className="mt-4 max-h-[60vh] overflow-y-auto pr-2">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {generatorUnits.map((unit) => {
+                const isBypassedAlreadyBilled = allowMeterBypass && unit.wasAlreadyBilled;
                 const selectable = unit.status === "ready";
                 const selected = selectedUnits.includes(unit.id);
+                const isBypassedReady = allowMeterBypass && unit.status === "ready" && !unit.hasCurrentMeterReading && !unit.wasAlreadyBilled;
                 const statusLabel =
                   unit.status === "waiting"
                     ? "Waiting for Meter Reading"
                     : unit.status === "already_billed"
                       ? "Already Billed"
-                      : "Ready";
+                      : isBypassedAlreadyBilled
+                        ? "Re-bill (Bypass)"
+                        : isBypassedReady
+                          ? "Ready (Meter Bypass)"
+                          : "Ready";
                 const statusColor =
                   unit.status === "waiting"
                     ? "text-rose-300"
                     : unit.status === "already_billed"
                       ? "text-emerald-300"
-                      : "text-emerald-200";
-                const dotColor = unit.status === "waiting" ? "bg-rose-400" : "bg-emerald-400";
+                      : isBypassedAlreadyBilled
+                        ? "text-orange-300"
+                        : isBypassedReady
+                          ? "text-amber-200"
+                          : "text-emerald-200";
+                const dotColor = unit.status === "waiting" ? "bg-rose-400" : isBypassedAlreadyBilled ? "bg-orange-400" : isBypassedReady ? "bg-amber-300" : "bg-emerald-400";
 
                 return (
                   <button
@@ -1551,6 +1620,8 @@ export default function BillsPage() {
                         <AlertCircle className="h-3.5 w-3.5 text-rose-300" />
                       ) : selected ? (
                         <CheckSquare2 className="h-3 w-3" />
+                      ) : isBypassedReady ? (
+                        <AlertCircle className="h-3.5 w-3.5 text-amber-200" />
                       ) : null}
                     </span>
                   </button>
@@ -1558,7 +1629,7 @@ export default function BillsPage() {
               })}
               {!generatorUnits.length ? (
                 <div className="col-span-full rounded-xl border border-white/10 bg-panel/60 p-4 text-sm text-slate-400">
-                  No leased units available for billing.
+                  No billable units available for billing.
                 </div>
               ) : null}
               </div>
@@ -1573,6 +1644,10 @@ export default function BillsPage() {
                 <span className="flex items-center gap-2">
                   <span className="h-2 w-2 rounded-full bg-rose-400" />
                   Waiting for Meter
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-amber-300" />
+                  Ready via Bypass
                 </span>
               </div>
               <button
