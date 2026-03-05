@@ -21,12 +21,13 @@ type Txn = {
 type CoaEntry = { code: string; name: string; category: string };
 type Property = { id: string; name: string };
 type Unit = { id: string; unit: string };
+type InvoiceOption = { id: string; period: string; total: number; status: string; invoiceNumber: string };
 type CodingForm = {
   who: string; account_code: string; property_id: string;
-  unit_id: string; notes: string;
+  unit_id: string; notes: string; invoice_id: string;
 };
 type SplitLine = {
-  key: string; amount: string; account_code: string; notes: string;
+  key: string; amount: string; account_code: string; unit_id: string; notes: string;
 };
 type ActiveTab = "reconcile" | "statements" | "transactions" | "summary";
 
@@ -36,7 +37,7 @@ const fmtDate = (d: string) =>
 function extractDesc(p: string) {
   return p?.match(/#EX:\d+#([^#]+)#/)?.[1]?.trim() ?? p ?? "";
 }
-const EMPTY_FORM: CodingForm = { who: "", account_code: "4010", property_id: "", unit_id: "", notes: "" };
+const EMPTY_FORM: CodingForm = { who: "", account_code: "4010", property_id: "", unit_id: "", notes: "", invoice_id: "" };
 let splitKeyCounter = 0;
 const newKey = () => String(++splitKeyCounter);
 
@@ -58,6 +59,8 @@ export default function BankReconciliationPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [invoiceOptions, setInvoiceOptions] = useState<InvoiceOption[]>([]);
+  const [loadingInvoices, setLoadingInvoices] = useState(false);
 
   useEffect(() => {
     fetch("/api/bank-accounts").then(r => r.json()).then(p => {
@@ -80,6 +83,34 @@ export default function BankReconciliationPage() {
       setUnits(p.ok ? p.data : Array.isArray(p) ? p : []);
     }).catch(() => {});
   }, [codingForm.property_id]);
+
+  useEffect(() => {
+    const unitId = codingForm.unit_id;
+    const tenantName = codingForm.who.trim();
+    if (!unitId && !tenantName) { setInvoiceOptions([]); return; }
+    setLoadingInvoices(true);
+    const url = unitId
+      ? `/api/invoices?unit_id=${encodeURIComponent(unitId)}`
+      : `/api/invoices/statement?tenantName=${encodeURIComponent(tenantName)}&listOnly=1`;
+    const fetchUrl = unitId
+      ? `/api/invoices?unit_id=${encodeURIComponent(unitId)}`
+      : `/api/invoices?tenant_name=${encodeURIComponent(tenantName)}`;
+    fetch(fetchUrl)
+      .then(r => r.json())
+      .then(p => {
+        const rows: InvoiceOption[] = (p.ok ? p.data : []).map((r: any) => ({
+          id: r.id,
+          period: r.period || "—",
+          total: r.total,
+          status: r.status,
+          invoiceNumber: r.invoiceNumber,
+        }));
+        setInvoiceOptions(rows);
+      })
+      .catch(() => setInvoiceOptions([]))
+      .finally(() => setLoadingInvoices(false));
+    setCodingForm(f => ({ ...f, invoice_id: "" }));
+  }, [codingForm.unit_id, codingForm.who]);
 
   const loadTxns = useCallback(() => {
     setLoadingTxns(true); setTxnError(null);
@@ -109,6 +140,7 @@ export default function BankReconciliationPage() {
       property_id: txn.property_id ?? "",
       unit_id: txn.unit_id ?? "",
       notes: txn.alloc_notes ?? extractDesc(txn.raw_particulars),
+      invoice_id: "",
     });
     // Load existing splits if this transaction was previously split
     if (txn.alloc_notes?.startsWith("Split:")) {
@@ -116,10 +148,11 @@ export default function BankReconciliationPage() {
         const res = await fetch(`/api/transactions/splits?transaction_id=${txn.id}`);
         const p = await res.json();
         if (p.ok && p.data.length > 0) {
-          setSplitLines(p.data.map((s: { id: string; amount: string; account_code: string; notes: string }) => ({
+          setSplitLines(p.data.map((s: { id: string; amount: string; account_code: string; unit_id: string | null; notes: string }) => ({
             key: newKey(),
             amount: String(Number(s.amount)),
             account_code: s.account_code ?? "4010",
+            unit_id: s.unit_id ?? "",
             notes: s.notes ?? "",
           })));
           setSplitMode(true);
@@ -130,8 +163,8 @@ export default function BankReconciliationPage() {
 
   function initSplitMode(txn: Txn) {
     setSplitLines([
-      { key: newKey(), amount: String(txn.amount), account_code: "4010", notes: "" },
-      { key: newKey(), amount: "0", account_code: "2010", notes: "" },
+      { key: newKey(), amount: String(txn.amount), account_code: "4010", unit_id: codingForm.unit_id, notes: "" },
+      { key: newKey(), amount: "0", account_code: "2010", unit_id: codingForm.unit_id, notes: "" },
     ]);
     setSplitMode(true);
   }
@@ -155,7 +188,7 @@ export default function BankReconciliationPage() {
             account_code: l.account_code || null,
             tenant_id: codingForm.who.trim() || null,
             property_id: codingForm.property_id || null,
-            unit_id: codingForm.unit_id || null,
+            unit_id: l.unit_id || null,
             notes: l.notes.trim() || null,
           })),
         };
@@ -179,6 +212,16 @@ export default function BankReconciliationPage() {
       const payload = await res.json();
       if (!payload.ok) throw new Error(payload.error ?? "Failed");
 
+      // If an invoice was linked, mark it as Paid
+      if (codingForm.invoice_id) {
+        await fetch(`/api/invoices/${codingForm.invoice_id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "Paid" }),
+        }).catch(() => {});
+        setInvoiceOptions(prev => prev.map(inv => inv.id === codingForm.invoice_id ? { ...inv, status: "Paid" } : inv));
+      }
+
       const allocNotes = splitMode
         ? `Split: ${splitLines.length} lines`
         : codingForm.notes || null;
@@ -198,7 +241,7 @@ export default function BankReconciliationPage() {
       if (next && subTab === "tocode") {
         setExpandedId(next.id);
         setSplitMode(false);
-        setCodingForm({ who: next.tenant_id ?? next.payee ?? "", account_code: next.account_code ?? "4010", property_id: next.property_id ?? "", unit_id: next.unit_id ?? "", notes: next.alloc_notes ?? extractDesc(next.raw_particulars) });
+        setCodingForm({ who: next.tenant_id ?? next.payee ?? "", account_code: next.account_code ?? "4010", property_id: next.property_id ?? "", unit_id: next.unit_id ?? "", notes: next.alloc_notes ?? extractDesc(next.raw_particulars), invoice_id: "" });
       } else {
         setExpandedId(null);
         setSplitMode(false);
@@ -226,13 +269,25 @@ export default function BankReconciliationPage() {
     finally { setSaving(false); }
   }
 
-  const unreviewed = txns.filter(t => t.status === "UNREVIEWED");
-  const reviewed   = txns.filter(t => t.status !== "UNREVIEWED");
-  const totalIn    = txns.reduce((s, t) => s + (t.deposit > 0 ? t.deposit : 0), 0);
-  const totalOut   = txns.reduce((s, t) => s + (t.withdrawal > 0 ? t.withdrawal : 0), 0);
-  const oldestTxn  = txns.length > 0 ? txns[txns.length - 1] : null;
-  const openingBal = oldestTxn?.balance != null ? oldestTxn.balance - oldestTxn.deposit + oldestTxn.withdrawal : null;
-  const closingBal = txns[0]?.balance ?? null;
+  // Compute running balance for every transaction.
+  // Use the real `balance` column if populated; otherwise compute a cumulative
+  // running total starting from 0 (oldest → newest).
+  const txnsWithBal = (() => {
+    const asc = [...txns].reverse(); // oldest first
+    let running = 0;
+    const mapped = asc.map(t => {
+      running += t.amount;
+      return { ...t, displayBalance: t.balance ?? running };
+    });
+    return mapped.reverse(); // newest first
+  })();
+
+  const unreviewed = txnsWithBal.filter(t => t.status === "UNREVIEWED");
+  const reviewed   = txnsWithBal.filter(t => t.status !== "UNREVIEWED");
+  const totalIn    = txnsWithBal.reduce((s, t) => s + (t.deposit > 0 ? t.deposit : 0), 0);
+  const totalOut   = txnsWithBal.reduce((s, t) => s + (t.withdrawal > 0 ? t.withdrawal : 0), 0);
+  const openingBal = txnsWithBal.length > 0 ? (txnsWithBal[txnsWithBal.length - 1].displayBalance - txnsWithBal[txnsWithBal.length - 1].amount) : null;
+  const closingBal = txnsWithBal[0]?.displayBalance ?? null;
   const visibleTxns = subTab === "tocode" ? unreviewed : reviewed;
   const selectedAccount = bankAccounts.find(a => a.id === selectedAccountId);
   const propName = (id: string) => properties.find(p => p.id === id)?.name ?? id;
@@ -287,6 +342,34 @@ export default function BankReconciliationPage() {
               className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent hover:bg-accent/20 disabled:opacity-50"
             >
               {syncing ? "Syncing…" : "↓ Import from Spaces"}
+            </button>
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={async () => {
+                setSyncing(true);
+                try {
+                  const res = await fetch("/api/admin/spaces-sync", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ force: true }),
+                  });
+                  const p = await res.json();
+                  if (p.ok) {
+                    setToast("Balances backfilled from Spaces");
+                    loadTxns();
+                  } else {
+                    setTxnError(p.error ?? "Backfill failed");
+                  }
+                } catch {
+                  setTxnError("Backfill failed");
+                } finally {
+                  setSyncing(false);
+                }
+              }}
+              className="rounded-full border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200 disabled:opacity-50"
+            >
+              {syncing ? "…" : "↺ Backfill balances"}
             </button>
           </div>
         </div>
@@ -367,8 +450,11 @@ export default function BankReconciliationPage() {
                       <p className="truncate text-base font-medium text-slate-100">{txn.payee || "—"}</p>
                       <p className="truncate text-sm text-slate-500">{desc}</p>
                     </div>
-                    <div className={`flex-shrink-0 text-base font-semibold tabular-nums ${txn.amount >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      {txn.amount >= 0 ? "+" : ""}{fmt.format(txn.amount)}
+                    <div className="flex-shrink-0 text-right">
+                      <p className={`text-base font-semibold tabular-nums ${txn.amount >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                        {txn.amount >= 0 ? "+" : ""}{fmt.format(txn.amount)}
+                      </p>
+                      <p className="text-xs tabular-nums text-slate-500">{fmt.format((txn as Txn & { displayBalance: number }).displayBalance)}</p>
                     </div>
                     <div className="flex flex-shrink-0 flex-wrap items-center gap-1.5">
                       {isCoded ? (
@@ -378,7 +464,7 @@ export default function BankReconciliationPage() {
                             : txn.account_code && <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-semibold text-emerald-400">{txn.account_code}</span>
                           }
                           {txn.property_id && <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300">{propName(txn.property_id)}</span>}
-                          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-400">Coded</span>
+                          <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">Reconciled</span>
                         </>
                       ) : (
                         <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">To code</span>
@@ -470,6 +556,36 @@ export default function BankReconciliationPage() {
                           )}
                         </div>
 
+                        {/* Invoice link */}
+                        {(codingForm.unit_id || codingForm.who.trim()) && (
+                          <div className="mb-4 rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-3">
+                            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-indigo-400">
+                              Link to Invoice
+                            </p>
+                            {loadingInvoices ? (
+                              <p className="text-xs text-slate-500">Loading invoices…</p>
+                            ) : invoiceOptions.length === 0 ? (
+                              <p className="text-xs text-slate-500">No invoices found for this unit.</p>
+                            ) : (
+                              <select
+                                value={codingForm.invoice_id}
+                                onChange={e => setCodingForm(f => ({ ...f, invoice_id: e.target.value }))}
+                                className="w-full rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:border-indigo-400/50 focus:outline-none"
+                              >
+                                <option value="">— Don't link to an invoice —</option>
+                                {invoiceOptions.map(inv => (
+                                  <option key={inv.id} value={inv.id}>
+                                    {inv.period} · {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(inv.total)} · {inv.status}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            {codingForm.invoice_id && (
+                              <p className="mt-1.5 text-xs text-indigo-300">✓ This invoice will be marked as <strong>Paid</strong> when you save.</p>
+                            )}
+                          </div>
+                        )}
+
                         {/* Single-line mode */}
                         {!splitMode && (
                           <div className="space-y-3">
@@ -506,6 +622,7 @@ export default function BankReconciliationPage() {
                                 <tr className="text-left text-xs text-slate-500">
                                   <th className="pb-2 pr-2">Amount</th>
                                   <th className="pb-2 pr-2">Account</th>
+                                  {codingForm.property_id && <th className="pb-2 pr-2">Unit</th>}
                                   <th className="pb-2 pr-2">Description</th>
                                   <th className="pb-2 w-6"></th>
                                 </tr>
@@ -539,6 +656,18 @@ export default function BankReconciliationPage() {
                                         })}
                                       </select>
                                     </td>
+                                    {codingForm.property_id && (
+                                      <td className="pr-2 pb-2">
+                                        <select
+                                          value={line.unit_id}
+                                          onChange={e => setSplitLines(ls => ls.map((l, i) => i === idx ? { ...l, unit_id: e.target.value } : l))}
+                                          className="w-28 rounded-lg border border-white/10 bg-panel/80 px-2 py-1.5 text-sm text-slate-100 focus:border-accent/50 focus:outline-none"
+                                        >
+                                          <option value="">— Any —</option>
+                                          {units.map(u => <option key={u.id} value={u.id}>Unit {u.unit}</option>)}
+                                        </select>
+                                      </td>
+                                    )}
                                     <td className="pr-2 pb-2">
                                       <input
                                         type="text"
@@ -562,7 +691,7 @@ export default function BankReconciliationPage() {
                             </table>
                             <div className="mt-2 flex items-center justify-between">
                               <button type="button"
-                                onClick={() => setSplitLines(ls => [...ls, { key: newKey(), amount: "0", account_code: "4010", notes: "" }])}
+                                onClick={() => setSplitLines(ls => [...ls, { key: newKey(), amount: "0", account_code: "4010", unit_id: "", notes: "" }])}
                                 className="flex items-center gap-1 text-sm text-slate-400 hover:text-slate-200">
                                 <Plus className="h-3.5 w-3.5" /> Add line
                               </button>
@@ -616,7 +745,7 @@ export default function BankReconciliationPage() {
                 </thead>
                 <tbody>
                   {loadingTxns && <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-500">Loading…</td></tr>}
-                  {!loadingTxns && txns.map(txn => (
+                  {!loadingTxns && txnsWithBal.map(txn => (
                     <tr key={txn.id} className="border-t border-white/5 hover:bg-white/5">
                       <td className="whitespace-nowrap px-4 py-3 text-slate-400">{fmtDate(txn.date)}</td>
                       <td className="px-4 py-3">
@@ -628,7 +757,7 @@ export default function BankReconciliationPage() {
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">{txn.reference ?? "—"}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-rose-400">{txn.withdrawal > 0 ? fmt.format(txn.withdrawal) : ""}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-emerald-400">{txn.deposit > 0 ? fmt.format(txn.deposit) : ""}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-slate-300">{txn.balance != null ? fmt.format(txn.balance) : "—"}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-slate-300">{fmt.format((txn as Txn & { displayBalance: number }).displayBalance)}</td>
                       <td className="px-4 py-3 text-xs text-slate-500">{txn.source_bank ?? "—"}</td>
                       <td className="px-4 py-3"><StatusBadge status={txn.status} /></td>
                     </tr>
@@ -655,7 +784,7 @@ export default function BankReconciliationPage() {
               </thead>
               <tbody>
                 {loadingTxns && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">Loading…</td></tr>}
-                {!loadingTxns && txns.map(txn => (
+                {!loadingTxns && txnsWithBal.map(txn => (
                   <tr key={txn.id} className="border-t border-white/5 hover:bg-white/5">
                     <td className="px-4 py-3 text-slate-500">{fmtDate(txn.date)}</td>
                     <td className="px-4 py-3 text-slate-100">{txn.payee || "—"}</td>

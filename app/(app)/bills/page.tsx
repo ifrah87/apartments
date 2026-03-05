@@ -16,6 +16,7 @@ import {
   PencilLine,
   Plus,
   AlertCircle,
+  ScrollText,
 } from "lucide-react";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
 import { dateOnlyToUtcTimestamp } from "@/lib/dateOnly";
@@ -332,8 +333,12 @@ export default function BillsPage() {
   const [generatorQuery, setGeneratorQuery] = useState("");
   const [selectedUnits, setSelectedUnits] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
-  const [generatorMonth, setGeneratorMonth] = useState("February");
-  const [generatorYear, setGeneratorYear] = useState("2026");
+  const [generatorMonth, setGeneratorMonth] = useState(() =>
+    new Date().toLocaleString("en-GB", { month: "long" })
+  );
+  const [generatorYear, setGeneratorYear] = useState(() =>
+    String(new Date().getFullYear())
+  );
   const [draftInvoice, setDraftInvoice] = useState<DraftInvoice | null>(null);
   const [draftItems, setDraftItems] = useState<DraftLineItem[]>([]);
   const [draftRefreshing, setDraftRefreshing] = useState(false);
@@ -1174,6 +1179,11 @@ export default function BillsPage() {
     window.open(href, "_blank", "noopener,noreferrer");
   };
 
+  const handleTenantStatement = (invoice: InvoiceRow) => {
+    const params = new URLSearchParams({ tenantName: invoice.tenantName });
+    window.open(`/api/invoices/statement?${params.toString()}`, "_blank", "noopener,noreferrer");
+  };
+
   const handleMarkPaid = async (invoice: InvoiceRow) => {
     const nextStatus = invoice.status === "Paid" ? "unpaid" : "paid";
     const label = nextStatus === "paid" ? "Mark as Paid" : "Mark as Unpaid";
@@ -1382,6 +1392,13 @@ export default function BillsPage() {
                         }`}
                       >
                         <CheckSquare2 className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleTenantStatement(invoice)}
+                        title="Tenant statement (all units)"
+                        className="rounded-lg border border-indigo-400/30 bg-indigo-500/10 p-2 text-indigo-300 hover:border-indigo-400/60"
+                      >
+                        <ScrollText className="h-4 w-4" />
                       </button>
                       <button
                         onClick={() => handleWhatsAppInvoice(invoice)}

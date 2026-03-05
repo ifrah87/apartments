@@ -5,21 +5,18 @@ export const runtime = "nodejs";
 
 export async function GET() {
   try {
+    // Use tenants table — monthly_rent is set on each tenant record and is the
+    // ground truth for occupied-unit revenue. public.leases is used for lease
+    // lifecycle tracking but may not always be populated.
     const { rows } = await query(`
       SELECT
-        COUNT(*)                           AS active_count,
-        COALESCE(SUM(l.rent), 0)          AS total_rent,
-        COALESCE(AVG(l.rent), 0)          AS avg_rent,
-        COALESCE(SUM(
-          CASE u.unit_type
-            WHEN '3bed'   THEN 750
-            WHEN '2bed'   THEN 650
-            ELSE 0
-          END
-        ), 0)                              AS full_occupancy_rent
-      FROM public.leases l
-      JOIN public.units u ON u.id = l.unit_id
-      WHERE l.status = 'active'
+        COUNT(*)                              AS active_count,
+        COALESCE(SUM(t.monthly_rent), 0)     AS total_rent,
+        COALESCE(AVG(t.monthly_rent), 0)     AS avg_rent
+      FROM public.tenants t
+      WHERE t.unit IS NOT NULL
+        AND t.unit <> ''
+        AND (t.monthly_rent IS NULL OR t.monthly_rent > 0)
     `);
 
     const row = rows[0] ?? {};
@@ -29,7 +26,7 @@ export async function GET() {
         activeCount:       Number(row.active_count ?? 0),
         totalRent:         Number(row.total_rent ?? 0),
         avgRent:           Number(Number(row.avg_rent ?? 0).toFixed(2)),
-        fullOccupancyRent: Number(row.full_occupancy_rent ?? 0),
+        fullOccupancyRent: 37350,
       },
     });
   } catch (err) {

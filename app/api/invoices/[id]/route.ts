@@ -191,7 +191,7 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
         return NextResponse.json({ ok: false, error: "Invalid status value." }, { status: 400 });
       }
       const res = await query(
-        `UPDATE public.invoices SET status = $1, updated_at = now() WHERE id = $2 RETURNING id, status`,
+        `UPDATE public.invoices SET status = $1 WHERE id = $2 RETURNING id, status`,
         [nextStatus, id],
       );
       if (!res.rowCount) {
@@ -280,8 +280,7 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
            meter_snapshot = $8::jsonb,
            total_amount = $9,
            status = COALESCE($10, 'draft'),
-           period = $11,
-           updated_at = now()
+           period = $11
        WHERE id = $12`,
       [
         totalCents,

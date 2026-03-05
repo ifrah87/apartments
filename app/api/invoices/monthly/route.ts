@@ -634,7 +634,7 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
     let y = doc.page.margins.top;
 
     const metaWidth = 220;
-    const logoWidth = 128;
+    const logoWidth = 180;
     const logoX = right - logoWidth;
     if (logoBuffer) {
       doc.image(logoBuffer, logoX, y, { width: logoWidth });
@@ -1200,7 +1200,7 @@ export async function GET(req: NextRequest) {
       .invoice:last-child { page-break-after: auto; }
       .page { width: 794px; min-height: 1123px; background: #fff; margin: 0 auto 32px; padding: 64px 72px 56px; position: relative; box-shadow: 0 8px 48px rgba(0,0,0,0.18); }
       .inv-header { display: flex; align-items: flex-start; justify-content: space-between; padding-bottom: 32px; border-bottom: 1.5px solid var(--black); margin-bottom: 32px; }
-      .logo-block img { height: 160px; width: auto; display: block; }
+      .logo-block img { height: 200px; width: auto; display: block; }
       .inv-label { font-family: 'Cormorant Garamond', serif; font-size: 36px; font-weight: 600; color: var(--ink); letter-spacing: 0.04em; line-height: 1; }
       .inv-number { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 6px; letter-spacing: 0.06em; }
       .inv-date { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 3px; }

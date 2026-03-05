@@ -21,7 +21,7 @@ const poolConfig = {
   connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT_MS || 10000),
   query_timeout: Number(process.env.PGQUERY_TIMEOUT_MS || 30000),
   statement_timeout: Number(process.env.PGSTATEMENT_TIMEOUT_MS || 30000),
-  idleTimeoutMillis: 10000,
+  idleTimeoutMillis: 30000,
   max: 2,
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
@@ -42,7 +42,16 @@ export async function query<T extends QueryResultRow = any>(
   text: string,
   params?: any[],
 ): Promise<QueryResult<T>> {
-  return pool.query<T>(text, params);
+  try {
+    return await pool.query<T>(text, params);
+  } catch (err) {
+    // Retry once on stale-connection errors (idle connection was closed by server)
+    const msg = err instanceof Error ? err.message : "";
+    if (msg.includes("Connection terminated") || msg.includes("connection timeout") || msg.includes("ECONNRESET") || msg.includes("EPIPE")) {
+      return await pool.query<T>(text, params);
+    }
+    throw err;
+  }
 }
 
 export default query;

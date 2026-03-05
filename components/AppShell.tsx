@@ -14,28 +14,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="relative z-10 min-h-screen lg:flex">
         <header className="sticky top-0 z-40 border-b border-white/10 bg-app-surface/95 backdrop-blur lg:hidden">
-          <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <div className="flex items-center justify-between gap-3 px-3 py-3 sm:px-4">
             <button
               type="button"
               onClick={() => setMobileNavOpen(true)}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-surface/70 text-slate-100 transition hover:border-white/20"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-surface/70 text-slate-100 transition hover:border-white/20"
               aria-label="Open navigation"
             >
               <Menu className="h-5 w-5" />
             </button>
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Orfane</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500 sm:text-[11px] sm:tracking-[0.28em]">Orfane</p>
               <p className="truncate text-sm font-semibold text-slate-100">Property Manager</p>
             </div>
           </div>
-          <div className="px-4 pb-3">
+          <div className="px-3 pb-3 sm:px-4">
             <Suspense fallback={<div className="h-10 w-full rounded-2xl bg-white/5" />}>
               <HeaderActions />
             </Suspense>
           </div>
         </header>
 
-        <Sidebar className="hidden lg:flex" />
+        <Sidebar className="hidden lg:flex sticky top-0 h-screen overflow-y-auto" />
 
         {mobileNavOpen ? (
           <div className="fixed inset-0 z-50 lg:hidden" aria-modal="true" role="dialog">
@@ -45,7 +45,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               aria-label="Close navigation"
               onClick={() => setMobileNavOpen(false)}
             />
-            <div className="absolute inset-y-0 left-0 flex w-[19rem] max-w-[88vw] flex-col border-r border-white/10 bg-app-surface shadow-2xl">
+            <div className="absolute inset-y-0 left-0 flex w-[18.5rem] max-w-[88vw] flex-col border-r border-white/10 bg-app-surface shadow-2xl">
               <div className="flex items-center justify-end px-4 py-3">
                 <button
                   type="button"
@@ -67,7 +67,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <HeaderActions />
             </Suspense>
           </div>
-          <main className="min-w-0 flex-1 overflow-x-auto px-4 pb-6 pt-4 sm:px-6 lg:pt-4">
+          <main className="min-w-0 flex-1 overflow-x-auto px-3 pb-6 pt-4 sm:px-4 lg:px-6 lg:pt-4">
             {children}
           </main>
         </div>
