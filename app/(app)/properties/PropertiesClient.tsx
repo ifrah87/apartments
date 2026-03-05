@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import type { PropertySummary } from "@/lib/repos/propertiesRepo";
 
 type Props = {
-  summaries: PropertySummary[];
+  summaries?: PropertySummary[];
   initialNotice?: string | null;
 };
 
@@ -20,17 +20,34 @@ function formatMoney(value: number) {
   return currency.format(value || 0);
 }
 
-export default function PropertiesClient({ summaries, initialNotice = null }: Props) {
+export default function PropertiesClient({ summaries: initialSummaries = [], initialNotice = null }: Props) {
   const router = useRouter();
   const confirm = useConfirm();
   const [query, setQuery] = useState("");
-  const [items, setItems] = useState<PropertySummary[]>(summaries);
+  const [items, setItems] = useState<PropertySummary[]>(initialSummaries);
+  const [loading, setLoading] = useState(initialSummaries.length === 0);
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ name: "", code: "" });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(initialNotice);
   const [saving, setSaving] = useState(false);
   const [isDeleting, startDelete] = useTransition();
+
+  useEffect(() => {
+    setLoading(true);
+    fetch("/api/properties/summaries", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (payload?.ok && Array.isArray(payload.data)) {
+          setItems(payload.data);
+          setNotice(null);
+        }
+      })
+      .catch(() => {
+        if (items.length === 0) setNotice("We couldn't load properties right now. Please try again shortly.");
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -162,7 +179,9 @@ export default function PropertiesClient({ summaries, initialNotice = null }: Pr
               className="w-full bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-500"
             />
           </div>
-          <p className="w-full text-xs text-slate-400 sm:w-auto">{items.length} properties loaded</p>
+          <p className="w-full text-xs text-slate-400 sm:w-auto">
+            {loading ? "Loading..." : `${items.length} properties loaded`}
+          </p>
         </div>
       </SectionCard>
 
