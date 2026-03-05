@@ -36,16 +36,16 @@ export default function PropertiesClient({ summaries: initialSummaries = [], ini
   useEffect(() => {
     setLoading(true);
     fetch("/api/properties/summaries", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((payload) => {
+      .then(async (res) => {
+        const payload = await res.json().catch(() => null);
         if (payload?.ok && Array.isArray(payload.data)) {
           setItems(payload.data);
           setNotice(null);
+        } else {
+          setNotice(payload?.error || "Could not load properties.");
         }
       })
-      .catch(() => {
-        if (items.length === 0) setNotice("We couldn't load properties right now. Please try again shortly.");
-      })
+      .catch(() => setNotice("Could not load properties — network error."))
       .finally(() => setLoading(false));
   }, []);
 
