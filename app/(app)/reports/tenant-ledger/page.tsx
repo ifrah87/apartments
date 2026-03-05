@@ -103,7 +103,20 @@ export default async function TenantLedgerPage({ searchParams }: { searchParams:
     if (unitFilter && (tenant.unit || "").toLowerCase() !== unitFilter.toLowerCase()) return false;
     return true;
   });
-  const tenantId = sp.tenant || filteredTenants[0]?.id || "";
+
+  // Deduplicate by name — keep first record per unique name, track unit list for label
+  const tenantUnitMap = new Map<string, string[]>();
+  filteredTenants.forEach((t) => {
+    const key = (t.name || "").trim().toLowerCase();
+    if (!tenantUnitMap.has(key)) tenantUnitMap.set(key, []);
+    if (t.unit) tenantUnitMap.get(key)!.push(t.unit);
+  });
+  const uniqueTenants = filteredTenants.filter((t, i, arr) => {
+    const key = (t.name || "").trim().toLowerCase();
+    return arr.findIndex((x) => (x.name || "").trim().toLowerCase() === key) === i;
+  });
+
+  const tenantId = sp.tenant || uniqueTenants[0]?.id || "";
   const start = sp.start || defaults.start;
   const end = sp.end || defaults.end;
   const statement = tenantId ? await fetchStatement(tenantId, start, end) : null;
@@ -157,11 +170,16 @@ export default async function TenantLedgerPage({ searchParams }: { searchParams:
               defaultValue={tenantId}
               className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
             >
-              {filteredTenants.map((tenant) => (
-                <option key={tenant.id} value={tenant.id}>
-                  {tenant.name} · {tenant.unit || "Unit ?"}
-                </option>
-              ))}
+              {uniqueTenants.map((tenant) => {
+                const key = (tenant.name || "").trim().toLowerCase();
+                const units = tenantUnitMap.get(key) ?? [];
+                const unitLabel = units.length > 1 ? `${units.length} units` : units[0] ? `Unit ${units[0]}` : "—";
+                return (
+                  <option key={tenant.id} value={tenant.id}>
+                    {tenant.name} · {unitLabel}
+                  </option>
+                );
+              })}
             </select>
           </div>
           <div>
