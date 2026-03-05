@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Clock3, Pencil, Plus, Save, Shield, Trash2, UserRound, X } from "lucide-react";
+import { Clock3, Pencil, Plus, Save, Shield, Trash2, UserRound, X, ShieldCheck, Calculator, Hammer } from "lucide-react";
 import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
+
+type AppRole = "admin" | "manager" | "accountant" | "reception" | "maintenance";
 
 type UserRow = {
   id: string;
   name?: string | null;
   phone?: string | null;
-  role: "admin" | "reception";
+  role: AppRole;
   permissions?: string[];
   created_at: string;
   updated_at: string;
@@ -20,11 +22,32 @@ type AttendanceRow = {
   userId: string;
   name?: string | null;
   phone?: string | null;
-  role?: "admin" | "reception" | null;
+  role?: AppRole | null;
   clockInAt: string;
   clockOutAt?: string | null;
   status: "signed_in" | "signed_out";
 };
+
+const ALL_SECTIONS = [
+  { id: "dashboard",   label: "Dashboard" },
+  { id: "properties",  label: "Properties" },
+  { id: "units",       label: "Units" },
+  { id: "readings",    label: "Readings" },
+  { id: "bills",       label: "Bills" },
+  { id: "bank",        label: "Bank" },
+  { id: "leases",      label: "Leases" },
+  { id: "services",    label: "Services" },
+  { id: "reports",     label: "Reports" },
+  { id: "settings",    label: "Settings" },
+  { id: "team",        label: "Team" },
+] as const;
+
+const ROLES: { id: AppRole; label: string }[] = [
+  { id: "manager",     label: "Manager" },
+  { id: "accountant",  label: "Accountant" },
+  { id: "reception",   label: "Reception" },
+  { id: "maintenance", label: "Maintenance" },
+];
 
 const dateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
   dateStyle: "medium",
@@ -53,40 +76,21 @@ export default function AdminSettingsPage() {
     name: "",
     phone: "",
     password: "",
-    role: "reception" as UserRow["role"],
+    role: "reception" as AppRole,
     permissions: [] as string[],
   });
+  const [activeTab, setActiveTab] = useState<"team" | "roles">("team");
+  const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({});
+  const [savingRolePerms, setSavingRolePerms] = useState(false);
 
   const roleMeta = useMemo(
     () => ({
-      admin: {
-        label: "ADMIN",
-        badge: "bg-sky-500/15 text-sky-300 border border-sky-500/30",
-        stripe: "border-sky-400",
-        icon: Shield,
-      },
-      reception: {
-        label: "RECEPTION TEAM",
-        badge: "bg-amber-500/15 text-amber-300 border border-amber-500/30",
-        stripe: "border-amber-400",
-        icon: UserRound,
-      },
+      admin:       { label: "Admin",       badge: "bg-sky-500/15 text-sky-300 border border-sky-500/30",     stripe: "border-sky-400",    icon: Shield },
+      manager:     { label: "Manager",     badge: "bg-purple-500/15 text-purple-300 border border-purple-500/30", stripe: "border-purple-400", icon: ShieldCheck },
+      accountant:  { label: "Accountant",  badge: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30", stripe: "border-emerald-400", icon: Calculator },
+      reception:   { label: "Reception",   badge: "bg-amber-500/15 text-amber-300 border border-amber-500/30",  stripe: "border-amber-400",  icon: UserRound },
+      maintenance: { label: "Maintenance", badge: "bg-orange-500/15 text-orange-300 border border-orange-500/30", stripe: "border-orange-400", icon: Hammer },
     }),
-    []
-  );
-
-  const securityTypes = useMemo(
-    () => [
-      { id: "dashboard", label: "Dashboard" },
-      { id: "units", label: "Units" },
-      { id: "readings", label: "Readings" },
-      { id: "bills", label: "Bills" },
-      { id: "leases", label: "Leases" },
-      { id: "expenses", label: "Expenses" },
-      { id: "services", label: "Services" },
-      { id: "team", label: "Team" },
-      { id: "settings", label: "Settings" },
-    ],
     []
   );
 
@@ -122,6 +126,8 @@ export default function AdminSettingsPage() {
         setSessionChecked(true);
         if (role === "admin") {
           loadUsers();
+          fetch("/api/admin/role-permissions", { cache: "no-store", credentials: "include" })
+            .then(r => r.json()).then(p => { if (p.ok) setRolePermissions(p.data ?? {}); }).catch(() => {});
           return;
         }
         setLoading(false);
@@ -140,6 +146,33 @@ export default function AdminSettingsPage() {
   }, []);
 
   const canEditSecurity = sessionRole === "admin";
+
+  const toggleRolePerm = (role: string, section: string) => {
+    setRolePermissions(prev => {
+      const current = prev[role] ?? [];
+      const next = current.includes(section) ? current.filter(p => p !== section) : [...current, section];
+      return { ...prev, [role]: next };
+    });
+  };
+
+  const saveRolePermissions = async () => {
+    setSavingRolePerms(true);
+    try {
+      const res = await fetch("/api/admin/role-permissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(rolePermissions),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || data?.ok === false) throw new Error(data?.error || "Failed to save");
+      setRolePermissions(data.data ?? rolePermissions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save permissions");
+    } finally {
+      setSavingRolePerms(false);
+    }
+  };
 
   const openAdd = () => {
     if (!canEditSecurity) {
@@ -302,6 +335,22 @@ export default function AdminSettingsPage() {
         <p className="text-xs text-amber-600">Only admins can edit security levels.</p>
       ) : null}
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+
+      {/* Tabs */}
+      <div className="flex gap-2 border-b border-slate-200 pb-0">
+        {[{ id: "team", label: "Team Members" }, { id: "roles", label: "Roles & Permissions" }].map(tab => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id as "team" | "roles")}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-semibold transition ${activeTab === tab.id ? "border-sky-400 text-sky-600" : "border-transparent text-slate-400 hover:text-slate-700"}`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "team" && (
       <SectionCard className="border border-slate-200 bg-white p-4">
         <div className="flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-slate-900/5 text-slate-700">
@@ -328,7 +377,8 @@ export default function AdminSettingsPage() {
             <tbody>
               {attendance.length ? (
                 attendance.map((row) => {
-                  const role = row.role === "admin" ? "Admin" : "Reception";
+                  const roleLabels: Record<string, string> = { admin: "Admin", manager: "Manager", accountant: "Accountant", reception: "Reception", maintenance: "Maintenance" };
+                  const role = roleLabels[row.role ?? ""] ?? (row.role ?? "—");
                   const displayName = (row.name || "").trim() || row.phone || "User";
                   return (
                     <tr key={row.id} className="border-b border-slate-100 last:border-b-0">
@@ -366,12 +416,13 @@ export default function AdminSettingsPage() {
           </table>
         </div>
       </SectionCard>
+      )}
       {loading ? (
-        <p className="text-sm text-slate-500">Loading users…</p>
+        activeTab === "team" && <p className="text-sm text-slate-500">Loading users…</p>
       ) : (
-        <SectionCard className="space-y-4 border border-slate-200 bg-white p-4">
+        activeTab === "team" && <SectionCard className="space-y-4 border border-slate-200 bg-white p-4">
           {users.map((user) => {
-            const meta = roleMeta[user.role];
+            const meta = roleMeta[user.role] ?? roleMeta.reception;
             const RoleIcon = meta.icon;
             const displayName = (user.name || "").trim() || "User";
             return (
@@ -426,6 +477,73 @@ export default function AdminSettingsPage() {
               </div>
             );
           })}
+        </SectionCard>
+      )}
+
+      {/* Roles & Permissions tab */}
+      {activeTab === "roles" && (
+        <SectionCard className="border border-slate-200 bg-white p-4">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Roles & Permissions</h2>
+              <p className="text-sm text-slate-500">Control which sections each role can access. Admin always has full access.</p>
+            </div>
+            <button
+              type="button"
+              onClick={saveRolePermissions}
+              disabled={savingRolePerms || !canEditSecurity}
+              className="inline-flex items-center gap-2 rounded-lg bg-sky-400 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-sky-300 disabled:opacity-50"
+            >
+              <Save className="h-4 w-4" />
+              {savingRolePerms ? "Saving…" : "Save"}
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="py-2 pr-4 text-left font-semibold text-slate-600">Section</th>
+                  {/* Admin — locked */}
+                  <th className="px-3 py-2 text-center">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-700">
+                      <Shield className="h-3 w-3" /> Admin
+                    </span>
+                  </th>
+                  {ROLES.map(role => (
+                    <th key={role.id} className="px-3 py-2 text-center">
+                      <span className="text-xs font-semibold text-slate-600">{role.label}</span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ALL_SECTIONS.map(section => (
+                  <tr key={section.id} className="border-b border-slate-100 last:border-0">
+                    <td className="py-2.5 pr-4 font-medium text-slate-700">{section.label}</td>
+                    {/* Admin always checked, disabled */}
+                    <td className="px-3 py-2.5 text-center">
+                      <input type="checkbox" checked readOnly disabled className="h-4 w-4 accent-sky-400 opacity-50" />
+                    </td>
+                    {ROLES.map(role => {
+                      const checked = (rolePermissions[role.id] ?? []).includes(section.id);
+                      return (
+                        <td key={role.id} className="px-3 py-2.5 text-center">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={!canEditSecurity}
+                            onChange={() => toggleRolePerm(role.id, section.id)}
+                            className="h-4 w-4 accent-sky-400"
+                          />
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </SectionCard>
       )}
 
@@ -499,16 +617,20 @@ export default function AdminSettingsPage() {
               </div>
             )}
             <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-600">Access Level</label>
+              <label className="text-sm font-semibold text-slate-600">Role</label>
               <select
                 value={form.role}
-                onChange={(event) => setForm((prev) => ({ ...prev, role: event.target.value as UserRow["role"] }))}
+                onChange={(event) => setForm((prev) => ({ ...prev, role: event.target.value as AppRole }))}
                 disabled={!canEditSecurity}
                 className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-300"
               >
-                <option value="admin">ADMIN</option>
-                <option value="reception">RECEPTION TEAM</option>
+                <option value="admin">Admin — Full Access</option>
+                <option value="manager">Manager</option>
+                <option value="accountant">Accountant</option>
+                <option value="reception">Reception</option>
+                <option value="maintenance">Maintenance</option>
               </select>
+              <p className="text-xs text-slate-400">Permissions for each role are set in the Roles & Permissions tab.</p>
             </div>
             <div className="space-y-3">
               <label className="text-sm font-semibold text-slate-600">Security Access</label>
