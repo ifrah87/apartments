@@ -39,28 +39,38 @@ type PropertiesSchema = {
   hasLegacyUnits: boolean;
 };
 
-let _propertiesSchemaCache: PropertiesSchema | null = null;
+// Shared promise — all concurrent callers await the same single query
+let _propertiesSchemaPromise: Promise<PropertiesSchema> | null = null;
 
 async function getPropertiesSchema(): Promise<PropertiesSchema> {
-  if (_propertiesSchemaCache) return _propertiesSchemaCache;
-  const { rows } = await query<{ column_name: string }>(
-    `SELECT column_name
-     FROM information_schema.columns
-     WHERE table_schema = 'public'
-       AND table_name = 'properties'`,
-  );
-  const columns = new Set(rows.map((row) => row.column_name));
-  _propertiesSchemaCache = {
-    hasCode: columns.has("code"),
-    hasStatus: columns.has("status"),
-    hasAddress: columns.has("address"),
-    hasCity: columns.has("city"),
-    hasCountry: columns.has("country"),
-    hasLegacyPropertyId: columns.has("property_id"),
-    hasLegacyBuilding: columns.has("building"),
-    hasLegacyUnits: columns.has("units"),
-  };
-  return _propertiesSchemaCache;
+  if (!_propertiesSchemaPromise) {
+    _propertiesSchemaPromise = (async () => {
+      // pg_catalog is far faster than information_schema.columns
+      const { rows } = await query<{ column_name: string }>(
+        `SELECT a.attname AS column_name
+         FROM pg_catalog.pg_attribute a
+         JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public' AND c.relname = 'properties'
+           AND a.attnum > 0 AND NOT a.attisdropped`,
+      );
+      const columns = new Set(rows.map((r) => r.column_name));
+      return {
+        hasCode: columns.has("code"),
+        hasStatus: columns.has("status"),
+        hasAddress: columns.has("address"),
+        hasCity: columns.has("city"),
+        hasCountry: columns.has("country"),
+        hasLegacyPropertyId: columns.has("property_id"),
+        hasLegacyBuilding: columns.has("building"),
+        hasLegacyUnits: columns.has("units"),
+      };
+    })().catch((err) => {
+      _propertiesSchemaPromise = null; // allow retry on failure
+      throw err;
+    });
+  }
+  return _propertiesSchemaPromise;
 }
 
 function legacyNameExpr(schema: PropertiesSchema, alias = "") {
