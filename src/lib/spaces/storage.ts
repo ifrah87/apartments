@@ -5,7 +5,7 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import type { Readable } from "stream";
-import { spacesClient, SPACES_BUCKET } from "./client";
+import { getSpacesClient, SPACES_BUCKET } from "./client";
 
 // ---------------------------------------------------------------------------
 // Stream → Buffer (Node.js readable from AWS SDK v3 GetObject)
@@ -26,6 +26,7 @@ export async function uploadObject(params: {
   body: Buffer | Uint8Array | string;
   contentType?: string;
 }): Promise<void> {
+  const spacesClient = getSpacesClient();
   await spacesClient.send(
     new PutObjectCommand({
       Bucket: SPACES_BUCKET,
@@ -42,6 +43,7 @@ export async function uploadObject(params: {
 // Download an object → Buffer
 // ---------------------------------------------------------------------------
 export async function downloadObject(params: { key: string }): Promise<Buffer> {
+  const spacesClient = getSpacesClient();
   const res = await spacesClient.send(
     new GetObjectCommand({ Bucket: SPACES_BUCKET, Key: params.key }),
   );
@@ -55,6 +57,7 @@ export async function downloadObject(params: { key: string }): Promise<Buffer> {
 export async function listObjects(params: {
   prefix: string;
 }): Promise<Array<{ key: string; size: number; lastModified?: string }>> {
+  const spacesClient = getSpacesClient();
   const res = await spacesClient.send(
     new ListObjectsV2Command({ Bucket: SPACES_BUCKET, Prefix: params.prefix }),
   );
@@ -69,6 +72,7 @@ export async function listObjects(params: {
 // Delete an object
 // ---------------------------------------------------------------------------
 export async function deleteObject(params: { key: string }): Promise<void> {
+  const spacesClient = getSpacesClient();
   await spacesClient.send(
     new DeleteObjectCommand({ Bucket: SPACES_BUCKET, Key: params.key }),
   );

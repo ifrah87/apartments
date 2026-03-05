@@ -108,6 +108,7 @@ export default function BankReconciliationPage() {
   const loadTxns = useCallback(() => {
     setLoadingTxns(true); setTxnError(null);
     const params = new URLSearchParams({ status: "all" });
+    params.set("limit", "500");
     if (selectedAccountId) params.set("bank_account_id", selectedAccountId);
     fetch(`/api/transactions?${params}`)
       .then(r => r.json())

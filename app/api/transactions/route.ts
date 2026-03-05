@@ -12,6 +12,8 @@ export async function GET(req: NextRequest) {
     const end            = searchParams.get("end") ?? undefined;
     const accountId      = searchParams.get("account_id") ?? undefined;
     const bankAccountId  = searchParams.get("bank_account_id") ?? undefined;
+    const rawLimit       = Number(searchParams.get("limit") ?? "500");
+    const limit          = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 2000) : 500;
 
     const conditions: string[] = [];
     const params: unknown[] = [];
@@ -65,8 +67,9 @@ export async function GET(req: NextRequest) {
          created_at
        FROM public.bank_transactions
        ${where}
-       ORDER BY txn_date DESC, created_at DESC`,
-      params,
+       ORDER BY txn_date DESC, created_at DESC
+       LIMIT $${params.length + 1}`,
+      [...params, limit],
     );
 
     return NextResponse.json({ ok: true, data: rows });
