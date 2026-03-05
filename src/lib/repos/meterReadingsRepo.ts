@@ -241,7 +241,8 @@ export async function listReadings(filters: MeterReadingFilters = {}): Promise<M
     `SELECT id, unit, tenant_id, meter_type, reading_date, reading_value, prev_value, usage, amount, proof_url
      FROM meter_readings
      ${where}
-     ORDER BY reading_date DESC, created_at DESC`,
+     ORDER BY reading_date DESC, created_at DESC
+     LIMIT 1000`,
     params,
   );
   return rows.map(normalizeReadingRow);

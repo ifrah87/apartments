@@ -22,7 +22,7 @@ const poolConfig = {
   query_timeout: Number(process.env.PGQUERY_TIMEOUT_MS || 30000),
   statement_timeout: Number(process.env.PGSTATEMENT_TIMEOUT_MS || 30000),
   idleTimeoutMillis: 30000,
-  max: 2,
+  max: Number(process.env.PGPOOL_MAX || 10),
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
   ssl: !isLocalDatabase && ca ? { ca, rejectUnauthorized: true } : undefined,
