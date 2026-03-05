@@ -49,12 +49,14 @@ export default function Sidebar({
         const session = await sessionRes.json().catch(() => null);
         const permsPayload = await permsRes.json().catch(() => null);
 
-        const role: string = session?.role ?? "reception";
-        // Admin always sees everything
-        if (role === "admin") { setAllowedPerms(null); return; }
+        const role: string | undefined = session?.role;
+        // Show everything if session unavailable or role is admin
+        if (!role || role === "admin") { setAllowedPerms(null); return; }
 
         const rolePerms: Record<string, string[]> = permsPayload?.data ?? {};
-        const perms = rolePerms[role] ?? [];
+        const perms = rolePerms[role];
+        // If no permissions found for this role, show everything
+        if (!perms || perms.length === 0) { setAllowedPerms(null); return; }
         setAllowedPerms(new Set(perms));
       } catch {
         setAllowedPerms(null);
