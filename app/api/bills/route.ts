@@ -643,6 +643,7 @@ type StoredInvoiceDbRow = {
   total_amount: string | number | null;
   total_cents: string | number | null;
   line_items: unknown;
+  line_items_from_lines: unknown;
   created_at?: string | Date | null;
   updated_at?: string | Date | null;
   tenant_name?: string | null;
@@ -786,15 +787,28 @@ async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
     `SELECT i.id, i.tenant_id, i.unit_id, i.invoice_date, i.due_date, i.status, i.total_amount, i.total_cents,
             i.line_items, i.created_at,
             t.name AS tenant_name, t.unit AS tenant_unit,
-            u.unit_number
+            u.unit_number,
+            COALESCE(
+              json_agg(
+                json_build_object(
+                  'description', il.description,
+                  'amount', ROUND((il.total_cents / 100.0)::numeric, 2),
+                  'meta', il.meta
+                )
+              ) FILTER (WHERE il.id IS NOT NULL),
+              NULL
+            ) AS line_items_from_lines
      FROM public.invoices i
      LEFT JOIN public.tenants t ON t.id = i.tenant_id
      LEFT JOIN public.units u ON u.id = i.unit_id
+     LEFT JOIN public.invoice_lines il ON il.invoice_id = i.id
+     GROUP BY i.id, i.tenant_id, i.unit_id, i.invoice_date, i.due_date, i.status, i.total_amount, i.total_cents,
+              i.line_items, i.created_at, t.name, t.unit, u.unit_number
      ORDER BY i.invoice_date DESC, i.created_at DESC, i.id DESC`,
   );
 
   return rows.map((row) => {
-    const amounts = deriveStoredInvoiceAmounts(row.line_items);
+    const amounts = deriveStoredInvoiceAmounts(row.line_items_from_lines ?? row.line_items);
     const total = toNumberOrNull(row.total_amount) ?? (toNumberOrNull(row.total_cents) ?? 0) / 100;
     const normalizedStatus = normalizeStoredInvoiceStatus(row.status);
     const invoiceDate = toDateOnlyString(row.invoice_date || "") || "";

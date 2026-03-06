@@ -194,7 +194,24 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
         `UPDATE public.invoices SET status = $1 WHERE id = $2 RETURNING id, status`,
         [nextStatus, id],
       );
-      if (!res.rowCount) {
+      if (res.rowCount) {
+        return NextResponse.json({ ok: true, data: { id, status: nextStatus } });
+      }
+      // Fallback: update status in legacy billing_invoices dataset
+      let found = false;
+      await datasetsRepo.updateDataset<any[]>(
+        INVOICES_KEY,
+        (current) => {
+          if (!Array.isArray(current)) return current ?? [];
+          return current.map((item) => {
+            if (item?.id !== id) return item;
+            found = true;
+            return { ...item, status: nextStatus === "paid" ? "Paid" : nextStatus === "partially_paid" ? "Partially Paid" : "Unpaid" };
+          });
+        },
+        [],
+      );
+      if (!found) {
         return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
       }
       return NextResponse.json({ ok: true, data: { id, status: nextStatus } });

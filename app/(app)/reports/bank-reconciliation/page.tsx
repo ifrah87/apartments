@@ -144,7 +144,6 @@ export default function BankReconciliationPage() {
   async function openRow(txn: TxnDTO) {
     if (expandedId === txn.id) { setExpandedId(null); setSplitMode(false); return; }
     setExpandedId(txn.id);
-    setSplitMode(false);
     setCodingForm({
       who: txn.tenant_id ?? txn.payee ?? "",
       account_code: txn.account_code ?? "4010",
@@ -170,21 +169,30 @@ export default function BankReconciliationPage() {
           setSplitLines(lines);
           setSplitInvoiceOptions({});
           setSplitMode(true);
+          return;
         }
       } catch { /* ignore */ }
     }
-  }
-
-  function initSplitMode(txn: TxnDTO) {
-    setSplitLines([
-      { key: newKey(), amount: String(txn.amount), account_code: "4010", unit_id: codingForm.unit_id, notes: "", invoice_id: "" },
-      { key: newKey(), amount: "0", account_code: "2010", unit_id: codingForm.unit_id, notes: "", invoice_id: "" },
-    ]);
+    // Always start in split mode with one line pre-filled from existing coding
+    const firstKey = newKey();
+    const unitId = txn.unit_id ?? "";
+    setSplitLines([{
+      key: firstKey,
+      amount: String(txn.amount),
+      account_code: txn.account_code ?? "4010",
+      unit_id: unitId,
+      notes: txn.alloc_notes?.startsWith("Split:") ? "" : (txn.alloc_notes ?? extractDesc(txn.raw_particulars)),
+      invoice_id: "",
+    }]);
     setSplitInvoiceOptions({});
     setSplitMode(true);
+    // Auto-load and auto-select outstanding invoice for this unit
+    if (unitId) {
+      loadSplitInvoices(firstKey, unitId, true);
+    }
   }
 
-  async function loadSplitInvoices(lineKey: string, unitId: string) {
+  async function loadSplitInvoices(lineKey: string, unitId: string, autoSelect = false) {
     if (!unitId) { setSplitInvoiceOptions(prev => ({ ...prev, [lineKey]: [] })); return; }
     const res = await fetch(`/api/invoices?unit_id=${encodeURIComponent(unitId)}`).then(r => r.json()).catch(() => ({ ok: false }));
     const rows: InvoiceOption[] = (res.ok ? res.data : []).map((r: any) => {
@@ -193,6 +201,13 @@ export default function BankReconciliationPage() {
       return { id: r.id, period: r.period || "—", total, outstanding: Math.max(0, total - amountPaid), status: r.status, invoiceNumber: r.invoiceNumber };
     });
     setSplitInvoiceOptions(prev => ({ ...prev, [lineKey]: rows }));
+    // Auto-select the first unpaid/partially_paid invoice when opening
+    if (autoSelect) {
+      const first = rows.find(r => r.status === "unpaid" || r.status === "partially_paid");
+      if (first) {
+        setSplitLines(ls => ls.map(l => l.key === lineKey ? { ...l, invoice_id: first.id } : l));
+      }
+    }
   }
 
   async function saveCoding(txn: TxnDTO) {
@@ -572,17 +587,10 @@ export default function BankReconciliationPage() {
 
                       {/* Right: coding form */}
                       <div className="p-5 text-base">
-                        <div className="mb-3 flex items-center justify-between">
+                        <div className="mb-3">
                           <p className="text-sm font-semibold uppercase tracking-[0.15em] text-slate-500">
-                            {splitMode ? "Split Transaction" : "Reconcile This Transaction"}
+                            Reconcile This Transaction
                           </p>
-                          <button
-                            type="button"
-                            onClick={() => splitMode ? setSplitMode(false) : initSplitMode(txn)}
-                            className={`rounded-full px-3 py-1 text-xs font-semibold transition ${splitMode ? "bg-purple-500/20 text-purple-300 hover:bg-purple-500/30" : "border border-white/10 text-slate-400 hover:border-purple-500/40 hover:text-purple-300"}`}
-                          >
-                            {splitMode ? "Single line" : "Split"}
-                          </button>
                         </div>
 
                         {/* Shared fields (who, property, unit) */}
@@ -667,36 +675,8 @@ export default function BankReconciliationPage() {
                           </div>
                         )}
 
-                        {/* Single-line mode */}
-                        {!splitMode && (
-                          <div className="space-y-3">
-                            <FormField label="Account">
-                              <select value={codingForm.account_code}
-                                onChange={e => setCodingForm(f => ({ ...f, account_code: e.target.value }))}
-                                className="w-full rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:border-accent/50 focus:outline-none">
-                                {coa.length === 0 && <option>Loading…</option>}
-                                {["INCOME", "LIABILITY", "ASSET", "EQUITY", "EXPENSE"].map(cat => {
-                                  const entries = coa.filter(c => c.category === cat);
-                                  if (!entries.length) return null;
-                                  return (
-                                    <optgroup key={cat} label={cat}>
-                                      {entries.map(c => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
-                                    </optgroup>
-                                  );
-                                })}
-                              </select>
-                            </FormField>
-                            <FormField label="Description">
-                              <input type="text" value={codingForm.notes}
-                                onChange={e => setCodingForm(f => ({ ...f, notes: e.target.value }))}
-                                placeholder="e.g. March rent — Unit 12"
-                                className="w-full rounded-lg border border-white/10 bg-panel/80 px-3 py-2 text-sm text-slate-100 focus:border-accent/50 focus:outline-none" />
-                            </FormField>
-                          </div>
-                        )}
-
-                        {/* Split mode */}
-                        {splitMode && (
+                        {/* Split lines */}
+                        {(
                           <div>
                             <table className="w-full text-sm">
                               <thead>
@@ -778,7 +758,7 @@ export default function BankReconciliationPage() {
                                       />
                                     </td>
                                     <td className="pb-2">
-                                      {splitLines.length > 2 && (
+                                      {splitLines.length > 1 && (
                                         <button type="button" onClick={() => setSplitLines(ls => ls.filter((_, i) => i !== idx))}
                                           className="text-slate-600 hover:text-rose-400">
                                           <X className="h-4 w-4" />
@@ -803,24 +783,14 @@ export default function BankReconciliationPage() {
                         )}
 
                         <div className="mt-4 flex items-center gap-3">
-                          {(() => {
-                            const linked = !splitMode && codingForm.invoice_id
-                              ? invoiceOptions.find(inv => inv.id === codingForm.invoice_id)
-                              : null;
-                            const owed = linked ? (linked.status === "partially_paid" ? linked.outstanding : linked.total) : 0;
-                            const overpaid = linked ? txn.amount - owed > 0.01 : false;
-                            return (
-                              <button
-                                type="button"
-                                onClick={() => saveCoding(txn)}
-                                disabled={saving || (splitMode && !splitBalanced) || overpaid}
-                                title={overpaid ? "Split the overpayment before saving" : undefined}
-                                className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                              >
-                                {saving ? "Saving…" : "OK"}
-                              </button>
-                            );
-                          })()}
+                          <button
+                            type="button"
+                            onClick={() => saveCoding(txn)}
+                            disabled={saving || !splitBalanced}
+                            className="rounded-full bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {saving ? "Saving…" : "OK"}
+                          </button>
                           {isCoded && (
                             <button type="button" onClick={() => removeCoding(txn)} disabled={saving}
                               className="text-sm text-slate-500 hover:text-rose-300">Mark Unreconciled</button>

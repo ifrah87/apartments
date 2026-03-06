@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { FileText, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
+import ExportButton from "@/components/ExportButton";
 import { resolveCurrentPropertyId, setCurrentPropertyId } from "@/lib/currentProperty";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 
@@ -443,14 +444,20 @@ export default function UnitsClient() {
         subtitle="Manage your property inventory"
         actions={
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/10 bg-panel/60 px-4 py-2 text-xs font-semibold text-slate-200 sm:w-auto"
-            >
-              <FileText className="h-3.5 w-3.5" />
-              Export PDF
-            </button>
+            <ExportButton
+              filename="units"
+              getData={() =>
+                filteredUnits.map((u) => ({
+                  Unit: u.unit,
+                  Type: u.type ?? "",
+                  Beds: u.beds ?? "",
+                  Floor: u.floor ?? "",
+                  Rent: u.rent ?? 0,
+                  Status: u.status ?? "",
+                  Property: u.property_id ?? "",
+                }))
+              }
+            />
             <button
               type="button"
               onClick={openModal}

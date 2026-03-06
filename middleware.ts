@@ -51,11 +51,20 @@ const PUBLIC_PATHS = [
   "/api/auth/login",
   "/api/auth/logout",
   "/api/auth/session",
+  "/api/health",
 ];
 
 function isPublic(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
+
+const SESSION_COOKIE_OPTS = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  secure: false,
+  path: "/",
+  maxAge: 60 * 60 * 12,
+};
 
 // ---------------------------------------------------------------------------
 // Middleware
@@ -74,31 +83,30 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // ── Marketing domain: redirect to marketing site if someone hits /app/* ─
+  // ── Marketing domain: pass through (no auth) ────────────────────────────
   if (isMarketing(host)) {
-    // API calls from the marketing page (e.g. contact form) still pass through
-    if (pathname.startsWith("/api/")) return NextResponse.next();
-    // No auth needed — serve (marketing) route group
     return NextResponse.next();
   }
 
-  // ── App domain: enforce authentication ──────────────────────────────────
+  // ── App domain: enforce authentication on ALL routes ────────────────────
   if (isApp(host)) {
-    // API routes: pass through (each route handles its own auth)
-    if (pathname.startsWith("/api/")) return NextResponse.next();
+    // Public paths never need auth
+    if (isPublic(pathname)) return NextResponse.next();
 
     // Verify session cookie
     const token = req.cookies.get("session")?.value;
+    let authenticated = false;
     if (token) {
       try {
         const payload = await verifySession(token, getAuthSecret());
-        if (payload) return NextResponse.next();
+        if (payload) authenticated = true;
       } catch {
-        // expired / tampered — fall through to redirect
+        // expired / tampered — fall through
       }
     }
 
-    if (isDevAuthBypassEnabled()) {
+    // Dev bypass: auto-inject a valid session instead of blocking
+    if (!authenticated && isDevAuthBypassEnabled()) {
       const session = await buildDevSession();
 
       if (pathname === "/login") {
@@ -106,31 +114,27 @@ export async function middleware(req: NextRequest) {
         redirectUrl.pathname = "/dashboard";
         redirectUrl.search = "";
         const response = NextResponse.redirect(redirectUrl);
-        response.cookies.set("session", session, {
-          httpOnly: true,
-          sameSite: "lax",
-          secure: false,
-          path: "/",
-          maxAge: 60 * 60 * 12,
-        });
+        response.cookies.set("session", session, SESSION_COOKIE_OPTS);
         return response;
       }
 
       const response = NextResponse.next();
-      response.cookies.set("session", session, {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: false,
-        path: "/",
-        maxAge: 60 * 60 * 12,
-      });
+      response.cookies.set("session", session, SESSION_COOKIE_OPTS);
       return response;
     }
 
-    // Public pages: login, etc.
-    if (isPublic(pathname)) return NextResponse.next();
+    if (authenticated) return NextResponse.next();
 
-    // No valid session → send to /login, preserving destination
+    // Not authenticated ──────────────────────────────────────────────────
+    // API routes: return 401 JSON (don't redirect, callers expect JSON)
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { ok: false, error: "Unauthorized" },
+        { status: 401 },
+      );
+    }
+
+    // UI routes: redirect to /login preserving destination
     const loginUrl = req.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.searchParams.set("next", pathname);

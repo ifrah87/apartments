@@ -8,6 +8,7 @@ import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
 import type { PropertySummary } from "@/lib/repos/propertiesRepo";
+import ExportButton from "@/components/ExportButton";
 
 type Props = {
   summaries?: PropertySummary[];
@@ -146,13 +147,29 @@ export default function PropertiesClient({ summaries: initialSummaries = [], ini
         title="Properties"
         subtitle="Overview, units, and tenants per building."
         actions={
-          <button
-            type="button"
-            onClick={() => setShowModal(true)}
-            className="w-full rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900 sm:w-auto"
-          >
-            Add Property
-          </button>
+          <div className="flex items-center gap-2">
+            <ExportButton
+              filename="properties"
+              getData={() =>
+                filtered.map((p) => ({
+                  Name: p.name,
+                  Code: p.code ?? "",
+                  "Total Units": p.totalUnits,
+                  Occupied: p.occupiedUnits,
+                  Vacant: p.vacantUnits,
+                  "Monthly Rent": p.monthlyRent,
+                  Status: p.status,
+                }))
+              }
+            />
+            <button
+              type="button"
+              onClick={() => setShowModal(true)}
+              className="w-full rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900 sm:w-auto"
+            >
+              Add Property
+            </button>
+          </div>
         }
       />
 
@@ -225,18 +242,27 @@ export default function PropertiesClient({ summaries: initialSummaries = [], ini
             </div>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-xl border border-white/10 bg-panel/60 p-3">
+              <Link
+                href={`/units?propertyId=${encodeURIComponent(summary.id)}`}
+                className="rounded-xl border border-white/10 bg-panel/60 p-3 hover:border-white/20"
+              >
                 <p className="text-xs uppercase tracking-wide text-slate-400">Total Units</p>
                 <p className="mt-1 text-lg font-semibold text-slate-100">{summary.totalUnits}</p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-panel/60 p-3">
+              </Link>
+              <Link
+                href={`/units?propertyId=${encodeURIComponent(summary.id)}&status=occupied`}
+                className="rounded-xl border border-white/10 bg-panel/60 p-3 hover:border-white/20"
+              >
                 <p className="text-xs uppercase tracking-wide text-slate-400">Occupied</p>
                 <p className="mt-1 text-lg font-semibold text-slate-100">{summary.occupiedUnits}</p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-panel/60 p-3">
+              </Link>
+              <Link
+                href={`/units?propertyId=${encodeURIComponent(summary.id)}&status=vacant`}
+                className="rounded-xl border border-white/10 bg-panel/60 p-3 hover:border-white/20"
+              >
                 <p className="text-xs uppercase tracking-wide text-slate-400">Vacant</p>
                 <p className="mt-1 text-lg font-semibold text-slate-100">{summary.vacantUnits}</p>
-              </div>
+              </Link>
               <div className="rounded-xl border border-white/10 bg-panel/60 p-3">
                 <p className="text-xs uppercase tracking-wide text-slate-400">Monthly Rent</p>
                 <p className="mt-1 text-lg font-semibold text-slate-100">{formatMoney(summary.monthlyRent)}</p>

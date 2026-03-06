@@ -122,7 +122,7 @@ export default function BankImportsPage() {
         </p>
         <h1 className="text-3xl font-semibold text-slate-900">Bank Imports</h1>
         <p className="text-sm text-slate-500">
-          Review and code imported bank transactions. Import CSV with:{" "}
+          Review and reconcile imported bank transactions. Import CSV with:{" "}
           <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-mono text-slate-700">
             npx tsx scripts/import-bank.ts ./march-2026.csv
           </code>
@@ -132,8 +132,8 @@ export default function BankImportsPage() {
       {/* Summary cards */}
       <div className="grid gap-4 sm:grid-cols-3">
         <SummaryCard label="Total imported" value={total} />
-        <SummaryCard label="Unreviewed" value={unreviewed} danger={unreviewed > 0} />
-        <SummaryCard label="Reviewed" value={reviewed} />
+        <SummaryCard label="Unreconciled" value={unreviewed} danger={unreviewed > 0} />
+        <SummaryCard label="Reconcile" value={reviewed} />
       </div>
 
       {/* Filter tabs */}
@@ -148,7 +148,7 @@ export default function BankImportsPage() {
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
-            {s === "all" ? "All" : s === "UNREVIEWED" ? "Unreviewed" : "Reviewed"}
+            {s === "all" ? "All" : s === "UNREVIEWED" ? "Unreconciled" : "Reconcile"}
           </button>
         ))}
       </div>
@@ -208,7 +208,7 @@ export default function BankImportsPage() {
                       onClick={() => openRow(txn)}
                       className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
                     >
-                      {expandedId === txn.id ? "Close" : txn.status === "REVIEWED" ? "Edit" : "Code"}
+                      {expandedId === txn.id ? "Close" : txn.status === "REVIEWED" ? "Edit" : "Reconcile"}
                     </button>
                   </td>
                 </tr>
@@ -289,10 +289,10 @@ function extractDesc(particulars: string): string {
 
 function StatusBadge({ status }: { status: string }) {
   if (status === "REVIEWED")
-    return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">Reviewed</span>;
+    return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">Reconcile</span>;
   if (status === "RECONCILED")
-    return <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">Reconciled</span>;
-  return <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Unreviewed</span>;
+    return <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">Reconcile</span>;
+  return <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Unreconciled</span>;
 }
 
 function SummaryCard({ label, value, danger }: { label: string; value: number; danger?: boolean }) {

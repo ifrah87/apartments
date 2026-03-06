@@ -13,7 +13,7 @@ async function requireAdmin(request: Request) {
   if (!match) return null;
   const token = decodeURIComponent(match[1]);
   const session = await verifySession(token, getAuthSecret());
-  if (!session || session.role !== "admin") return null;
+  if (!session || normalizeAppRole(session.role) !== "admin") return null;
   return session;
 }
 
@@ -32,6 +32,14 @@ const SECURITY_KEYS = new Set([
   "settings",
 ]);
 
+type AppRole = "admin" | "reception";
+
+type UsersColumnMeta = {
+  data_type: string | null;
+  udt_name: string | null;
+  column_default: string | null;
+};
+
 function normalizeLoginName(value: string) {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -41,6 +49,92 @@ function normalizePermissions(value: unknown) {
   return value
     .map((item) => String(item))
     .filter((item) => SECURITY_KEYS.has(item));
+}
+
+function normalizeAppRole(value: unknown): AppRole {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (!normalized) return "reception";
+  return normalized === "admin" || normalized.includes("admin") ? "admin" : "reception";
+}
+
+function isRoleConstraintError(err: unknown) {
+  const code = String((err as { code?: string })?.code ?? "");
+  const message = err instanceof Error ? err.message.toLowerCase() : String(err ?? "").toLowerCase();
+  if (message.includes("invalid input value for enum") && message.includes("role")) return true;
+  if (message.includes("check constraint") && message.includes("role")) return true;
+  return ["22P02", "23514", "42804"].includes(code) && message.includes("role");
+}
+
+async function getUsersColumnMeta(column: string): Promise<UsersColumnMeta | null> {
+  const result = await query<UsersColumnMeta>(
+    `SELECT data_type, udt_name, column_default
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'users'
+       AND column_name = $1
+     LIMIT 1`,
+    [column],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function getEnumLabels(typeName: string): Promise<string[]> {
+  const result = await query<{ enumlabel: string }>(
+    `SELECT e.enumlabel
+     FROM pg_type t
+     JOIN pg_enum e ON e.enumtypid = t.oid
+     JOIN pg_namespace n ON n.oid = t.typnamespace
+     WHERE n.nspname = 'public'
+       AND t.typname = $1
+     ORDER BY e.enumsortorder ASC`,
+    [typeName],
+  );
+  return result.rows.map((row) => String(row.enumlabel || "").trim()).filter(Boolean);
+}
+
+function buildRoleCandidates(requestedRole: AppRole, preferredRole: string) {
+  const candidates = [preferredRole, requestedRole];
+  if (requestedRole === "reception") {
+    candidates.push("customer_service", "staff", "user", "team", "agent", "support");
+  }
+  return Array.from(new Set(candidates.map((item) => String(item || "").trim()).filter(Boolean)));
+}
+
+async function resolvePreferredDbRole(requestedRole: AppRole): Promise<string> {
+  const meta = await getUsersColumnMeta("role");
+  if (!meta || String(meta.data_type || "").toUpperCase() !== "USER-DEFINED" || !meta.udt_name) {
+    return requestedRole;
+  }
+
+  const labels = await getEnumLabels(meta.udt_name);
+  if (!labels.length) return requestedRole;
+
+  if (requestedRole === "admin") {
+    const adminExact = labels.find((label) => label.toLowerCase() === "admin");
+    if (adminExact) return adminExact;
+    const adminLike = labels.find((label) => label.toLowerCase().includes("admin"));
+    return adminLike || labels[0];
+  }
+
+  const preferred = ["reception", "customer_service", "staff", "user", "team", "agent", "support"];
+  for (const value of preferred) {
+    const found = labels.find((label) => label.toLowerCase() === value);
+    if (found) return found;
+  }
+
+  const nonAdmin = labels.find((label) => !label.toLowerCase().includes("admin"));
+  return nonAdmin || labels[0];
+}
+
+async function resolveExplicitUserIdForInsert(): Promise<string | null> {
+  const meta = await getUsersColumnMeta("id");
+  if (!meta) return null;
+  if (meta.column_default) return null;
+  const dataType = String(meta.data_type || "").toLowerCase();
+  if (dataType === "uuid" || dataType === "text" || dataType === "character varying" || dataType === "varchar") {
+    return crypto.randomUUID();
+  }
+  return null;
 }
 
 async function getPermissionsMap(): Promise<Record<string, string[]>> {
@@ -117,7 +211,7 @@ export async function GET(request: Request) {
     id: string;
     name: string | null;
     phone: string | null;
-    role: "admin" | "reception";
+    role: string | null;
     created_at: string;
     updated_at: string;
   }>("SELECT id, name, phone, role, created_at, updated_at FROM users ORDER BY created_at DESC");
@@ -129,6 +223,7 @@ export async function GET(request: Request) {
   ]);
   const users = result.rows.map((row) => ({
     ...row,
+    role: normalizeAppRole(row.role),
     name: row.name || namesMap[row.id] || null,
     permissions: permissionsMap[row.id] || [],
   }));
@@ -142,7 +237,7 @@ export async function PATCH(request: Request) {
 
   const payload = await request.json().catch(() => ({}));
   const id = String(payload?.id || "").trim();
-  const role = payload?.role === "admin" || payload?.role === "reception" ? payload.role : null;
+  const role: AppRole | null = payload?.role === "admin" || payload?.role === "reception" ? payload.role : null;
   const name = typeof payload?.name === "string" ? payload.name.trim() : null;
   const hasPhoneField = Object.prototype.hasOwnProperty.call(payload, "phone");
   const phone = typeof payload?.phone === "string" ? payload.phone.trim() : payload?.phone === null ? null : undefined;
@@ -173,8 +268,9 @@ export async function PATCH(request: Request) {
   let index = 1;
 
   if (role) {
+    const dbRole = await resolvePreferredDbRole(role);
     updates.push(`role = $${index++}`);
-    values.push(role);
+    values.push(dbRole);
   }
   if (hasPhoneField) {
     updates.push(`phone = $${index++}`);
@@ -221,7 +317,7 @@ export async function POST(request: Request) {
   const name = String(payload?.name || "").trim();
   const phone = typeof payload?.phone === "string" ? payload.phone.trim() : "";
   const password = String(payload?.password || "").trim();
-  const role = payload?.role === "admin" ? "admin" : "reception";
+  const role: AppRole = payload?.role === "admin" ? "admin" : "reception";
   const permissions = normalizePermissions(payload?.permissions);
 
   if (!name || !password) {
@@ -242,19 +338,58 @@ export async function POST(request: Request) {
   const passwordHash = hashPassword(password);
 
   try {
-    const result = await query<{
-      id: string;
-      name: string | null;
-      phone: string | null;
-      role: "admin" | "reception";
-      created_at: string;
-      updated_at: string;
-    }>(
-      "INSERT INTO users (name, phone, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, phone, role, created_at, updated_at",
-      [name || null, phone || null, passwordHash, role],
-    );
+    const preferredRole = await resolvePreferredDbRole(role);
+    const roleCandidates = buildRoleCandidates(role, preferredRole);
+    const explicitId = await resolveExplicitUserIdForInsert();
+    let row:
+      | {
+          id: string;
+          name: string | null;
+          phone: string | null;
+          role: string | null;
+          created_at: string;
+          updated_at: string;
+        }
+      | undefined;
 
-    const row = result.rows[0];
+    for (const candidateRole of roleCandidates) {
+      try {
+        const result = explicitId
+          ? await query<{
+              id: string;
+              name: string | null;
+              phone: string | null;
+              role: string | null;
+              created_at: string;
+              updated_at: string;
+            }>(
+              "INSERT INTO users (id, name, phone, password_hash, role) VALUES ($1, $2, $3, $4, $5) RETURNING id, name, phone, role, created_at, updated_at",
+              [explicitId, name || null, phone || null, passwordHash, candidateRole],
+            )
+          : await query<{
+              id: string;
+              name: string | null;
+              phone: string | null;
+              role: string | null;
+              created_at: string;
+              updated_at: string;
+            }>(
+              "INSERT INTO users (name, phone, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, name, phone, role, created_at, updated_at",
+              [name || null, phone || null, passwordHash, candidateRole],
+            );
+        row = result.rows[0];
+        break;
+      } catch (error) {
+        if (isRoleConstraintError(error) && candidateRole !== roleCandidates[roleCandidates.length - 1]) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!row) {
+      throw new Error("Failed to create user.");
+    }
     const userId = (row as { id: string }).id;
     if (permissions.length) {
       const permissionsMap = await getPermissionsMap();
@@ -266,6 +401,7 @@ export async function POST(request: Request) {
     await setNamesMap(namesMap);
     const user = {
       ...row,
+      role: normalizeAppRole(row.role),
       name: row.name ?? (name || null),
       permissions,
     };
@@ -275,7 +411,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "A team member with this login already exists." }, { status: 409 });
     }
     console.error("Failed to create user", err);
-    return NextResponse.json({ error: "Failed to create user." }, { status: 500 });
+    const message = err instanceof Error && err.message ? err.message : "Failed to create user.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

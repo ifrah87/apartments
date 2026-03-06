@@ -505,6 +505,44 @@ async function fetchMeterSnapshotFromReadings(input: {
   } satisfies MeterSnapshot;
 }
 
+async function findLegacyInvoiceRow(id: string): Promise<InvoiceHeaderRow | null> {
+  const data = await datasetsRepo.getDataset<unknown[]>("billing_invoices", []);
+  if (!Array.isArray(data)) return null;
+  const item = data.find(
+    (inv) => typeof inv === "object" && inv !== null && (inv as Record<string, unknown>).id === id,
+  );
+  if (!item) return null;
+  const row = item as Record<string, unknown>;
+  const rentAmount = Number(row.rentAmount ?? 0);
+  const electricityAmount = Number(row.electricityAmount ?? 0);
+  const cleaningAmount = Number(row.cleaningAmount ?? 0);
+  const lineItems: InvoiceLineItem[] = [];
+  if (rentAmount > 0) {
+    lineItems.push({ id: "rent-1", description: "Monthly Rent", qty: 1, rate: rentAmount, amount: rentAmount, meta: { kind: "RENT" } as Record<string, unknown> });
+  }
+  if (electricityAmount > 0) {
+    lineItems.push({ id: "elec-1", description: "Electricity", qty: 1, rate: electricityAmount, amount: electricityAmount, meta: { kind: "METER_ELECTRICITY" } as Record<string, unknown> });
+  }
+  if (cleaningAmount > 0) {
+    lineItems.push({ id: "clean-1", description: "Cleaning Service", qty: 1, rate: cleaningAmount, amount: cleaningAmount });
+  }
+  return {
+    id: String(row.id),
+    tenant_id: String(row.tenantId ?? row.tenant_id ?? "") || null,
+    unit_id: String(row.unitId ?? row.unit_id ?? "") || null,
+    invoice_number: null,
+    invoice_date: String(row.invoiceDate ?? row.invoice_date ?? "") || null,
+    due_date: null,
+    status: String(row.status ?? "unpaid"),
+    currency: "USD",
+    notes: null,
+    meta: null,
+    period: null,
+    line_items: lineItems as unknown as InvoiceLineItem[],
+    meter_snapshot: null,
+  };
+}
+
 async function loadInvoiceLines(invoiceId: string, storedLineItems: unknown) {
   const mappedStored = mapStoredLineItems(storedLineItems);
   if (mappedStored.length) {
@@ -1070,11 +1108,16 @@ export async function GET(req: NextRequest) {
          LIMIT 1`,
         [requestedInvoiceId],
       );
-      const invoice = singleRes.rows[0] as InvoiceHeaderRow | undefined;
-      if (!invoice) {
+      let invoiceRow = singleRes.rows[0] as InvoiceHeaderRow | undefined;
+      if (!invoiceRow) {
+        // Fallback: look in the legacy billing_invoices dataset
+        const legacyRow = await findLegacyInvoiceRow(requestedInvoiceId);
+        invoiceRow = legacyRow ?? undefined;
+      }
+      if (!invoiceRow) {
         return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
       }
-      invoicePayloads = [await buildInvoicePayloadFromRow(invoice, reference)];
+      invoicePayloads = [await buildInvoicePayloadFromRow(invoiceRow, reference)];
       reference = invoicePayloads[0]?.issueDate || reference;
     } else {
       let tenants: TenantRecord[] = [];
@@ -1198,8 +1241,9 @@ export async function GET(req: NextRequest) {
       body { font-family: 'DM Sans', "Helvetica Neue", Arial, sans-serif; background: #e8e4de; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; min-height: 100vh; }
       .invoice { page-break-after: always; }
       .invoice:last-child { page-break-after: auto; }
-      .page { width: 794px; min-height: 1123px; background: #fff; margin: 0 auto 32px; padding: 64px 72px 56px; position: relative; box-shadow: 0 8px 48px rgba(0,0,0,0.18); }
+      .page { width: 794px; min-height: 1123px; background: #fff; margin: 0 auto 32px; padding: 32px 72px 56px; position: relative; box-shadow: 0 8px 48px rgba(0,0,0,0.18); }
       .inv-header { display: flex; align-items: flex-start; justify-content: space-between; padding-bottom: 32px; border-bottom: 1.5px solid var(--black); margin-bottom: 32px; }
+      .logo-block { margin-top: -8px; }
       .logo-block img { height: 200px; width: auto; display: block; }
       .inv-label { font-family: 'Cormorant Garamond', serif; font-size: 36px; font-weight: 600; color: var(--ink); letter-spacing: 0.04em; line-height: 1; }
       .inv-number { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 6px; letter-spacing: 0.06em; }

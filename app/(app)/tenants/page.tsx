@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { displayPropertyLabel } from "@/lib/propertyLabel";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
+import ExportButton from "@/components/ExportButton";
 
 export default function TenantPortalPage() {
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
@@ -14,11 +15,17 @@ export default function TenantPortalPage() {
     fetch(`/api/tenants?ts=${Date.now()}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((payload) => {
-        const data = payload?.ok === false ? [] : payload?.ok ? payload.data : payload;
-        setTenants(data || []);
-        if (data?.length) {
-          setSelectedTenant(data[0]);
-        }
+        const data: TenantRecord[] = payload?.ok === false ? [] : payload?.ok ? payload.data : payload;
+        // Deduplicate by name — one row per unique tenant (tenants table has one row per unit)
+        const seen = new Set<string>();
+        const unique = (data || []).filter((t) => {
+          const key = (t.name || "").trim().toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setTenants(unique);
+        if (unique.length) setSelectedTenant(unique[0]);
       })
       .catch(() => setTenants([]));
   }, []);
@@ -41,10 +48,25 @@ export default function TenantPortalPage() {
 
   return (
     <div className="space-y-8">
-      <header className="space-y-1">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-500">Tenants</p>
-        <h1 className="text-3xl font-semibold text-slate-900">Tenant Directory</h1>
-        <p className="text-sm text-slate-500">Search and review tenant profiles for each unit.</p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-500">Tenants</p>
+          <h1 className="text-3xl font-semibold text-slate-900">Tenant Directory</h1>
+          <p className="text-sm text-slate-500">Search and review tenant profiles for each unit.</p>
+        </div>
+        <ExportButton
+          filename="tenants"
+          getData={() =>
+            filteredTenants.map((t) => ({
+              Name: t.name,
+              Unit: t.unit ?? "",
+              Property: displayPropertyLabel(t.building || t.property_id) ?? "",
+              "Monthly Rent": t.monthly_rent ?? 0,
+              "Due Day": t.due_day ?? "",
+              Reference: t.reference ?? "",
+            }))
+          }
+        />
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[320px,1fr]">

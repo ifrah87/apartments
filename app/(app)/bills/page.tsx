@@ -17,11 +17,13 @@ import {
   Plus,
   AlertCircle,
   ScrollText,
+  Landmark,
 } from "lucide-react";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
 import { dateOnlyToUtcTimestamp } from "@/lib/dateOnly";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { normalizeId } from "@/lib/normalizeId";
+import ExportButton from "@/components/ExportButton";
 
 type UnitCard = {
   id: string;
@@ -125,6 +127,21 @@ const STATUS_VARIANTS: Record<InvoiceRow["status"], "success" | "warning" | "dan
   "Partially Paid": "warning",
   Unpaid: "danger",
 };
+
+const MONTH_NAMES: string[] = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
 const formatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
@@ -341,6 +358,8 @@ function normalizeInvoice(row: any): InvoiceRow {
 export default function BillsPage() {
   const confirm = useConfirm();
   const [query, setQuery] = useState("");
+  const [historyMonth, setHistoryMonth] = useState("All Months");
+  const [historyYear, setHistoryYear] = useState("All Years");
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [units, setUnits] = useState<UnitCard[]>([]);
   const [showGenerator, setShowGenerator] = useState(false);
@@ -526,6 +545,12 @@ export default function BillsPage() {
           }, new Map<string, UnitCard>()).values(),
         );
 
+        dedupedUnits.sort((a, b) => {
+          const numA = parseInt(a.unitNumber || a.unit.replace(/\D/g, ""), 10);
+          const numB = parseInt(b.unitNumber || b.unit.replace(/\D/g, ""), 10);
+          if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+          return (a.unitNumber || a.unit).localeCompare(b.unitNumber || b.unit);
+        });
         setUnits(dedupedUnits);
         setInvoices(Array.isArray(invoicesData) ? invoicesData.map(normalizeInvoice) : []);
         setServices(Array.isArray(servicesData) ? servicesData : []);
@@ -926,16 +951,59 @@ export default function BillsPage() {
     [invoices, billingPeriod],
   );
 
+  const historyYearOptions = useMemo(() => {
+    const years = new Set<string>();
+    invoices.forEach((invoice) => {
+      const { year } = getInvoiceMonthYear(invoice);
+      if (year) years.add(year);
+    });
+    return Array.from(years).sort((a, b) => Number(b) - Number(a));
+  }, [invoices]);
+
+  const historyMonthOptions = useMemo(() => {
+    const months = new Set<string>();
+    invoices.forEach((invoice) => {
+      const { month, year } = getInvoiceMonthYear(invoice);
+      if (!month) return;
+      if (historyYear !== "All Years" && year !== historyYear) return;
+      months.add(month);
+    });
+    return MONTH_NAMES.filter((month) => months.has(month));
+  }, [invoices, historyYear]);
+
+  useEffect(() => {
+    if (historyYear !== "All Years" && !historyYearOptions.includes(historyYear)) {
+      setHistoryYear("All Years");
+    }
+  }, [historyYear, historyYearOptions]);
+
+  useEffect(() => {
+    if (historyMonth !== "All Months" && !historyMonthOptions.includes(historyMonth)) {
+      setHistoryMonth("All Months");
+    }
+  }, [historyMonth, historyMonthOptions]);
+
   const visibleInvoices = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return invoices;
-    return invoices.filter((invoice) => {
-      return (
+    const filtered = invoices.filter((invoice) => {
+      const matchesQuery =
+        !normalized ||
         invoice.unitLabel.toLowerCase().includes(normalized) ||
-        invoice.tenantName.toLowerCase().includes(normalized)
-      );
+        invoice.tenantName.toLowerCase().includes(normalized);
+      if (!matchesQuery) return false;
+
+      const { month, year } = getInvoiceMonthYear(invoice);
+      if (historyMonth !== "All Months" && month !== historyMonth) return false;
+      if (historyYear !== "All Years" && year !== historyYear) return false;
+      return true;
     });
-  }, [query, invoices]);
+    return filtered.sort((a, b) => {
+      const numA = parseInt(a.unitLabel.replace(/\D/g, ""), 10);
+      const numB = parseInt(b.unitLabel.replace(/\D/g, ""), 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.unitLabel.localeCompare(b.unitLabel);
+    });
+  }, [query, invoices, historyMonth, historyYear]);
 
   const handleDeleteInvoice = async (invoice: InvoiceRow) => {
     const confirmed = await confirm({
@@ -1210,6 +1278,36 @@ export default function BillsPage() {
     window.open(buildInvoiceUrl(invoice, "download"), "_blank", "noopener,noreferrer");
   };
 
+  const handlePayFromDeposit = async (invoice: InvoiceRow) => {
+    const confirmed = await confirm({
+      title: "Pay from Security Deposit",
+      message: `Mark invoice for ${invoice.tenantName} (${getInvoicePeriodLabel(invoice)}) as Paid using their security deposit ($${invoice.total.toFixed(2)})?`,
+      confirmLabel: "Apply Deposit",
+      tone: "default",
+    });
+    if (!confirmed) return;
+    try {
+      const res = await fetch(`/api/invoices/${invoice.id}/pay-from-deposit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: invoice.total }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || payload?.ok === false) {
+        setToast({ type: "error", message: payload?.error || "Failed to apply deposit." });
+        return;
+      }
+      setInvoices((prev) =>
+        prev.map((inv) =>
+          inv.id === invoice.id ? { ...inv, status: "Paid" } : inv,
+        ),
+      );
+      setToast({ type: "success", message: `Deposit applied — invoice marked as Paid.` });
+    } catch {
+      setToast({ type: "error", message: "Failed to apply deposit." });
+    }
+  };
+
   const handleWhatsAppInvoice = (invoice: InvoiceRow) => {
     const invoiceUrl = new URL(buildInvoiceUrl(invoice, "pdf"), window.location.origin).toString();
     const message = `Invoice for ${invoice.tenantName} (${getInvoicePeriodLabel(invoice)}) - ${formatCurrency(invoice.total)}. ${invoiceUrl}`;
@@ -1261,6 +1359,26 @@ export default function BillsPage() {
       <PageHeader
         title="Bills"
         subtitle="Generate invoices and review the latest billing history."
+        actions={
+          <ExportButton
+            filename="bills"
+            getData={() =>
+              visibleInvoices.map((inv) => ({
+                Tenant: inv.tenantName,
+                Unit: inv.unitLabel,
+                Period: inv.period,
+                "Invoice Date": inv.invoiceDate ?? "",
+                "Due Date": inv.dueDate ?? "",
+                Rent: inv.rentAmount,
+                Electricity: inv.electricityAmount,
+                Cleaning: inv.cleaningAmount,
+                Total: inv.total,
+                Outstanding: inv.outstanding,
+                Status: inv.status,
+              }))
+            }
+          />
+        }
       />
 
       {toast ? (
@@ -1351,20 +1469,52 @@ export default function BillsPage() {
           <div className="flex items-center gap-3 text-xs text-slate-400">
             <label className="flex items-center gap-2">
               Month
-              <select className="rounded-full border border-white/10 bg-panel/60 px-3 py-1 text-xs text-slate-200">
-                <option>All Months</option>
-                <option>March</option>
-                <option>February</option>
-                <option>January</option>
+              <select
+                value={historyMonth}
+                onChange={(event) => setHistoryMonth(event.target.value)}
+                className="rounded-full border border-white/10 bg-panel/60 px-3 py-1 text-xs text-slate-200"
+              >
+                <option value="All Months">All Months</option>
+                {historyMonthOptions.map((month) => (
+                  <option key={month} value={month}>
+                    {month}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="flex items-center gap-2">
               Year
-              <select className="rounded-full border border-white/10 bg-panel/60 px-3 py-1 text-xs text-slate-200">
-                <option>2026</option>
-                <option>2025</option>
+              <select
+                value={historyYear}
+                onChange={(event) => setHistoryYear(event.target.value)}
+                className="rounded-full border border-white/10 bg-panel/60 px-3 py-1 text-xs text-slate-200"
+              >
+                <option value="All Years">All Years</option>
+                {historyYearOptions.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
               </select>
             </label>
+            <ExportButton
+              filename={`invoices-${historyYear === "All Years" ? "all" : historyYear}-${historyMonth === "All Months" ? "all" : historyMonth}`}
+              getData={() =>
+                visibleInvoices.map((inv) => ({
+                  Unit: inv.unitLabel,
+                  Tenant: inv.tenantName,
+                  Period: inv.period,
+                  "Invoice Date": inv.invoiceDate ?? "",
+                  "Due Date": inv.dueDate ?? "",
+                  Rent: inv.rentAmount,
+                  Electricity: inv.electricityAmount,
+                  Cleaning: inv.cleaningAmount,
+                  Total: inv.total,
+                  Outstanding: inv.outstanding,
+                  Status: inv.status,
+                }))
+              }
+            />
           </div>
         </div>
 
@@ -1431,6 +1581,15 @@ export default function BillsPage() {
                       >
                         <CheckSquare2 className="h-4 w-4" />
                       </button>
+                      {invoice.status !== "Paid" && (
+                        <button
+                          onClick={() => handlePayFromDeposit(invoice)}
+                          title="Pay from Security Deposit"
+                          className="rounded-lg border border-amber-400/30 bg-amber-500/10 p-2 text-amber-300 hover:border-amber-400/60"
+                        >
+                          <Landmark className="h-4 w-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => handleTenantStatement(invoice)}
                         title="Tenant statement (all units)"

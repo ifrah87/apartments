@@ -125,8 +125,8 @@ export default async function DashboardPage({
       label: "Bank balance",
       value: formatCurrency(bank.bankBalance),
       subtitle: bank.unreconciledCount > 0
-        ? `⚠ ${bank.unreconciledCount} items need coding`
-        : `All coded · ${lastUpdatedText}`,
+        ? `⚠ ${bank.unreconciledCount} items need Reconcile`
+        : `All Reconcile · ${lastUpdatedText}`,
       accent: "cyan" as const,
       href: "/reports/bank-reconciliation",
     },
@@ -400,8 +400,8 @@ function buildMonthlyCashflow(transactions: Txn[]): CashflowPoint[] {
 function formatCurrency(value: number) {
   const safe = Number.isFinite(value) ? value : 0;
   const abs = Math.abs(safe);
-  const formatted = abs.toLocaleString("en-GB", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-  return safe < 0 ? `-${formatted}` : formatted;
+  const formatted = abs.toLocaleString("en-GB", { maximumFractionDigits: 0 });
+  return safe < 0 ? `-$${formatted}` : `$${formatted}`;
 }
 
 function formatDate(value: string) {

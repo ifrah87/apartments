@@ -10,7 +10,8 @@ import { DEFAULT_LEASES, LeaseAgreement, LeaseBillingCycle, LeaseAgreementStatus
 import { DEFAULT_LEASE_TEMPLATE } from "@/lib/settings/defaults";
 import type { LeaseTemplateSettings } from "@/lib/settings/types";
 import { getCurrentPropertyId, resolveCurrentPropertyId, setCurrentPropertyId } from "@/lib/currentProperty";
-import { FileDown, Plus, Search, PencilLine, Eye, Trash2, X, Info } from "lucide-react";
+import { Plus, Search, PencilLine, Eye, Trash2, X, Info } from "lucide-react";
+import ExportButton from "@/components/ExportButton";
 
 type LeaseFormState = {
   property: string;
@@ -761,10 +762,22 @@ export default function LeasesClient() {
         subtitle="Manage tenant contracts and financial obligations."
         actions={
           <div className="flex items-center gap-2">
-            <button className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-panel/60 px-4 py-2 text-xs font-semibold text-slate-200 hover:border-white/20">
-              <FileDown className="h-4 w-4" />
-              Export PDF
-            </button>
+            <ExportButton
+              filename="leases"
+              getData={() =>
+                visibleLeases.map((l) => ({
+                  Tenant: l.tenantName,
+                  Unit: l.unit,
+                  Property: l.property ?? "",
+                  Rent: l.rent ?? 0,
+                  Deposit: l.deposit ?? 0,
+                  Cycle: l.billingCycle ?? "",
+                  "Start Date": l.startDate ?? "",
+                  "End Date": l.endDate ?? "",
+                  Status: l.status,
+                }))
+              }
+            />
             <button
               onClick={startCreate}
               className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-xs font-semibold text-slate-900 shadow-[0_10px_20px_rgba(56,189,248,0.25)] hover:bg-accent-strong"

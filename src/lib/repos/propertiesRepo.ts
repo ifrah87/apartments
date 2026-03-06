@@ -1,7 +1,5 @@
 import { randomUUID } from "crypto";
 import { query } from "@/lib/db";
-import { datasetsRepo } from "@/lib/repos/datasetsRepo";
-import type { LeaseAgreement } from "@/lib/leases";
 import { badRequest, notFound } from "./errors";
 
 export type PropertyRecord = {
@@ -162,19 +160,56 @@ export async function listPropertySummaries(): Promise<PropertySummary[]> {
            p.name,
            p.code,
            p.status,
-           COALESCE(u.total_units, 0)::int as total_units,
-           COALESCE(u.occupied_units, 0)::int as occupied_units,
-           COALESCE(u.vacant_units, 0)::int as vacant_units
+           COALESCE(u_agg.total_units, 0)::int AS total_units,
+           CASE
+             WHEN COALESCE(ds_agg.occupied, 0) > 0 THEN COALESCE(ds_agg.occupied, 0)
+             WHEN COALESCE(l_agg.occupied, 0) > 0  THEN COALESCE(l_agg.occupied, 0)
+             ELSE COALESCE(t_agg.occupied, 0)
+           END::int AS occupied_units,
+           GREATEST(
+             COALESCE(u_agg.total_units, 0) - CASE
+               WHEN COALESCE(ds_agg.occupied, 0) > 0 THEN COALESCE(ds_agg.occupied, 0)
+               WHEN COALESCE(l_agg.occupied, 0) > 0  THEN COALESCE(l_agg.occupied, 0)
+               ELSE COALESCE(t_agg.occupied, 0)
+             END,
+             0
+           )::int AS vacant_units,
+           CASE
+             WHEN COALESCE(ds_agg.monthly_rent, 0) > 0 THEN COALESCE(ds_agg.monthly_rent, 0)
+             WHEN COALESCE(l_agg.monthly_rent, 0) > 0  THEN COALESCE(l_agg.monthly_rent, 0)
+             ELSE COALESCE(t_agg.monthly_rent, 0)
+           END AS monthly_rent
          FROM properties p
          LEFT JOIN (
+           SELECT property_id, COUNT(*)::int AS total_units
+           FROM public.units GROUP BY property_id
+         ) u_agg ON u_agg.property_id = p.id
+         LEFT JOIN (
+           SELECT u.property_id,
+                  COUNT(l.id)::int        AS occupied,
+                  COALESCE(SUM(l.rent),0) AS monthly_rent
+           FROM public.leases l
+           JOIN public.units u ON u.id = l.unit_id
+           WHERE l.status = 'active'
+           GROUP BY u.property_id
+         ) l_agg ON l_agg.property_id = p.id
+         LEFT JOIN (
+           SELECT property_id,
+                  COUNT(*)::int                    AS occupied,
+                  COALESCE(SUM(monthly_rent), 0)   AS monthly_rent
+           FROM public.tenants
+           GROUP BY property_id
+         ) t_agg ON t_agg.property_id::text = p.id::text
+         LEFT JOIN (
            SELECT
-             property_id,
-             COUNT(*) as total_units,
-             COUNT(*) FILTER (WHERE lower(status) = 'occupied') as occupied_units,
-             COUNT(*) FILTER (WHERE lower(status) = 'vacant') as vacant_units
-           FROM units
-            GROUP BY property_id
-         ) u ON u.property_id = p.id
+             elem->>'property' AS property_id,
+             COUNT(*)::int AS occupied,
+             COALESCE(SUM((elem->>'rent')::numeric), 0) AS monthly_rent
+           FROM app_datasets, jsonb_array_elements(data) AS elem
+           WHERE key = 'lease_agreements'
+             AND (elem->>'status' IS NULL OR elem->>'status' = 'Active')
+           GROUP BY elem->>'property'
+         ) ds_agg ON ds_agg.property_id = p.id::text
          WHERE p.status <> 'archived'
          ORDER BY p.created_at DESC`,
       )
@@ -184,60 +219,69 @@ export async function listPropertySummaries(): Promise<PropertySummary[]> {
            ${legacyNameExpr(schema, "p")} as name,
            NULL::text as code,
            'active'::text as status,
-           COALESCE(u.total_units, ${schema.hasLegacyUnits ? "COALESCE(p.units, 0)" : "0"})::int as total_units,
-           COALESCE(u.occupied_units, 0)::int as occupied_units,
-           GREATEST(COALESCE(u.total_units, ${schema.hasLegacyUnits ? "COALESCE(p.units, 0)" : "0"}) - COALESCE(u.occupied_units, 0), 0)::int as vacant_units
+           COALESCE(u_agg.total_units, ${schema.hasLegacyUnits ? "COALESCE(p.units, 0)" : "0"})::int as total_units,
+           CASE
+             WHEN COALESCE(ds_agg.occupied, 0) > 0 THEN COALESCE(ds_agg.occupied, 0)
+             WHEN COALESCE(l_agg.occupied, 0) > 0  THEN COALESCE(l_agg.occupied, 0)
+             ELSE COALESCE(t_agg.occupied, 0)
+           END::int as occupied_units,
+           GREATEST(
+             COALESCE(u_agg.total_units, ${schema.hasLegacyUnits ? "COALESCE(p.units, 0)" : "0"}) - CASE
+               WHEN COALESCE(ds_agg.occupied, 0) > 0 THEN COALESCE(ds_agg.occupied, 0)
+               WHEN COALESCE(l_agg.occupied, 0) > 0  THEN COALESCE(l_agg.occupied, 0)
+               ELSE COALESCE(t_agg.occupied, 0)
+             END,
+             0
+           )::int as vacant_units,
+           CASE
+             WHEN COALESCE(ds_agg.monthly_rent, 0) > 0 THEN COALESCE(ds_agg.monthly_rent, 0)
+             WHEN COALESCE(l_agg.monthly_rent, 0) > 0  THEN COALESCE(l_agg.monthly_rent, 0)
+             ELSE COALESCE(t_agg.monthly_rent, 0)
+           END as monthly_rent
          FROM properties p
          LEFT JOIN (
-           SELECT
-             property_id::text as property_id,
-             COUNT(*)::int as total_units,
-             COUNT(*) FILTER (WHERE lower(status) = 'occupied')::int as occupied_units
-           FROM units
+           SELECT property_id::text AS property_id, COUNT(*)::int AS total_units
+           FROM public.units GROUP BY property_id
+         ) u_agg ON u_agg.property_id = ${legacyPropertyKeyExpr(schema, "p")}
+         LEFT JOIN (
+           SELECT u.property_id::text,
+                  COUNT(l.id)::int        AS occupied,
+                  COALESCE(SUM(l.rent),0) AS monthly_rent
+           FROM public.leases l
+           JOIN public.units u ON u.id = l.unit_id
+           WHERE l.status = 'active'
+           GROUP BY u.property_id
+         ) l_agg ON l_agg.property_id = ${legacyPropertyKeyExpr(schema, "p")}
+         LEFT JOIN (
+           SELECT property_id,
+                  COUNT(*)::int                    AS occupied,
+                  COALESCE(SUM(monthly_rent), 0)   AS monthly_rent
+           FROM public.tenants
            GROUP BY property_id
-         ) u ON u.property_id = ${legacyPropertyKeyExpr(schema, "p")}
+         ) t_agg ON t_agg.property_id = ${legacyPropertyKeyExpr(schema, "p")}
+         LEFT JOIN (
+           SELECT
+             elem->>'property' AS property_id,
+             COUNT(*)::int AS occupied,
+             COALESCE(SUM((elem->>'rent')::numeric), 0) AS monthly_rent
+           FROM app_datasets, jsonb_array_elements(data) AS elem
+           WHERE key = 'lease_agreements'
+             AND (elem->>'status' IS NULL OR elem->>'status' = 'Active')
+           GROUP BY elem->>'property'
+         ) ds_agg ON ds_agg.property_id = ${legacyPropertyKeyExpr(schema, "p")}
          ORDER BY p.created_at DESC`,
       );
 
-  const leases = await datasetsRepo.getDataset<LeaseAgreement[]>("lease_agreements", []);
-  const leaseList = Array.isArray(leases) ? leases : [];
-
-  const propertyKeyMap = new Map<string, string>();
-  rows.forEach((row: any) => {
-    const id = String(row.id).toLowerCase();
-    const name = String(row.name || "").toLowerCase();
-    const code = String(row.code || "").toLowerCase();
-    if (id) propertyKeyMap.set(id, String(row.id));
-    if (name) propertyKeyMap.set(name, String(row.id));
-    if (code) propertyKeyMap.set(code, String(row.id));
-  });
-
-  const rentByProperty = new Map<string, number>();
-  leaseList.forEach((lease) => {
-    if (!lease || typeof lease !== "object") return;
-    if ((lease.status || "").toLowerCase() !== "active") return;
-    const key = String(lease.property || "").toLowerCase();
-    if (!key) return;
-    const propertyId = propertyKeyMap.get(key);
-    if (!propertyId) return;
-    const rent = Number(lease.rent || 0);
-    if (!Number.isFinite(rent) || rent <= 0) return;
-    rentByProperty.set(propertyId, (rentByProperty.get(propertyId) || 0) + rent);
-  });
-
-  return rows.map((row: any) => {
-    const id = String(row.id);
-    return {
-      id,
-      name: String(row.name),
-      code: row.code ?? null,
-      status: row.status === "archived" ? "archived" : "active",
-      totalUnits: Number(row.total_units || 0),
-      occupiedUnits: Number(row.occupied_units || 0),
-      vacantUnits: Number(row.vacant_units || 0),
-      monthlyRent: Number(rentByProperty.get(id) || 0),
-    };
-  });
+  return rows.map((row: any) => ({
+    id: String(row.id),
+    name: String(row.name),
+    code: row.code ?? null,
+    status: row.status === "archived" ? "archived" : "active",
+    totalUnits: Number(row.total_units || 0),
+    occupiedUnits: Number(row.occupied_units || 0),
+    vacantUnits: Number(row.vacant_units || 0),
+    monthlyRent: Number(row.monthly_rent || 0),
+  }));
 }
 
 export async function getProperty(id: string): Promise<PropertyRecord | null> {
