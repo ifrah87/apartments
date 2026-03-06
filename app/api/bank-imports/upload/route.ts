@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { uploadObject } from "@/lib/spaces/storage";
 import { verifySession, getAuthSecret } from "@/lib/auth";
+import { query } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -29,6 +30,26 @@ function keyTimestamp(): string {
 }
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+
+async function ensureImportBatchesTable() {
+  await query(
+    `CREATE TABLE IF NOT EXISTS public.bank_import_batches (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      source text NOT NULL,
+      status text NOT NULL DEFAULT 'pending',
+      row_count int NOT NULL DEFAULT 0,
+      processed_count int NOT NULL DEFAULT 0,
+      error_count int NOT NULL DEFAULT 0,
+      error_message text,
+      meta jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_by text,
+      started_at timestamptz,
+      completed_at timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // POST /api/bank-imports/upload
@@ -86,6 +107,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: `Upload to Spaces failed: ${msg}` }, { status: 502 });
   }
 
+  await ensureImportBatchesTable();
+  const batchRes = await query<{ id: string }>(
+    `INSERT INTO public.bank_import_batches (source, status, row_count, processed_count, error_count, meta, created_by)
+     VALUES ($1, 'pending', 0, 0, 0, $2::jsonb, $3)
+     RETURNING id`,
+    [
+      "bank-imports/upload",
+      JSON.stringify({
+        key,
+        file_name: file.name,
+        file_size: file.size,
+        property_id: propertyId,
+        period,
+      }),
+      session.sub,
+    ],
+  );
+  const batchId = String(batchRes.rows[0]?.id || "");
+
   console.log(`[bank-imports/upload] completed key=${key}`);
-  return NextResponse.json({ ok: true, key, size: file.size });
+  return NextResponse.json({ ok: true, key, size: file.size, batchId });
 }

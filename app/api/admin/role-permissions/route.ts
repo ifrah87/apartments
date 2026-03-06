@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 
 const DATASET_KEY = "role_permissions";
 
-export const ALL_SECTIONS = [
+const ALL_SECTIONS = [
   "dashboard",
   "properties",
   "units",

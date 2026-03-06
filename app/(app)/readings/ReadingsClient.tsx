@@ -75,6 +75,7 @@ export default function ReadingsPage() {
   const [unitPropertyId, setUnitPropertyId] = useState<string | null>(null);
   const [readingDate, setReadingDate] = useState(() => todayISO());
   const [showForm, setShowForm] = useState(false);
+  const [allowNegativeUsage, setAllowNegativeUsage] = useState(false);
   const selectedPropertyId = useMemo(() => {
     const fromUrl = searchParams.get("propertyId")?.trim();
     return fromUrl || getCurrentPropertyId() || "";
@@ -217,6 +218,12 @@ export default function ReadingsPage() {
     );
     return match?.reading_value ?? null;
   }, [rows, unit, meterType]);
+  const currentReadingNumeric = Number(meterValue || 0);
+  const hasBackwardReading =
+    lastReading !== null &&
+    meterValue.trim() !== "" &&
+    Number.isFinite(currentReadingNumeric) &&
+    currentReadingNumeric < Number(lastReading);
 
   const handleDelete = async (id: string) => {
     const confirmed = await confirm({
@@ -268,6 +275,7 @@ export default function ReadingsPage() {
           meter_type: meterType,
           reading_date: readingDate,
           reading_value: meterValue,
+          allow_negative_usage: allowNegativeUsage,
         }),
       });
       const payload = await res.json().catch(() => null);
@@ -276,6 +284,7 @@ export default function ReadingsPage() {
       }
       await loadReadings();
       setMeterValue("");
+      setAllowNegativeUsage(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save reading");
     } finally {
@@ -464,6 +473,17 @@ export default function ReadingsPage() {
                       </div>
                     </div>
                   )}
+                  {hasBackwardReading ? (
+                    <label className="mt-1 flex items-center gap-2 text-xs text-amber-300">
+                      <input
+                        type="checkbox"
+                        checked={allowNegativeUsage}
+                        onChange={(event) => setAllowNegativeUsage(event.target.checked)}
+                        className="h-3.5 w-3.5 rounded border-white/20 bg-surface/70"
+                      />
+                      Allow backward reading override (meter reset/correction). Billing amount will not go negative.
+                    </label>
+                  ) : null}
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-semibold uppercase tracking-wide text-slate-400">Upload Proof (image)</label>

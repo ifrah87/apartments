@@ -3,29 +3,32 @@ import { query } from "@/lib/db";
 
 export const runtime = "nodejs";
 
+function toDateOnly(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
 export async function GET() {
   try {
-    // Use tenants table — monthly_rent is set on each tenant record and is the
-    // ground truth for occupied-unit revenue. public.leases is used for lease
-    // lifecycle tracking but may not always be populated.
-    const { rows } = await query(`
-      SELECT
-        COUNT(*)                              AS active_count,
-        COALESCE(SUM(t.monthly_rent), 0)     AS total_rent,
-        COALESCE(AVG(t.monthly_rent), 0)     AS avg_rent
-      FROM public.tenants t
-      WHERE t.unit IS NOT NULL
-        AND t.unit <> ''
-        AND (t.monthly_rent IS NULL OR t.monthly_rent > 0)
-    `);
+    const today = toDateOnly(new Date());
+    const { rows } = await query<{ active_count: number; total_rent: number; avg_rent: number }>(
+      `SELECT
+         COUNT(*)::int AS active_count,
+         COALESCE(SUM(COALESCE(l.rent, 0)), 0)::numeric AS total_rent,
+         COALESCE(AVG(COALESCE(l.rent, 0)), 0)::numeric AS avg_rent
+       FROM public.leases l
+       WHERE lower(l.status) = 'active'
+         AND l.start_date <= $1
+         AND (l.end_date IS NULL OR l.end_date >= $1)`,
+      [today],
+    );
+    const row = rows[0] ?? { active_count: 0, total_rent: 0, avg_rent: 0 };
 
-    const row = rows[0] ?? {};
     return NextResponse.json({
       ok: true,
       data: {
-        activeCount:       Number(row.active_count ?? 0),
-        totalRent:         Number(row.total_rent ?? 0),
-        avgRent:           Number(Number(row.avg_rent ?? 0).toFixed(2)),
+        activeCount: Number(row.active_count || 0),
+        totalRent: Number(row.total_rent || 0),
+        avgRent: Number(Number(row.avg_rent || 0).toFixed(2)),
         fullOccupancyRent: 37350,
       },
     });

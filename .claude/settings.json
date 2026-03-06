@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -l \"CREATE TABLE.*public.users\\\\|INSERT INTO.*users\" /Users/ifrahawaale/Desktop/apartments/src/lib/repos/*.ts)"
+    ]
+  }
+}

@@ -1,12 +1,30 @@
 import { NextResponse } from "next/server";
 import { query } from "@/lib/db";
+import { getAuthSecret, verifySession } from "@/lib/auth";
 import fs from "fs/promises";
 import path from "path";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-export async function POST() {
+async function requireAdmin(request: Request) {
+  const cookie = request.headers.get("cookie") || "";
+  const match = cookie.match(/(?:^|; )session=([^;]+)/);
+  if (!match) return false;
+  try {
+    const token = decodeURIComponent(match[1]);
+    const session = await verifySession(token, getAuthSecret());
+    return session?.role === "admin";
+  } catch {
+    return false;
+  }
+}
+
+export async function POST(request: Request) {
+  if (!(await requireAdmin(request))) {
+    return NextResponse.json({ ok: false, error: "Admin only" }, { status: 403 });
+  }
+
   try {
     const migrationsDir = path.join(process.cwd(), "db", "migrations");
     const files = (await fs.readdir(migrationsDir))

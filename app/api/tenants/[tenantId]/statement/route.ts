@@ -28,23 +28,12 @@ type StoredInvoiceRow = {
   id: string;
   invoice_number: string | null;
   invoice_date: string | Date | null;
-  line_items: unknown;
+  total_amount: number | null;
 };
-
-type StoredInvoiceLineItem = {
-  description?: string;
-  amount?: number | string | null;
-  meta?: Record<string, unknown> | null;
-};
-
-function normalizeInvoiceLineItems(value: unknown): StoredInvoiceLineItem[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as StoredInvoiceLineItem[];
-}
 
 async function loadInvoiceCharges(tenantId: string, start: Date, end: Date): Promise<ChargeEntry[]> {
   const { rows } = await query<StoredInvoiceRow>(
-    `SELECT id, invoice_number, invoice_date, line_items
+    `SELECT id, invoice_number, invoice_date, total_amount
      FROM public.invoices
      WHERE tenant_id = $1
        AND invoice_date >= $2
@@ -59,23 +48,20 @@ async function loadInvoiceCharges(tenantId: string, start: Date, end: Date): Pro
     const normalizedDate = normalizeDay(invoiceDate);
     if (normalizedDate < start || normalizedDate > end) return [];
 
-    const charges: ChargeEntry[] = [];
-    for (const item of normalizeInvoiceLineItems(invoice.line_items)) {
-      const amount = Number(item.amount || 0);
-      if (!Number.isFinite(amount) || amount === 0) continue;
-      charges.push({
-          date: toISO(normalizedDate),
-          amount,
-          description: item.description || "Invoice charge",
-          category: "invoice",
-          meta: {
-            invoice_id: invoice.id,
-            invoice_number: invoice.invoice_number,
-            ...(item.meta && typeof item.meta === "object" ? item.meta : {}),
-          },
-        });
-    }
-    return charges;
+    const amount = Number(invoice.total_amount || 0);
+    if (!Number.isFinite(amount) || amount === 0) return [];
+    return [
+      {
+        date: toISO(normalizedDate),
+        amount,
+        description: invoice.invoice_number ? `Invoice ${invoice.invoice_number}` : "Invoice charge",
+        category: "invoice",
+        meta: {
+          invoice_id: invoice.id,
+          invoice_number: invoice.invoice_number,
+        },
+      },
+    ];
   });
 }
 
@@ -115,38 +101,58 @@ export async function GET(
       return NextResponse.json({ ok: false, error: "Start date must be before end date" }, { status: 400 });
     }
 
-    const tenantName = (tenant.name || "").toLowerCase();
-    const unitRef = (tenant.reference || "").toLowerCase();
-
-    const bankTransactions = await bankTransactionsRepo.listTransactions();
-    const payments: PaymentEntry[] = bankTransactions
-      .map((row) => ({
+    let payments: PaymentEntry[] = [];
+    try {
+      const allocatedPaymentsRes = await query<{ date: string; description: string; amount: number }>(
+        `SELECT
+           bt.txn_date::text AS date,
+           COALESCE(bt.payee, bt.particulars, 'Bank payment') AS description,
+           SUM(ba.allocated_amount)::numeric AS amount
+         FROM public.bank_allocations ba
+         JOIN public.bank_transactions bt ON bt.id = ba.transaction_id
+         JOIN public.invoices i ON i.id::text = ba.invoice_id::text
+         WHERE i.tenant_id::text = $1::text
+           AND bt.txn_date >= $2
+           AND bt.txn_date <= $3
+         GROUP BY bt.id, bt.txn_date, bt.payee, bt.particulars
+         ORDER BY bt.txn_date ASC, bt.id ASC`,
+        [tenant.id, toISO(start), toISO(end)],
+      );
+      payments = allocatedPaymentsRes.rows.map((row) => ({
+        date: row.date,
         amount: Number(row.amount || 0),
-        date: row.date,
-        description: row.description,
-        tenant_id: row.tenant_id,
-      }))
-      .filter((row) => {
-        const normalizedId = normalizeId(row.tenant_id);
-        const desc = (row.description || "").toLowerCase();
-        return (
-          normalizedId === tenantIdValue ||
-          (unitRef && desc.includes(unitRef)) ||
-          (tenantName && desc.includes(tenantName))
-        );
-      })
-      .filter((row) => {
-        const d = parseDate(row.date);
-        if (!d) return false;
-        const normalized = normalizeDay(d);
-        return normalized >= start && normalized <= end;
-      })
-      .map((row) => ({
-        date: row.date,
-        amount: row.amount,
         description: row.description,
         source: "bank",
       }));
+    } catch (err: any) {
+      const code = err?.code;
+      const message = err instanceof Error ? err.message : String(err);
+      // Backward-compatible fallback when allocations are not migrated yet.
+      if (code !== "42P01" && !message.includes('relation "bank_allocations" does not exist')) {
+        throw err;
+      }
+      const bankTransactions = await bankTransactionsRepo.listTransactions();
+      payments = bankTransactions
+        .map((row) => ({
+          amount: Number(row.amount || 0),
+          date: row.date,
+          description: row.description,
+          tenant_id: row.tenant_id,
+        }))
+        .filter((row) => normalizeId(row.tenant_id) === tenantIdValue)
+        .filter((row) => {
+          const d = parseDate(row.date);
+          if (!d) return false;
+          const normalized = normalizeDay(d);
+          return normalized >= start && normalized <= end;
+        })
+        .map((row) => ({
+          date: row.date,
+          amount: row.amount,
+          description: row.description,
+          source: "bank",
+        }));
+    }
 
     const manualPayments = await listManualPayments();
     const manualEntries: PaymentEntry[] = manualPayments

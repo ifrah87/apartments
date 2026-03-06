@@ -6,7 +6,7 @@ import { datasetsRepo } from "@/lib/repos";
 type AttendanceUser = {
   id: string;
   phone?: string | null;
-  role: "admin" | "reception";
+  role: "admin" | "manager" | "accountant" | "reception";
   name?: string | null;
 };
 
@@ -15,7 +15,7 @@ export type StaffAttendanceRecord = {
   userId: string;
   name: string | null;
   phone: string | null;
-  role: "admin" | "reception" | null;
+  role: "admin" | "manager" | "accountant" | "reception" | null;
   clockInAt: string;
   clockOutAt: string | null;
   status: "signed_in" | "signed_out";
@@ -114,7 +114,7 @@ export async function listStaffAttendance(limit = 50): Promise<StaffAttendanceRe
         clock_in_at: string | Date;
         clock_out_at: string | Date | null;
         phone: string | null;
-        role: "admin" | "reception" | null;
+        role: "admin" | "manager" | "accountant" | "reception" | null;
         name: string | null;
       }>(
         `SELECT
@@ -137,7 +137,7 @@ export async function listStaffAttendance(limit = 50): Promise<StaffAttendanceRe
         clock_in_at: string | Date;
         clock_out_at: string | Date | null;
         phone: string | null;
-        role: "admin" | "reception" | null;
+        role: "admin" | "manager" | "accountant" | "reception" | null;
       }>(
         `SELECT
            a.id,

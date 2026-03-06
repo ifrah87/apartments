@@ -3,6 +3,10 @@ import { query } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  if (process.env.NODE_ENV !== "development") {
+    return Response.json({ ok: false, error: "Not found" }, { status: 404 });
+  }
+
   const stamp = {
     routeVersion: "debug-db-v2",
     builtAt: new Date().toISOString(),
@@ -11,27 +15,14 @@ export async function GET() {
   try {
     const r = await query("SELECT now() as now");
     return Response.json({ ok: true, now: r.rows[0].now, ...stamp });
-  } catch (err: any) {
-    const causes = Array.isArray(err?.errors)
-      ? err.errors.map((e: any) => ({
-          name: e?.name,
-          message: e?.message,
-          code: e?.code,
-          errno: e?.errno,
-        }))
-      : null;
-
+  } catch {
     return Response.json(
       {
         ok: false,
         ...stamp,
-        name: err?.name,
-        message: err?.message,
-        code: err?.code,
-        errno: err?.errno,
-        causes,
+        error: "Debug DB check failed.",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

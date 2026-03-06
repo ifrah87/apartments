@@ -918,39 +918,6 @@ export default function BillsPage() {
     });
   }, [billingUnits]);
 
-  const rentBilled = useMemo(
-    () =>
-      Number(
-        invoices
-          .filter((inv) => getInvoicePeriodLabel(inv) === billingPeriod)
-          .reduce((sum, inv) => sum + (inv.rentAmount ?? 0), 0)
-          .toFixed(2),
-      ),
-    [invoices, billingPeriod],
-  );
-
-  const cleaningBilled = useMemo(
-    () =>
-      Number(
-        invoices
-          .filter((inv) => getInvoicePeriodLabel(inv) === billingPeriod)
-          .reduce((sum, inv) => sum + (inv.cleaningAmount ?? 0), 0)
-          .toFixed(2),
-      ),
-    [invoices, billingPeriod],
-  );
-
-  const electricityBilled = useMemo(
-    () =>
-      Number(
-        invoices
-          .filter((inv) => getInvoicePeriodLabel(inv) === billingPeriod)
-          .reduce((sum, inv) => sum + (inv.electricityAmount ?? 0), 0)
-          .toFixed(2),
-      ),
-    [invoices, billingPeriod],
-  );
-
   const historyYearOptions = useMemo(() => {
     const years = new Set<string>();
     invoices.forEach((invoice) => {
@@ -1004,6 +971,21 @@ export default function BillsPage() {
       return a.unitLabel.localeCompare(b.unitLabel);
     });
   }, [query, invoices, historyMonth, historyYear]);
+
+  const rentBilled = useMemo(
+    () => Number(visibleInvoices.reduce((sum, inv) => sum + (inv.rentAmount ?? 0), 0).toFixed(2)),
+    [visibleInvoices],
+  );
+
+  const cleaningBilled = useMemo(
+    () => Number(visibleInvoices.reduce((sum, inv) => sum + (inv.cleaningAmount ?? 0), 0).toFixed(2)),
+    [visibleInvoices],
+  );
+
+  const electricityBilled = useMemo(
+    () => Number(visibleInvoices.reduce((sum, inv) => sum + (inv.electricityAmount ?? 0), 0).toFixed(2)),
+    [visibleInvoices],
+  );
 
   const handleDeleteInvoice = async (invoice: InvoiceRow) => {
     const confirmed = await confirm({

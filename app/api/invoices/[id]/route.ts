@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { datasetsRepo } from "@/lib/repos";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
+import { getInvoiceById } from "@/src/modules/billing/repository";
 
 type RouteParams = Promise<{ id: string }>;
 
@@ -118,54 +119,18 @@ function extractMeterSnapshot(meta: Record<string, any> | null | undefined): Met
 
 export async function GET(_req: NextRequest, context: { params: RouteParams }) {
   const { id } = await context.params;
-  const invoiceRes = await query(
-    `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, period, line_items, meter_snapshot
-     FROM public.invoices
-     WHERE id = $1`,
-    [id],
-  );
-  if (!invoiceRes.rows.length) {
+  const invoice = await getInvoiceById(id);
+  if (!invoice) {
     return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
   }
-  const invoiceMeta = (invoiceRes.rows[0]?.meta ?? null) as Record<string, any> | null;
-  const invoiceRow = invoiceRes.rows[0] as any;
-  const storedLineItems = Array.isArray(invoiceRow?.line_items) ? invoiceRow.line_items : null;
-  let lineItems: InvoiceLineItem[] = [];
-  let totalCents = 0;
-
-  if (storedLineItems) {
-    lineItems = storedLineItems
-      .map((item: any, idx: number) => ({
-        id: String(item?.id ?? `line-${idx + 1}`),
-        description: String(item?.description ?? ""),
-        qty: Number(item?.qty ?? 0),
-        rate: toNumber(item?.rate),
-        amount: toNumber(item?.amount),
-        meta: item?.meta && typeof item.meta === "object" ? item.meta : undefined,
-      }))
-      .filter((item: InvoiceLineItem) => item.description);
-    totalCents = lineItems.reduce((sum, item) => sum + toCents(item.amount), 0);
-  } else {
-    const lineRes = await query(
-      `SELECT id, invoice_id, line_index, description, quantity, unit_price_cents, total_cents, meta, created_at
-       FROM public.invoice_lines
-       WHERE invoice_id = $1
-       ORDER BY line_index ASC, created_at ASC`,
-      [id],
-    );
-    const lineRows = lineRes.rows as InvoiceLineRow[];
-    lineItems = mapInvoiceLines(lineRows);
-    totalCents = lineRows.reduce((sum, row) => sum + Number(row.total_cents || 0), 0);
-  }
-  const meterSnapshot = invoiceRow?.meter_snapshot ?? extractMeterSnapshot(invoiceMeta);
   return NextResponse.json({
     ok: true,
     data: {
-      ...invoiceRow,
-      line_items: lineItems,
-      meter_snapshot: meterSnapshot,
-      total_amount: fromCents(totalCents),
-      total_cents: totalCents,
+      ...invoice,
+      line_items: invoice.line_items,
+      meter_snapshot: invoice.meter_snapshot,
+      total_amount: invoice.total_amount,
+      total_cents: invoice.total_cents,
     },
   });
 }
@@ -191,11 +156,29 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
         return NextResponse.json({ ok: false, error: "Invalid status value." }, { status: 400 });
       }
       const res = await query(
-        `UPDATE public.invoices SET status = $1 WHERE id = $2 RETURNING id, status`,
+        `UPDATE public.invoices
+            SET status = $1,
+                amount_paid = CASE
+                  WHEN $1 = 'paid' THEN COALESCE(total_amount, 0)
+                  WHEN $1 = 'unpaid' THEN 0
+                  ELSE amount_paid
+                END
+          WHERE id = $2
+          RETURNING id, status, total_amount, amount_paid`,
         [nextStatus, id],
       );
       if (res.rowCount) {
-        return NextResponse.json({ ok: true, data: { id, status: nextStatus } });
+        const row = res.rows[0] as { id: string; status: string; total_amount: number; amount_paid: number };
+        return NextResponse.json({
+          ok: true,
+          data: {
+            id: row.id,
+            status: row.status,
+            total: Number(row.total_amount || 0),
+            amount_paid: Number(row.amount_paid || 0),
+            outstanding: Math.max(0, Number(row.total_amount || 0) - Number(row.amount_paid || 0)),
+          },
+        });
       }
       // Fallback: update status in legacy billing_invoices dataset
       let found = false;

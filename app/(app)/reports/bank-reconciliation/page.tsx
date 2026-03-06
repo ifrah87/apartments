@@ -21,6 +21,37 @@ type CodingForm = {
 type SplitLine = {
   key: string; amount: string; account_code: string; unit_id: string; notes: string; invoice_id: string;
 };
+type SuggestedMatch = {
+  invoiceId: string;
+  invoiceNumber: string | null;
+  period: string | null;
+  tenantId: string | null;
+  unitId: string | null;
+  tenantName: string | null;
+  status: string | null;
+  total: number;
+  amountPaid: number;
+  outstanding: number;
+  score: number;
+  reasonSummary: string;
+};
+type ReconciliationHistory = {
+  allocations: Array<{
+    id: string;
+    invoice_id: string;
+    allocated_amount: number;
+    created_by: string | null;
+    created_at: string;
+    invoice_number: string | null;
+  }>;
+  events: Array<{
+    id: string;
+    action: string;
+    details: Record<string, unknown> | null;
+    created_by: string | null;
+    created_at: string;
+  }>;
+};
 type TxnWithBalance = TxnDTO & { displayBalance: number };
 type ActiveTab = "reconcile" | "statements" | "transactions" | "summary";
 
@@ -33,6 +64,7 @@ function extractDesc(p: string) {
 const EMPTY_FORM: CodingForm = { who: "", account_code: "4010", property_id: "", unit_id: "", notes: "", invoice_id: "" };
 let splitKeyCounter = 0;
 const newKey = () => String(++splitKeyCounter);
+const normalizeInvoiceStatus = (value: unknown) => String(value ?? "").trim().toLowerCase();
 
 export default function BankReconciliationPage() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
@@ -55,6 +87,32 @@ export default function BankReconciliationPage() {
   const [invoiceOptions, setInvoiceOptions] = useState<InvoiceOption[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState(false);
   const [splitInvoiceOptions, setSplitInvoiceOptions] = useState<Record<string, InvoiceOption[]>>({});
+  const [suggestionsByTxn, setSuggestionsByTxn] = useState<Record<string, SuggestedMatch[]>>({});
+  const [loadingSuggestionTxnId, setLoadingSuggestionTxnId] = useState<string | null>(null);
+  const [historyByTxn, setHistoryByTxn] = useState<Record<string, ReconciliationHistory>>({});
+  const [loadingHistoryTxnId, setLoadingHistoryTxnId] = useState<string | null>(null);
+
+  async function fetchInvoiceOptionsForReconciliation(unitId?: string, tenantName?: string): Promise<InvoiceOption[]> {
+    const normalizedTenant = String(tenantName || "").trim().toLowerCase();
+    const byUnitUrl = unitId ? `/api/invoices?unit_id=${encodeURIComponent(unitId)}` : "";
+    const byTenantUrl = !unitId && normalizedTenant ? `/api/invoices?tenant_name=${encodeURIComponent(tenantName || "")}` : "";
+    const primaryUrl = byUnitUrl || byTenantUrl;
+    if (!primaryUrl) return [];
+    const primary = await fetch(primaryUrl).then(r => r.json()).catch(() => ({ ok: false }));
+    const rows = (primary.ok ? primary.data : []) as any[];
+    return rows.map((r: any) => {
+      const total = Number(r.total || 0);
+      const amountPaid = Number(r.amount_paid || 0);
+      return {
+        id: r.id,
+        period: r.period || "—",
+        total,
+        outstanding: Math.max(0, total - amountPaid),
+        status: normalizeInvoiceStatus(r.status),
+        invoiceNumber: r.invoiceNumber || r.invoice_number || r.id,
+      };
+    });
+  }
 
   useEffect(() => {
     fetch("/api/bank-accounts").then(r => r.json()).then(p => {
@@ -88,30 +146,8 @@ export default function BankReconciliationPage() {
     const tenantName = codingForm.who.trim();
     if (!unitId && !tenantName) { setInvoiceOptions([]); return; }
     setLoadingInvoices(true);
-    const url = unitId
-      ? `/api/invoices?unit_id=${encodeURIComponent(unitId)}`
-      : `/api/invoices/statement?tenantName=${encodeURIComponent(tenantName)}&listOnly=1`;
-    const fetchUrl = unitId
-      ? `/api/invoices?unit_id=${encodeURIComponent(unitId)}`
-      : `/api/invoices?tenant_name=${encodeURIComponent(tenantName)}`;
-    fetch(fetchUrl)
-      .then(r => r.json())
-      .then(p => {
-        const rows: InvoiceOption[] = (p.ok ? p.data : []).map((r: any) => {
-          const total = Number(r.total || 0);
-          const amountPaid = Number(r.amount_paid || 0);
-          const outstanding = Math.max(0, total - amountPaid);
-          return {
-            id: r.id,
-            period: r.period || "—",
-            total,
-            outstanding,
-            status: r.status,
-            invoiceNumber: r.invoiceNumber,
-          };
-        });
-        setInvoiceOptions(rows);
-      })
+    fetchInvoiceOptionsForReconciliation(unitId, tenantName)
+      .then((rows) => setInvoiceOptions(rows))
       .catch(() => setInvoiceOptions([]))
       .finally(() => setLoadingInvoices(false));
     setCodingForm(f => ({ ...f, invoice_id: "" }));
@@ -186,24 +222,50 @@ export default function BankReconciliationPage() {
     }]);
     setSplitInvoiceOptions({});
     setSplitMode(true);
+    loadSuggestions(txn.id);
+    loadHistory(txn.id);
     // Auto-load and auto-select outstanding invoice for this unit
     if (unitId) {
       loadSplitInvoices(firstKey, unitId, true);
     }
   }
 
+  async function loadHistory(transactionId: string) {
+    setLoadingHistoryTxnId(transactionId);
+    try {
+      const res = await fetch(`/api/transactions/history?transaction_id=${encodeURIComponent(transactionId)}`);
+      const payload = await res.json();
+      setHistoryByTxn((prev) => ({ ...prev, [transactionId]: payload.ok ? payload.data : { allocations: [], events: [] } }));
+    } catch {
+      setHistoryByTxn((prev) => ({ ...prev, [transactionId]: { allocations: [], events: [] } }));
+    } finally {
+      setLoadingHistoryTxnId((current) => (current === transactionId ? null : current));
+    }
+  }
+
+  async function loadSuggestions(transactionId: string) {
+    setLoadingSuggestionTxnId(transactionId);
+    try {
+      const res = await fetch(`/api/transactions/suggestions?transaction_id=${encodeURIComponent(transactionId)}`);
+      const payload = await res.json();
+      setSuggestionsByTxn((prev) => ({ ...prev, [transactionId]: payload.ok ? (payload.data ?? []) : [] }));
+    } catch {
+      setSuggestionsByTxn((prev) => ({ ...prev, [transactionId]: [] }));
+    } finally {
+      setLoadingSuggestionTxnId((current) => (current === transactionId ? null : current));
+    }
+  }
+
   async function loadSplitInvoices(lineKey: string, unitId: string, autoSelect = false) {
     if (!unitId) { setSplitInvoiceOptions(prev => ({ ...prev, [lineKey]: [] })); return; }
-    const res = await fetch(`/api/invoices?unit_id=${encodeURIComponent(unitId)}`).then(r => r.json()).catch(() => ({ ok: false }));
-    const rows: InvoiceOption[] = (res.ok ? res.data : []).map((r: any) => {
-      const total = Number(r.total || 0);
-      const amountPaid = Number(r.amount_paid || 0);
-      return { id: r.id, period: r.period || "—", total, outstanding: Math.max(0, total - amountPaid), status: r.status, invoiceNumber: r.invoiceNumber };
-    });
+    const rows = await fetchInvoiceOptionsForReconciliation(unitId);
     setSplitInvoiceOptions(prev => ({ ...prev, [lineKey]: rows }));
     // Auto-select the first unpaid/partially_paid invoice when opening
     if (autoSelect) {
-      const first = rows.find(r => r.status === "unpaid" || r.status === "partially_paid");
+      const first = rows.find(r => {
+        const status = normalizeInvoiceStatus(r.status);
+        return status === "unpaid" || status === "partially_paid" || status === "partially paid";
+      });
       if (first) {
         setSplitLines(ls => ls.map(l => l.key === lineKey ? { ...l, invoice_id: first.id } : l));
       }
@@ -255,45 +317,6 @@ export default function BankReconciliationPage() {
       const payload = await res.json();
       if (!payload.ok) throw new Error(payload.error ?? "Failed");
 
-      // Update invoice status when linked (single-line mode).
-      if (!splitMode && codingForm.invoice_id) {
-        const linked = invoiceOptions.find(inv => inv.id === codingForm.invoice_id);
-        const owed = linked ? (linked.status === "partially_paid" ? linked.outstanding : linked.total) : txn.amount;
-        const invoiceStatus = txn.amount < owed - 0.01 ? "partially_paid" : "paid";
-        const invoiceRes = await fetch(`/api/invoices/${codingForm.invoice_id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: invoiceStatus }),
-        });
-        const invoicePayload = await invoiceRes.json().catch(() => null);
-        if (!invoiceRes.ok || invoicePayload?.ok === false) {
-          throw new Error(invoicePayload?.error || "Failed to update invoice status.");
-        }
-        setInvoiceOptions((prev) =>
-          prev.map((inv) => inv.id === codingForm.invoice_id ? { ...inv, status: invoiceStatus } : inv),
-        );
-      }
-
-      // Update invoice status for each split line's linked invoice.
-      if (splitMode) {
-        for (const line of splitLines) {
-          if (!line.invoice_id) continue;
-          const splitInv = (splitInvoiceOptions[line.key] ?? []).find(inv => inv.id === line.invoice_id);
-          const splitAmount = parseFloat(line.amount) || 0;
-          const splitOwed = splitInv ? (splitInv.status === "partially_paid" ? splitInv.outstanding : splitInv.total) : splitAmount;
-          const splitStatus = splitAmount < splitOwed - 0.01 ? "partially_paid" : "paid";
-          const invoiceRes = await fetch(`/api/invoices/${line.invoice_id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: splitStatus }),
-          });
-          const invoicePayload = await invoiceRes.json().catch(() => null);
-          if (!invoiceRes.ok || invoicePayload?.ok === false) {
-            throw new Error(invoicePayload?.error || `Failed to update invoice for unit ${line.unit_id}.`);
-          }
-        }
-      }
-
       const allocNotes = splitMode
         ? `Split: ${splitLines.length} lines`
         : codingForm.notes || null;
@@ -323,6 +346,41 @@ export default function BankReconciliationPage() {
     } catch (err) {
       setTxnError(err instanceof Error ? err.message : "Failed");
     } finally { setSaving(false); }
+  }
+
+  async function confirmSuggestedMatch(txn: TxnDTO, suggestion: SuggestedMatch) {
+    setSaving(true);
+    setTxnError(null);
+    try {
+      const res = await fetch("/api/transactions/allocate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: txn.id,
+          tenant_id: suggestion.tenantId ?? (codingForm.who.trim() || null),
+          property_id: codingForm.property_id || null,
+          unit_id: suggestion.unitId ?? (codingForm.unit_id || null),
+          account_code: codingForm.account_code || "4010",
+          notes: suggestion.reasonSummary
+            ? `Auto-match: ${suggestion.reasonSummary}`
+            : "Auto-match from suggestion",
+          invoice_id: suggestion.invoiceId,
+          status: "REVIEWED",
+        }),
+      });
+      const payload = await res.json();
+      if (!payload.ok) throw new Error(payload.error ?? "Failed to confirm match");
+
+      await loadTxns();
+      setExpandedId(null);
+      setSplitMode(false);
+      setToast("Suggested match confirmed");
+      setTimeout(() => setToast(null), 2500);
+    } catch (err) {
+      setTxnError(err instanceof Error ? err.message : "Failed to confirm suggested match");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function removeCoding(txn: TxnDTO) {
@@ -591,6 +649,79 @@ export default function BankReconciliationPage() {
                           <p className="text-sm font-semibold uppercase tracking-[0.15em] text-slate-500">
                             Reconcile This Transaction
                           </p>
+                        </div>
+
+                        <div className="mb-4 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
+                            Suggested Matches
+                          </p>
+                          {loadingSuggestionTxnId === txn.id ? (
+                            <p className="text-xs text-slate-500">Finding suggestions…</p>
+                          ) : (suggestionsByTxn[txn.id] ?? []).length === 0 ? (
+                            <p className="text-xs text-slate-500">No high-confidence suggestions. You can still reconcile manually below.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {(suggestionsByTxn[txn.id] ?? []).map((s) => (
+                                <div key={s.invoiceId} className="flex items-center justify-between gap-3 rounded-md border border-white/10 bg-black/10 px-2.5 py-2">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-xs font-semibold text-slate-200">
+                                      {s.invoiceNumber || s.period || s.invoiceId}
+                                      <span className="ml-2 rounded-full bg-cyan-500/20 px-1.5 py-0.5 text-[10px] text-cyan-200">
+                                        {Math.round(s.score * 100)}%
+                                      </span>
+                                    </p>
+                                    <p className="truncate text-[11px] text-slate-400">
+                                      {s.tenantName || "Unknown tenant"} - Outstanding {fmt.format(s.outstanding)}
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    disabled={saving}
+                                    onClick={() => confirmSuggestedMatch(txn, s)}
+                                    className="shrink-0 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-200 hover:bg-cyan-400/20 disabled:opacity-50"
+                                  >
+                                    Confirm match
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mb-4 rounded-lg border border-violet-500/20 bg-violet-500/5 p-3">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.15em] text-violet-300">
+                            Transaction History
+                          </p>
+                          {loadingHistoryTxnId === txn.id ? (
+                            <p className="text-xs text-slate-500">Loading history…</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {(historyByTxn[txn.id]?.events ?? []).map((event) => (
+                                <div key={event.id} className="rounded-md border border-white/10 bg-black/10 px-2.5 py-2">
+                                  <p className="text-[11px] font-semibold text-slate-200">
+                                    {event.action.replace(/_/g, " ")}
+                                  </p>
+                                  <p className="text-[10px] text-slate-500">
+                                    {event.created_by || "unknown user"} · {event.created_at ? new Date(event.created_at).toLocaleString() : "unknown time"}
+                                  </p>
+                                </div>
+                              ))}
+                              {(historyByTxn[txn.id]?.allocations ?? []).map((alloc) => (
+                                <div key={alloc.id} className="rounded-md border border-white/10 bg-black/10 px-2.5 py-2">
+                                  <p className="text-[11px] text-slate-200">
+                                    Matched {fmt.format(Number(alloc.allocated_amount || 0))} to{" "}
+                                    {alloc.invoice_number || alloc.invoice_id}
+                                  </p>
+                                  <p className="text-[10px] text-slate-500">
+                                    {alloc.created_by || "unknown user"} · {alloc.created_at ? new Date(alloc.created_at).toLocaleString() : "unknown time"}
+                                  </p>
+                                </div>
+                              ))}
+                              {(historyByTxn[txn.id]?.events ?? []).length === 0 && (historyByTxn[txn.id]?.allocations ?? []).length === 0 && (
+                                <p className="text-xs text-slate-500">No reconciliation history yet.</p>
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         {/* Shared fields (who, property, unit) */}

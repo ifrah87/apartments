@@ -8,6 +8,7 @@ import { dateOnlyToUtcTimestamp, toDateOnlyString } from "@/lib/dateOnly";
 import { createStatement } from "@/lib/reports/tenantStatement";
 import { buildInvoiceLineItems } from "@/lib/invoices/lineItems";
 import type { LeaseAgreement } from "@/lib/leases";
+import { getActiveLeaseForUnit } from "@/lib/leases/activeLease";
 
 export const runtime = "nodejs";
 
@@ -292,7 +293,7 @@ async function resolveElectricityReadings(opts: {
     return { prev: null, cur: null, usage: null, reason: "missing unit number" };
   }
   try {
-    const [prevRes, curRes] = await Promise.all([
+    const [prevRes, inWindowRes] = await Promise.all([
       query(
         `SELECT reading_value, reading_date
          FROM public.meter_readings
@@ -304,14 +305,14 @@ async function resolveElectricityReadings(opts: {
       query(
         `SELECT reading_value, reading_date
          FROM public.meter_readings
-         WHERE unit = $1 AND lower(meter_type) = 'electricity' AND reading_date >= $2 AND reading_date <= $3
-         ORDER BY reading_date DESC, created_at DESC
-         LIMIT 1`,
+         WHERE unit = $1 AND lower(meter_type) = 'electricity' AND reading_date >= $2 AND reading_date < $3
+         ORDER BY reading_date ASC, created_at ASC`,
         [unitNumber, periodStart, periodEnd],
       ),
     ]);
 
-    const curRow = curRes.rows[0];
+    const inWindowRows = Array.isArray(inWindowRes.rows) ? inWindowRes.rows : [];
+    const curRow = inWindowRows.length ? inWindowRows[inWindowRows.length - 1] : null;
     const curValue = toNumberOrNull(curRow?.reading_value);
     if (curValue === null) {
       return { prev: null, cur: null, usage: null, reason: "missing current reading within billing window" };
@@ -324,9 +325,25 @@ async function resolveElectricityReadings(opts: {
 
     const prevRow = prevRes.rows[0];
     const prevValue = toNumberOrNull(prevRow?.reading_value);
+    const fallbackInWindowPrev = (() => {
+      if (prevValue !== null) return null;
+      // If there is no reading before the period, use the previous reading
+      // from inside the billing window (e.g. first -> last reading this month).
+      for (let idx = inWindowRows.length - 2; idx >= 0; idx -= 1) {
+        const row = inWindowRows[idx];
+        const value = toNumberOrNull(row?.reading_value);
+        if (value === null) continue;
+        return {
+          value,
+          date: toDateOnlyString(row?.reading_date),
+          source: "reading" as const,
+        };
+      }
+      return null;
+    })();
     let prev: ElectricityReading | null =
       prevValue === null
-        ? null
+        ? fallbackInWindowPrev
         : {
             value: prevValue,
             date: toDateOnlyString(prevRow?.reading_date),
@@ -902,7 +919,9 @@ async function syncInvoiceNumberSequence() {
     await query(`SELECT setval('public.invoice_number_seq', $1, true)`, [maxSeq]);
     return;
   }
-  await query(`SELECT setval('public.invoice_number_seq', 1, false)`);
+  // Fresh installs should start billing invoice numbers from Inv-125.
+  // Existing installations keep continuity from the current max sequence.
+  await query(`SELECT setval('public.invoice_number_seq', 124, false)`);
 }
 
 async function allocateInvoiceNumber(input: {
@@ -1110,85 +1129,21 @@ export async function POST(req: NextRequest) {
     const propertyKey = String(unit.property_id || "").trim().toLowerCase();
     const unitKey = String(unit.unit || "").trim().toLowerCase();
     try {
-      const leaseRes = await query(
-        `SELECT id, tenant_id, rent, start_date, end_date, status
-         FROM public.leases
-         WHERE unit_id = $1 AND status = 'active'
-         ORDER BY start_date DESC
-         LIMIT 1`,
-        [unit.id],
-      );
-      const dbLease = (leaseRes.rows[0] as LeaseRow | undefined) ?? null;
-      if (dbLease) {
+      const activeLease = await getActiveLeaseForUnit(unit.id, new Date());
+      if (activeLease) {
         lease = {
-          ...dbLease,
+          ...activeLease,
           source: "db",
         };
       }
     } catch (err) {
-      console.warn("⚠️ failed to load lease from db", err);
-    }
-
-    if (!lease) {
-      const leaseIndex = buildLeaseIndex(Array.isArray(leasesData) ? leasesData : []);
-      const datasetLease =
-        leaseIndex.get(`${propertyKey}::${unitKey}`.toLowerCase()) ||
-        leaseIndex.get(`::${unitKey}`.toLowerCase()) ||
-        null;
-
-      if (datasetLease && coerceLeaseStatus(datasetLease.status) === "active") {
-        const tenant =
-          tenantIndex.get(`${propertyKey}::${unitKey}`.toLowerCase()) ||
-          tenantIndex.get(`::${unitKey}`.toLowerCase()) ||
-          tenants.find((row) => {
-            const tenantUnit = String(row.unit || "").trim().toLowerCase();
-            const tenantProperty = String(row.property_id || row.building || "").trim().toLowerCase();
-            return tenantUnit === String(datasetLease.unit || "").trim().toLowerCase() &&
-              (!propertyKey || !tenantProperty || tenantProperty === propertyKey);
-          }) ||
-          null;
-
-        if (tenant) {
-          lease = {
-            id: String(datasetLease.id),
-            tenant_id: String(tenant.id),
-            rent: toNumberOrNull(datasetLease.rent),
-            start_date: String(datasetLease.startDate || ""),
-            end_date: datasetLease.endDate ? String(datasetLease.endDate) : null,
-            status: String(datasetLease.status || "Active"),
-            source: "dataset",
-          };
-        }
-      }
-    }
-
-    if (!lease) {
-      const fallbackTenant =
-        tenantIndex.get(`${propertyKey}::${unitKey}`.toLowerCase()) ||
-        tenantIndex.get(`::${unitKey}`.toLowerCase()) ||
-        null;
-      const unitStatus = String((unit as any).status || "").trim().toLowerCase();
-      const isOccupied = unitStatus === "occupied" || unitStatus.startsWith("occ");
-      if (isOccupied && fallbackTenant) {
-        lease = {
-          id: `occupied-${unit.id}-${fallbackTenant.id}`,
-          tenant_id: String(fallbackTenant.id),
-          rent: toNumberOrNull((fallbackTenant as any).monthly_rent) ?? toNumberOrNull((unit as any).rent),
-          start_date: toDateOnlyString(start) || reference.toISOString().slice(0, 10),
-          end_date: null,
-          status: "occupied",
-          source: "occupied",
-        };
-      }
+      console.warn("⚠️ failed to load active lease from db", err);
     }
 
     if (!lease) {
       const response: Record<string, unknown> = {
         ok: false,
-        error:
-          String((unit as any).status || "").trim().toLowerCase().startsWith("occ")
-            ? "Unit is occupied in Units but no tenant is linked. Link a tenant to this unit first."
-            : "Unit is not ready: no active lease.",
+        error: "Unit is not ready: no active lease for today.",
         unit: { id: unit.id, unit: unit.unit },
         reason: "no active lease",
       };
@@ -1283,6 +1238,12 @@ export async function POST(req: NextRequest) {
       periodEnd: periodEndKey,
     });
     const electricity = electricityResult.lineItem;
+    const hasExistingElectricityLine = lineItemsForInvoice.some((line) => {
+      const meta = line.meta && typeof line.meta === "object" ? line.meta : null;
+      const kind = String(meta?.kind || "").trim().toUpperCase();
+      const description = String(line.description || "").toLowerCase();
+      return kind === "METER_ELECTRICITY" || description.includes("electric");
+    });
     const electricityDebugPayload = {
       unitNumber: electricityResult.debug.unitNumber,
       rate: electricityResult.debug.rate,
@@ -1292,6 +1253,20 @@ export async function POST(req: NextRequest) {
     };
     if (electricity) {
       lineItemsForInvoice.push(electricity);
+    } else if (!hasExistingElectricityLine) {
+      lineItemsForInvoice.push({
+        description: "Electricity (pending meter reading)",
+        qty: 1,
+        unit_cents: 0,
+        total_cents: 0,
+        meta: {
+          kind: "METER_ELECTRICITY_PENDING",
+          pending: true,
+          reason: electricityResult.debug.reason ?? "meter reading unavailable",
+          periodStart: periodStartKey,
+          periodEnd: periodEndKey,
+        },
+      });
     }
     const finalLineItemsForInvoice = dedupeGeneratedLineItems(lineItemsForInvoice);
 
@@ -1446,7 +1421,10 @@ export async function POST(req: NextRequest) {
            END,
            invoice_date = EXCLUDED.invoice_date,
            due_date = EXCLUDED.due_date,
-           status = EXCLUDED.status,
+           status = CASE
+             WHEN LOWER(COALESCE(public.invoices.status, '')) IN ('paid', 'partially_paid') THEN public.invoices.status
+             ELSE EXCLUDED.status
+           END,
            currency = EXCLUDED.currency,
            subtotal_cents = EXCLUDED.subtotal_cents,
            tax_cents = EXCLUDED.tax_cents,

@@ -20,12 +20,28 @@ const LANDING_IMAGE_PATHS = {
   threeBedKitchen: "/images/landing/apartments/3bed/kitchen.jpg",
   threeBedBathroom: "/images/landing/apartments/3bed/bathroom.jpg",
 };
-const LANDING_GALLERY_IMAGES = [
-  { src: LANDING_IMAGE_PATHS.twoBedLivingRoom, alt: "2 bedroom living room" },
-  { src: LANDING_IMAGE_PATHS.twoBedBathroom, alt: "2 bedroom bathroom" },
-  { src: LANDING_IMAGE_PATHS.threeBedLivingRoom, alt: "3 bedroom living room" },
-  { src: LANDING_IMAGE_PATHS.threeBedKitchen, alt: "3 bedroom kitchen" },
+const TWO_BED_IMAGES = [
+  { src: LANDING_IMAGE_PATHS.twoBedMain, alt: "Private office suite interior" },
+  { src: LANDING_IMAGE_PATHS.twoBedLivingRoom, alt: "Executive office meeting area" },
+  { src: LANDING_IMAGE_PATHS.twoBedKitchen, alt: "Office kitchenette and pantry area" },
+  { src: LANDING_IMAGE_PATHS.twoBedBathroom, alt: "Premium office washroom" },
 ];
+const THREE_BED_IMAGES = [
+  { src: LANDING_IMAGE_PATHS.threeBedMain, alt: "Collaborative office floor interior" },
+  { src: LANDING_IMAGE_PATHS.threeBedLivingRoom, alt: "Open-plan office lounge" },
+  { src: LANDING_IMAGE_PATHS.threeBedKitchen, alt: "Shared office pantry and break area" },
+  { src: LANDING_IMAGE_PATHS.threeBedBathroom, alt: "Commercial office facilities" },
+];
+const LANDING_GALLERY_IMAGES = [
+  { src: LANDING_IMAGE_PATHS.twoBedLivingRoom, alt: "Meeting-ready office suite" },
+  { src: LANDING_IMAGE_PATHS.twoBedBathroom, alt: "Professional office facilities" },
+  { src: LANDING_IMAGE_PATHS.threeBedLivingRoom, alt: "Open collaborative office area" },
+  { src: LANDING_IMAGE_PATHS.threeBedKitchen, alt: "Modern office support space" },
+];
+
+function wrapCarouselIndex(current: number, delta: number, length: number) {
+  return (current + delta + length) % length;
+}
 
 type GoogleTranslateElementConstructor = {
   new(
@@ -133,43 +149,43 @@ const LANDING_TRANSLATIONS: Record<LandingLanguage, {
     navHome: "Home",
     navFeatures: "Features",
     navGallery: "Gallery",
-    nav2Bedroom: "2-Bedroom",
-    nav3Bedroom: "3-Bedroom",
+    nav2Bedroom: "Private Suites",
+    nav3Bedroom: "Team Floors",
     navContact: "Contact",
-    heroTitle: "Premium\nApartments\nfor Rent",
-    heroSubtitle: "Luxuriously designed 2-bedroom and 3-bedroom apartments available now.",
-    heroCta: "Schedule a Viewing",
-    twoBedLabel: "2-Bedroom Apartments",
-    twoBedShort: "Spacious 2-bedroom, 2-bathroom units with modern finishes",
+    heroTitle: "Professional\nOffice Spaces\nfor Growing Teams",
+    heroSubtitle: "Move into premium private suites and full-floor office spaces designed for modern business.",
+    heroCta: "Book a Site Tour",
+    twoBedLabel: "Private Office Suites",
+    twoBedShort: "Fully serviced executive suites for focused teams",
     twoBedCaption:
-      "Spacious 2-bedroom, 2-bathroom units with modern finishes throughout. Perfect for couples or small families seeking comfort and style.",
-    twoBedCta: "Explore 2-Bedroom",
-    threeBedLabel: "3-Bedroom Apartments",
-    threeBedShort: "Elegant 3-bedroom, 2-bathroom units perfect for families",
+      "Move-in ready private suites with polished interiors, reception support, and daily operations convenience for professional teams.",
+    twoBedCta: "View Private Suites",
+    threeBedLabel: "Full-Floor Team Offices",
+    threeBedShort: "Spacious office floors built for collaborative companies",
     threeBedCaption:
-      "Elegant 3-bedroom, 2-bathroom units with premium finishes throughout. Ideal for families who value space and sophistication.",
-    threeBedCta: "Explore 3-Bedroom",
-    galleryTitle: "Apartment Features",
-    highlightsTitle: "What's Included",
+      "Open-plan layouts with dedicated meeting zones and premium infrastructure, ideal for scaling teams and headquarters operations.",
+    threeBedCta: "View Team Floors",
+    galleryTitle: "Workspace Gallery",
+    highlightsTitle: "Everything Your Team Needs",
     highlights: [
-      { icon: "🛁", title: "Modern Bathrooms", desc: "Floor-to-ceiling marble tiles, rainfall showers, and premium fixtures." },
-      { icon: "🍳", title: "Fitted Kitchen", desc: "High-spec appliances, ample storage, and contemporary cabinetry." },
-      { icon: "🌇", title: "City Views", desc: "Large windows with natural light and panoramic views throughout." },
-      { icon: "🔒", title: "Secure Building", desc: "24/7 access control, CCTV, and on-site management." },
+      { icon: "🏢", title: "Premium Business Address", desc: "Present your brand from a central location trusted by clients and partners." },
+      { icon: "📶", title: "High-Speed Internet", desc: "Reliable, business-grade connectivity ready for meetings, cloud tools, and teams." },
+      { icon: "👥", title: "Meeting & Collaboration Areas", desc: "Dedicated rooms and shared spaces for presentations, planning, and teamwork." },
+      { icon: "🔒", title: "Secure Access", desc: "Monitored entry, controlled access, and professional building management." },
     ],
     contactTitle: "Contact Us",
-    contactSubtitle: "Get in touch to schedule a viewing or ask questions about availability.",
+    contactSubtitle: "Talk to our team to schedule a tour, compare plans, and secure the right office space.",
     firstName: "First name",
     lastName: "Last name",
     email: "Email address",
     phone: "Phone number",
     interestedIn: "Interested in...",
-    optionTwoBed: "2-Bedroom Apartment",
-    optionThreeBed: "3-Bedroom Apartment",
-    optionGeneral: "General Enquiry",
+    optionTwoBed: "Private Office Suite",
+    optionThreeBed: "Full-Floor Team Office",
+    optionGeneral: "General Office Enquiry",
     message: "Your message...",
     sendMessage: "Send Message",
-    footerRights: "Orfane Real Estate. All rights reserved.",
+    footerRights: "Orfane Office Spaces. All rights reserved.",
     privacy: "Privacy",
     terms: "Terms",
   },
@@ -180,43 +196,43 @@ const LANDING_TRANSLATIONS: Record<LandingLanguage, {
     navHome: "Bogga Hore",
     navFeatures: "Astaamo",
     navGallery: "Sawirro",
-    nav2Bedroom: "2-Qol Jiif",
-    nav3Bedroom: "3-Qol Jiif",
+    nav2Bedroom: "Xafiisyo Gaar ah",
+    nav3Bedroom: "Dabaqyo Kooxo",
     navContact: "La Xiriir",
-    heroTitle: "Guryo Casri ah\noo\nKirro ah",
-    heroSubtitle: "Guryo 2-qol iyo 3-qol ah oo si heer sare ah loo naqshadeeyey, hadda diyaar ah.",
-    heroCta: "Qabso Booqasho",
-    twoBedLabel: "Guryo 2-Qol Jiif ah",
-    twoBedShort: "Unugyo waasac ah oo leh 2 qol jiif, 2 musqulood iyo dhameystir casri ah",
+    heroTitle: "Goobo Xafiis\nCasri ah\noo Kooxo u Diyaar ah",
+    heroSubtitle: "Xafiisyo gaar ah iyo dabaqyo waaweyn oo shirkado casri ah loogu talagalay, hadda diyaar ah.",
+    heroCta: "Qabso Dalxiis",
+    twoBedLabel: "Xafiisyo Gaar ah",
+    twoBedShort: "Xafiisyo nadiif ah oo adeegyo dhameystiran leh",
     twoBedCaption:
-      "Unugyo waasac ah oo leh 2 qol jiif iyo 2 musqulood, kuna dhammaaday naqshad casri ah. Ku habboon lammaanaha ama qoysaska yaryar ee raadinaya raaxo iyo qurux.",
-    twoBedCta: "Daawo 2-Qol Jiif",
-    threeBedLabel: "Guryo 3-Qol Jiif ah",
-    threeBedShort: "Unugyo qurux badan oo leh 3 qol jiif, 2 musqulood, kuna habboon qoysaska",
+      "Xafiisyo gaar ah oo si buuxda loo diyaariyey, ku habboon kooxaha u baahan jawi xirfadeed iyo wax-qabad sare.",
+    twoBedCta: "Daawo Xafiisyada Gaar ah",
+    threeBedLabel: "Dabaqyo Xafiis Kooxo",
+    threeBedShort: "Meelo waaweyn oo loogu talagalay kooxo iyo waaxyo",
     threeBedCaption:
-      "Unugyo qurux badan oo leh 3 qol jiif iyo 2 musqulood, kuna dhammaaday tayo sare. Ku habboon qoysaska jecel meel ballaaran iyo heer sare.",
-    threeBedCta: "Daawo 3-Qol Jiif",
-    galleryTitle: "Astaamaha Guryaha",
-    highlightsTitle: "Waxa Ku Jira",
+      "Dabaqyo xafiis oo waaweyn oo leh meel wada-shaqeyn, qolal kulan, iyo kaabayaal tayo sare leh.",
+    threeBedCta: "Daawo Dabaqyada Kooxo",
+    galleryTitle: "Sawirrada Xafiisyada",
+    highlightsTitle: "Waxyaabaha La Helo",
     highlights: [
-      { icon: "🛁", title: "Musqulo Casri ah", desc: "Darbiyo marmar ah, qubays roobaad leh, iyo qalab tayo sare leh." },
-      { icon: "🍳", title: "Jiko Qalabaysan", desc: "Qalab casri ah, kaydin ku filan, iyo armaajooyin qurux badan." },
-      { icon: "🌇", title: "Muuqaal Magaalo", desc: "Daaqado waaweyn oo iftiin dabiici ah iyo muuqaal furan leh." },
-      { icon: "🔒", title: "Dhisme Ammaan ah", desc: "Amni 24/7, CCTV, iyo maamul goobta jooga." },
+      { icon: "🏢", title: "Cinwaan Ganacsi Heer Sare ah", desc: "Goob ganacsi oo sumcad leh oo ku habboon shirkadaha casriga ah." },
+      { icon: "📶", title: "Internet Xawaare Sare leh", desc: "Xiriir deggan oo ku habboon kulamada onlaynka iyo shaqada maalinlaha ah." },
+      { icon: "👥", title: "Qolal Kulan iyo Wada-shaqeyn", desc: "Meelo loogu talagalay kulamo, qorsheyn, iyo wada-shaqeyn kooxeed." },
+      { icon: "🔒", title: "Ammaan iyo Kontorool Gelitaan", desc: "Gelitaan la maamulo, kormeer joogto ah, iyo maamul xirfadeed." },
     ],
     contactTitle: "Nala Soo Xiriir",
-    contactSubtitle: "Nala soo xiriir si aad u qabsato booqasho ama aad u weydiiso helitaan.",
+    contactSubtitle: "Nala soo xiriir si aad u qabsato dalxiis oo aad u hesho qorshaha xafiis ee ku habboon kooxdaada.",
     firstName: "Magaca hore",
     lastName: "Magaca dambe",
     email: "Cinwaanka iimaylka",
     phone: "Lambarka telefoonka",
     interestedIn: "Waxaan daneynayaa...",
-    optionTwoBed: "Guri 2-Qol Jiif ah",
-    optionThreeBed: "Guri 3-Qol Jiif ah",
-    optionGeneral: "Weydiin Guud",
+    optionTwoBed: "Xafiis Gaar ah",
+    optionThreeBed: "Dabaq Xafiis Kooxo",
+    optionGeneral: "Weydiin Xafiis Guud",
     message: "Fariintaada...",
     sendMessage: "Dir Farriin",
-    footerRights: "Orfane Real Estate. Dhammaan xuquuqdu way dhowran tahay.",
+    footerRights: "Orfane Office Spaces. Dhammaan xuquuqdu way dhowran tahay.",
     privacy: "Asturnaanta",
     terms: "Shuruudaha",
   },
@@ -226,6 +242,9 @@ export default function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
   const [googleLanguage, setGoogleLanguage] = useState<GoogleLanguage>("en");
   const [googleLanguageReady, setGoogleLanguageReady] = useState(false);
+  const [twoBedImageIndex, setTwoBedImageIndex] = useState(0);
+  const [threeBedImageIndex, setThreeBedImageIndex] = useState(0);
+  const [galleryImageIndex, setGalleryImageIndex] = useState(0);
   const t = LANDING_TRANSLATIONS.en;
   const currentYear = new Date().getFullYear();
 
@@ -295,6 +314,13 @@ export default function LandingPage() {
     setGoogleLanguage(nextValue);
   };
 
+  const prevTwoBedImage = () => setTwoBedImageIndex((prev) => wrapCarouselIndex(prev, -1, TWO_BED_IMAGES.length));
+  const nextTwoBedImage = () => setTwoBedImageIndex((prev) => wrapCarouselIndex(prev, 1, TWO_BED_IMAGES.length));
+  const prevThreeBedImage = () => setThreeBedImageIndex((prev) => wrapCarouselIndex(prev, -1, THREE_BED_IMAGES.length));
+  const nextThreeBedImage = () => setThreeBedImageIndex((prev) => wrapCarouselIndex(prev, 1, THREE_BED_IMAGES.length));
+  const prevGalleryImage = () => setGalleryImageIndex((prev) => wrapCarouselIndex(prev, -1, LANDING_GALLERY_IMAGES.length));
+  const nextGalleryImage = () => setGalleryImageIndex((prev) => wrapCarouselIndex(prev, 1, LANDING_GALLERY_IMAGES.length));
+
   return (
     <>
       <style>{`
@@ -303,13 +329,13 @@ export default function LandingPage() {
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         :root {
-          --navy: #1e2a3a;
-          --navy-light: #2d3f54;
+          --navy: #0f172a;
+          --navy-light: #1e293b;
           --white: #ffffff;
-          --off-white: #f8f8f8;
-          --gray: #6b7280;
-          --light-gray: #e5e7eb;
-          --text: #111827;
+          --off-white: #f8fafc;
+          --gray: #64748b;
+          --light-gray: #e2e8f0;
+          --text: #0f172a;
           --nav-height: 92px;
         }
 
@@ -327,16 +353,17 @@ export default function LandingPage() {
           position: fixed;
           top: 0; left: 0; right: 0;
           z-index: 100;
-          background: var(--white);
+          background: rgba(255, 255, 255, 0.96);
+          backdrop-filter: blur(8px);
           border-bottom: 1px solid var(--light-gray);
-          padding: 0 30px;
+          padding: 0 36px;
           height: var(--nav-height);
           display: flex;
           align-items: center;
           justify-content: space-between;
           transition: box-shadow 0.3s;
         }
-        nav.scrolled { box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+        nav.scrolled { box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
 
         .nav-logo {
           display: flex;
@@ -423,8 +450,8 @@ export default function LandingPage() {
         }
         .nav-links a {
           font-size: 13px;
-          font-weight: 400;
-          color: var(--text);
+          font-weight: 500;
+          color: #334155;
           text-decoration: none;
           transition: color 0.2s;
         }
@@ -439,9 +466,9 @@ export default function LandingPage() {
 
         .nav-contact-btn {
           padding: 8px 22px;
-          background: transparent;
-          border: 1.5px solid var(--navy);
-          color: var(--navy);
+          background: var(--navy);
+          border: 1px solid var(--navy);
+          color: white;
           font-family: 'DM Sans', sans-serif;
           font-size: 14px;
           font-weight: 500;
@@ -451,13 +478,13 @@ export default function LandingPage() {
           transition: background 0.2s, color 0.2s;
           white-space: nowrap;
         }
-        .nav-contact-btn:hover { background: var(--navy); color: white; }
+        .nav-contact-btn:hover { background: var(--navy-light); color: white; }
 
         /* HERO */
         .hero {
           margin-top: var(--nav-height);
           position: relative;
-          height: 520px;
+          min-height: 620px;
           overflow: hidden;
         }
         .hero-bg {
@@ -474,9 +501,10 @@ export default function LandingPage() {
           inset: 0;
           background: linear-gradient(
             to right,
-            rgba(255,255,255,0.05) 0%,
-            rgba(255,255,255,0.6) 42%,
-            rgba(255,255,255,0.1) 100%
+            rgba(2,6,23,0.7) 0%,
+            rgba(2,6,23,0.5) 35%,
+            rgba(2,6,23,0.2) 70%,
+            rgba(2,6,23,0.05) 100%
           );
         }
         .hero-content {
@@ -486,53 +514,63 @@ export default function LandingPage() {
           display: flex;
           flex-direction: column;
           justify-content: center;
-          padding: 0 8% 0 44%;
+          padding: 0 8% 0 10%;
+          max-width: 720px;
         }
         .hero-title {
           font-family: 'DM Serif Display', serif;
           font-size: clamp(38px, 5.5vw, 64px);
           font-weight: 400;
           line-height: 1.08;
-          color: var(--navy);
-          margin-bottom: 18px;
+          color: white;
+          margin-bottom: 20px;
           white-space: pre-line;
         }
         .hero-sub {
           font-size: 16px;
           font-weight: 300;
           line-height: 1.65;
-          color: #374151;
+          color: rgba(255,255,255,0.86);
           margin-bottom: 32px;
-          max-width: 360px;
+          max-width: 560px;
         }
         .hero-btn {
           display: inline-block;
           padding: 14px 32px;
-          background: var(--navy);
-          color: white;
+          background: white;
+          color: var(--navy);
           font-family: 'DM Sans', sans-serif;
           font-size: 15px;
           font-weight: 500;
-          border-radius: 4px;
+          border-radius: 8px;
           text-decoration: none;
           transition: background 0.25s, transform 0.2s;
           align-self: flex-start;
         }
-        .hero-btn:hover { background: var(--navy-light); transform: translateY(-2px); }
+        .hero-btn:hover { background: #f1f5f9; transform: translateY(-2px); }
 
         /* APARTMENTS */
         .apartments {
-          padding: 72px 48px;
+          padding: 88px 48px;
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 56px;
+          max-width: 1240px;
+          margin: 0 auto;
+        }
+        .apartments > div {
+          border: 1px solid var(--light-gray);
+          border-radius: 16px;
+          padding: 24px;
+          background: white;
+          box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
         }
         .apt-type-label {
           font-size: 13px;
           font-weight: 500;
           letter-spacing: 0.12em;
           text-transform: uppercase;
-          color: var(--text);
+          color: #0b3b8f;
           margin-bottom: 8px;
         }
         .apt-type-desc {
@@ -550,6 +588,19 @@ export default function LandingPage() {
           margin-bottom: 16px;
           background: linear-gradient(135deg, #d4dae0 0%, #c2cad2 100%);
           position: relative;
+        }
+        .image-carousel {
+          position: relative;
+          width: 100%;
+          aspect-ratio: 4/3;
+          border-radius: 2px;
+          overflow: hidden;
+          margin-bottom: 16px;
+          background: linear-gradient(135deg, #d4dae0 0%, #c2cad2 100%);
+        }
+        .image-carousel.gallery-carousel {
+          aspect-ratio: 16/10;
+          margin-bottom: 0;
         }
         .apt-img-double {
           width: 100%;
@@ -571,6 +622,52 @@ export default function LandingPage() {
           object-fit: cover;
           object-position: center;
         }
+        .carousel-btn {
+          position: absolute;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 34px;
+          height: 34px;
+          border: none;
+          border-radius: 999px;
+          background: rgba(15, 23, 42, 0.62);
+          color: #ffffff;
+          display: grid;
+          place-items: center;
+          font-size: 22px;
+          line-height: 1;
+          cursor: pointer;
+          transition: background 0.2s, transform 0.2s;
+          z-index: 3;
+        }
+        .carousel-btn:hover {
+          background: rgba(15, 23, 42, 0.82);
+          transform: translateY(-50%) scale(1.03);
+        }
+        .carousel-btn.prev { left: 10px; }
+        .carousel-btn.next { right: 10px; }
+        .carousel-dots {
+          position: absolute;
+          left: 50%;
+          bottom: 10px;
+          transform: translateX(-50%);
+          display: flex;
+          gap: 6px;
+          z-index: 3;
+        }
+        .carousel-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 999px;
+          border: none;
+          background: rgba(255,255,255,0.55);
+          cursor: pointer;
+          transition: background 0.2s, transform 0.2s;
+        }
+        .carousel-dot.active {
+          background: #ffffff;
+          transform: scale(1.12);
+        }
         .apt-caption {
           font-size: 13px;
           font-weight: 300;
@@ -586,7 +683,7 @@ export default function LandingPage() {
           font-family: 'DM Sans', sans-serif;
           font-size: 14px;
           font-weight: 500;
-          border-radius: 4px;
+          border-radius: 8px;
           text-decoration: none;
           transition: background 0.2s, transform 0.2s;
         }
@@ -594,14 +691,16 @@ export default function LandingPage() {
 
         /* FEATURES GALLERY */
         .gallery {
-          padding: 0 48px 72px;
+          padding: 0 48px 88px;
+          max-width: 1240px;
+          margin: 0 auto;
         }
         .gallery-title {
           font-family: 'DM Serif Display', serif;
           font-size: 26px;
           font-weight: 400;
           color: var(--text);
-          margin-bottom: 24px;
+          margin-bottom: 20px;
         }
         .gallery-grid {
           display: grid;
@@ -621,8 +720,8 @@ export default function LandingPage() {
 
         /* FEATURE HIGHLIGHTS */
         .highlights {
-          padding: 72px 48px;
-          background: var(--off-white);
+          padding: 88px 48px;
+          background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
         }
         .highlights-title {
           font-family: 'DM Serif Display', serif;
@@ -634,8 +733,10 @@ export default function LandingPage() {
         }
         .highlights-grid {
           display: grid;
-          grid-template-columns: repeat(3, 1fr);
+          grid-template-columns: repeat(4, 1fr);
           gap: 24px;
+          max-width: 1240px;
+          margin: 0 auto;
         }
         .highlight-card {
           background: white;
@@ -671,7 +772,7 @@ export default function LandingPage() {
 
         /* CONTACT */
         .contact {
-          background: var(--navy);
+          background: #0b1220;
           padding: 80px 48px;
           text-align: center;
         }
@@ -742,7 +843,7 @@ export default function LandingPage() {
           font-size: 15px;
           font-weight: 500;
           border: none;
-          border-radius: 4px;
+          border-radius: 8px;
           cursor: pointer;
           transition: background 0.2s, transform 0.2s;
           align-self: center;
@@ -753,7 +854,7 @@ export default function LandingPage() {
         /* FOOTER */
         footer {
           padding: 24px 48px;
-          background: #141e29;
+          background: #090f1b;
           display: flex;
           align-items: center;
           justify-content: space-between;
@@ -786,10 +887,11 @@ export default function LandingPage() {
           .nav-actions { margin-left: auto; gap: 10px; }
           .nav-language { min-width: 100px; }
           .nav-contact-btn { padding: 8px 16px; }
-          .hero { margin-top: 82px; height: auto; min-height: 520px; }
+          .hero { margin-top: 82px; height: auto; min-height: 560px; }
           .hero-content { padding: 60px 32px 52px; }
           .hero-sub { max-width: 520px; }
           .apartments { padding: 56px 32px; gap: 34px; }
+          .apartments > div { padding: 20px; }
           .gallery { padding: 0 32px 56px; }
           .highlights { padding: 56px 32px; }
           .highlights-grid { grid-template-columns: 1fr 1fr; }
@@ -816,7 +918,7 @@ export default function LandingPage() {
             font-size: 11px;
           }
           .nav-contact-btn { padding: 6px 10px; font-size: 12px; }
-          .hero { margin-top: 74px; min-height: 420px; }
+          .hero { margin-top: 74px; min-height: 500px; }
           .hero-content {
             padding: 34px 18px 40px;
             min-height: calc(100vh - 74px);
@@ -842,7 +944,16 @@ export default function LandingPage() {
             padding: 40px 18px;
             gap: 30px;
           }
+          .apartments > div { padding: 18px; border-radius: 14px; }
           .apt-btn { width: 100%; text-align: center; padding: 12px 18px; }
+          .carousel-btn {
+            width: 30px;
+            height: 30px;
+            font-size: 18px;
+          }
+          .carousel-btn.prev { left: 8px; }
+          .carousel-btn.next { right: 8px; }
+          .carousel-dots { bottom: 8px; }
           .gallery { padding: 0 18px 40px; }
           .gallery-title { font-size: 22px; margin-bottom: 16px; }
           .highlights { padding: 40px 18px; }
@@ -869,7 +980,7 @@ export default function LandingPage() {
           .logo-text { display: none; }
           .nav-language { min-width: 74px; font-size: 10.5px; }
           .nav-contact-btn { padding: 6px 8px; font-size: 11.5px; }
-          .hero { margin-top: 68px; min-height: 430px; }
+          .hero { margin-top: 68px; min-height: 470px; }
           .hero-content {
             padding: 26px 14px 30px;
             min-height: calc(100vh - 68px);
@@ -886,7 +997,7 @@ export default function LandingPage() {
           <span className="logo-icon">
             <Image src={BLACK_LOGO_PATH} alt={BLACK_LOGO_ALT} width={84} height={62} className="logo-img" priority />
           </span>
-          <span className="logo-text">Orfane Real Estate</span>
+          <span className="logo-text">Orfane Office Spaces</span>
         </a>
         <ul className="nav-links">
           <li><a href="#">{t.navHome}</a></li>
@@ -914,7 +1025,7 @@ export default function LandingPage() {
       {/* HERO */}
       <section className="hero">
         <div className="hero-bg">
-          <Image src={LANDING_IMAGE_PATHS.hero} alt="Orfane premium apartment interior" fill priority className="hero-image" />
+          <Image src={LANDING_IMAGE_PATHS.hero} alt="Orfane professional office interior" fill priority className="hero-image" />
         </div>
         <div className="hero-overlay" />
         <div className="hero-content">
@@ -932,14 +1043,27 @@ export default function LandingPage() {
         <div id="2bed">
           <p className="apt-type-label">{t.twoBedLabel}</p>
           <p className="apt-type-desc">{t.twoBedShort}</p>
-          <div className="apt-img-single">
+          <div className="image-carousel">
             <Image
-              src={LANDING_IMAGE_PATHS.twoBedMain}
-              alt="2 bedroom apartment interior"
+              src={TWO_BED_IMAGES[twoBedImageIndex].src}
+              alt={TWO_BED_IMAGES[twoBedImageIndex].alt}
               fill
               sizes="(max-width: 768px) 100vw, 48vw"
               className="section-image"
             />
+            <button type="button" className="carousel-btn prev" onClick={prevTwoBedImage} aria-label="Previous 2 bedroom photo">‹</button>
+            <button type="button" className="carousel-btn next" onClick={nextTwoBedImage} aria-label="Next 2 bedroom photo">›</button>
+            <div className="carousel-dots">
+              {TWO_BED_IMAGES.map((image, index) => (
+                <button
+                  key={image.src}
+                  type="button"
+                  className={`carousel-dot ${index === twoBedImageIndex ? "active" : ""}`}
+                  aria-label={`Go to 2 bedroom photo ${index + 1}`}
+                  onClick={() => setTwoBedImageIndex(index)}
+                />
+              ))}
+            </div>
           </div>
           <p className="apt-caption">
             {t.twoBedCaption}
@@ -951,33 +1075,26 @@ export default function LandingPage() {
         <div id="3bed">
           <p className="apt-type-label">{t.threeBedLabel}</p>
           <p className="apt-type-desc">{t.threeBedShort}</p>
-          <div className="apt-img-double">
-            <div className="apt-img-cell">
-              <Image
-                src={LANDING_IMAGE_PATHS.threeBedMain}
-                alt="3 bedroom apartment main view"
-                fill
-                sizes="(max-width: 768px) 100vw, 24vw"
-                className="section-image"
-              />
-            </div>
-            <div className="apt-img-cell">
-              <Image
-                src={LANDING_IMAGE_PATHS.threeBedLivingRoom}
-                alt="3 bedroom apartment living room"
-                fill
-                sizes="(max-width: 768px) 100vw, 24vw"
-                className="section-image"
-              />
-            </div>
-            <div className="apt-img-cell">
-              <Image
-                src={LANDING_IMAGE_PATHS.threeBedKitchen}
-                alt="3 bedroom apartment kitchen"
-                fill
-                sizes="(max-width: 768px) 100vw, 24vw"
-                className="section-image"
-              />
+          <div className="image-carousel">
+            <Image
+              src={THREE_BED_IMAGES[threeBedImageIndex].src}
+              alt={THREE_BED_IMAGES[threeBedImageIndex].alt}
+              fill
+              sizes="(max-width: 768px) 100vw, 48vw"
+              className="section-image"
+            />
+            <button type="button" className="carousel-btn prev" onClick={prevThreeBedImage} aria-label="Previous 3 bedroom photo">‹</button>
+            <button type="button" className="carousel-btn next" onClick={nextThreeBedImage} aria-label="Next 3 bedroom photo">›</button>
+            <div className="carousel-dots">
+              {THREE_BED_IMAGES.map((image, index) => (
+                <button
+                  key={image.src}
+                  type="button"
+                  className={`carousel-dot ${index === threeBedImageIndex ? "active" : ""}`}
+                  aria-label={`Go to 3 bedroom photo ${index + 1}`}
+                  onClick={() => setThreeBedImageIndex(index)}
+                />
+              ))}
             </div>
           </div>
           <p className="apt-caption">
@@ -990,18 +1107,27 @@ export default function LandingPage() {
       {/* GALLERY */}
       <section className="gallery" id="gallery">
         <h2 className="gallery-title">{t.galleryTitle}</h2>
-        <div className="gallery-grid">
-          {LANDING_GALLERY_IMAGES.map((img, i) => (
-            <div className="gallery-cell" key={i}>
-              <Image
-                src={img.src}
-                alt={img.alt}
-                fill
-                sizes="(max-width: 768px) 100vw, 48vw"
-                className="section-image"
+        <div className="image-carousel gallery-carousel">
+          <Image
+            src={LANDING_GALLERY_IMAGES[galleryImageIndex].src}
+            alt={LANDING_GALLERY_IMAGES[galleryImageIndex].alt}
+            fill
+            sizes="(max-width: 768px) 100vw, 92vw"
+            className="section-image"
+          />
+          <button type="button" className="carousel-btn prev" onClick={prevGalleryImage} aria-label="Previous gallery photo">‹</button>
+          <button type="button" className="carousel-btn next" onClick={nextGalleryImage} aria-label="Next gallery photo">›</button>
+          <div className="carousel-dots">
+            {LANDING_GALLERY_IMAGES.map((image, index) => (
+              <button
+                key={image.src}
+                type="button"
+                className={`carousel-dot ${index === galleryImageIndex ? "active" : ""}`}
+                aria-label={`Go to gallery photo ${index + 1}`}
+                onClick={() => setGalleryImageIndex(index)}
               />
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </section>
 
@@ -1043,7 +1169,7 @@ export default function LandingPage() {
 
       {/* FOOTER */}
       <footer>
-        <div className="footer-logo">Orfane Real Estate</div>
+        <div className="footer-logo">Orfane Office Spaces</div>
         <p className="footer-copy">© {currentYear} {t.footerRights}</p>
         <div className="footer-links">
           <a href="#">{t.privacy}</a>

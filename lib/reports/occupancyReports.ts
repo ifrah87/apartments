@@ -4,6 +4,7 @@ import type { PropertyInfo } from "@/lib/reports/rentInsights";
 import { normalizeId } from "@/lib/reports/tenantStatement";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { opt } from "@/src/lib/utils/normalize";
+import { listActiveLeaseOccupancy } from "@/lib/leases/activeLease";
 
 type UnitInventory = {
   property_id: string;
@@ -124,10 +125,11 @@ function getPropertyName(id: string | undefined, properties: PropertyInfo[]) {
 }
 
 export async function buildOccupancyReport(filters: OccupancyFilters, properties: PropertyInfo[]): Promise<OccupancyReportResult> {
-  const [units, turnover, tenants] = await Promise.all([
+  const [units, turnover, tenants, activeLeaseRows] = await Promise.all([
     fetchJson<UnitInventory[]>("/api/unit-inventory").catch(() => [] as UnitInventory[]),
     fetchJson<UnitTurnover[]>("/api/unit-turnover").catch(() => [] as UnitTurnover[]),
     fetchJson<TenantRecord[]>("/api/dashboard/occupancy").catch(() => [] as TenantRecord[]),
+    listActiveLeaseOccupancy(new Date()).catch(() => []),
   ]);
   const propertyFilter = (filters.propertyId || "").toLowerCase();
   const statusFilter = filters.status || "all";
@@ -143,6 +145,9 @@ export async function buildOccupancyReport(filters: OccupancyFilters, properties
     const propertyKey = opt(tenant.property_id) ?? opt(tenant.building) ?? "";
     tenantMap.set(unitKey(propertyKey, opt(tenant.unit)), tenant);
   });
+  const activeLeaseUnitKeys = new Set(
+    activeLeaseRows.map((row) => unitKey(String(row.property_id || ""), String(row.unit_number || ""))),
+  );
 
   const rows = units
     .map((unit) => {
@@ -151,8 +156,9 @@ export async function buildOccupancyReport(filters: OccupancyFilters, properties
       if (bedsFilter && String(unit.beds || "").toLowerCase() !== bedsFilter.toLowerCase()) return null;
       const turnoverRecord = turnoverMap.get(unitKey(propertyId, unit.unit));
       const tenant = tenantMap.get(unitKey(propertyId, unit.unit));
+      const hasActiveLease = activeLeaseUnitKeys.has(unitKey(propertyId, unit.unit));
       const status: OccupancyRow["status"] =
-        tenant ? "Occupied" : toTitle(unit.status) === "Occupied" ? "Occupied" : "Vacant";
+        hasActiveLease ? "Occupied" : "Vacant";
       if (statusFilter === "occupied" && status !== "Occupied") return null;
       if (statusFilter === "vacant" && status !== "Vacant") return null;
       const monthlyRent = toNumber(unit.rent);

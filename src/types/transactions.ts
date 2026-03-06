@@ -1,4 +1,4 @@
-export type TxnStatus = "UNREVIEWED" | "REVIEWED" | "CODED";
+export type TxnStatus = "UNREVIEWED" | "REVIEWED" | "CODED" | "RECONCILED";
 
 export type TxnDTO = {
   id: string;

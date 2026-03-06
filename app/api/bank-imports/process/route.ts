@@ -20,6 +20,26 @@ async function requireAuth(req: NextRequest) {
   }
 }
 
+async function ensureImportBatchesTable() {
+  await query(
+    `CREATE TABLE IF NOT EXISTS public.bank_import_batches (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      source text NOT NULL,
+      status text NOT NULL DEFAULT 'pending',
+      row_count int NOT NULL DEFAULT 0,
+      processed_count int NOT NULL DEFAULT 0,
+      error_count int NOT NULL DEFAULT 0,
+      error_message text,
+      meta jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_by text,
+      started_at timestamptz,
+      completed_at timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // CSV header normalisation
 // Maps whatever the bank calls the column → our canonical field name
@@ -176,15 +196,63 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  let key: string;
+  await ensureImportBatchesTable();
+
+  let key: string | undefined;
+  let batchId: string | undefined;
+  let retry = false;
   try {
-    ({ key } = await req.json());
+    const body = await req.json();
+    key = body?.key;
+    batchId = body?.batchId;
+    retry = body?.retry === true;
   } catch {
-    return NextResponse.json({ ok: false, error: "Body must be JSON { key: string }" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Body must be JSON { key?: string, batchId?: string }" }, { status: 400 });
+  }
+  if ((!key || typeof key !== "string") && batchId) {
+    const batchRes = await query<{ id: string; meta: Record<string, unknown> | null; status: string | null }>(
+      `SELECT id, meta, status
+       FROM public.bank_import_batches
+       WHERE id = $1
+       LIMIT 1`,
+      [batchId],
+    );
+    const batch = batchRes.rows[0];
+    if (!batch) {
+      return NextResponse.json({ ok: false, error: "Batch not found." }, { status: 404 });
+    }
+    const batchKey = typeof batch.meta?.key === "string" ? batch.meta.key : "";
+    if (!batchKey) {
+      return NextResponse.json({ ok: false, error: "Batch has no source key." }, { status: 400 });
+    }
+    if (!retry && String(batch.status || "").toLowerCase() === "completed") {
+      return NextResponse.json({ ok: false, error: "Batch already completed. Use retry=true to reprocess." }, { status: 409 });
+    }
+    key = batchKey;
   }
   if (!key || typeof key !== "string") {
-    return NextResponse.json({ ok: false, error: "key is required" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "key or batchId is required" }, { status: 400 });
   }
+
+  if (!batchId) {
+    const createdBatch = await query<{ id: string }>(
+      `INSERT INTO public.bank_import_batches (source, status, row_count, processed_count, error_count, meta, created_by)
+       VALUES ($1, 'pending', 0, 0, 0, $2::jsonb, $3)
+       RETURNING id`,
+      ["bank-imports/process", JSON.stringify({ key }), session.sub],
+    );
+    batchId = String(createdBatch.rows[0]?.id || "");
+  }
+  await query(
+    `UPDATE public.bank_import_batches
+     SET status = 'processing',
+         started_at = now(),
+         completed_at = NULL,
+         error_message = NULL,
+         updated_at = now()
+     WHERE id = $1`,
+    [batchId],
+  );
 
   // ── 1. Download from Spaces ──────────────────────────────────────────────
   console.log(`[bank-imports/process] downloading key=${key}`);
@@ -194,7 +262,16 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[bank-imports/process] download failed key=${key}`, msg);
-    return NextResponse.json({ ok: false, error: `Could not download file: ${msg}` }, { status: 502 });
+    await query(
+      `UPDATE public.bank_import_batches
+       SET status = 'failed',
+           error_message = $2,
+           completed_at = now(),
+           updated_at = now()
+       WHERE id = $1`,
+      [batchId, msg],
+    ).catch(() => {});
+    return NextResponse.json({ ok: false, error: `Could not download file: ${msg}`, batchId }, { status: 502 });
   }
   console.log(`[bank-imports/process] download ok bytes=${csvBuffer.length}`);
 
@@ -215,8 +292,24 @@ export async function POST(req: NextRequest) {
   console.log(`[bank-imports/process] normalised txns=${txns.length} skipped_parse=${skippedParse}`);
 
   if (!txns.length) {
+    await query(
+      `UPDATE public.bank_import_batches
+       SET status = 'completed',
+           row_count = $2,
+           processed_count = 0,
+           error_count = $3,
+           completed_at = now(),
+           updated_at = now()
+       WHERE id = $1`,
+      [batchId, rawRows.length, skippedParse],
+    );
     return NextResponse.json({
       ok: true,
+      batchId,
+      status: "completed",
+      row_count: rawRows.length,
+      processed_count: 0,
+      error_count: skippedParse,
       inserted: 0,
       skipped_duplicates: 0,
       skipped_parse: skippedParse,
@@ -261,8 +354,27 @@ export async function POST(req: NextRequest) {
 
   console.log(`[bank-imports/process] done inserted=${inserted} skipped_duplicates=${skippedDuplicates} key=${key}`);
 
+  const processedCount = inserted + skippedDuplicates;
+  await query(
+    `UPDATE public.bank_import_batches
+     SET status = 'completed',
+         row_count = $2,
+         processed_count = $3,
+         error_count = $4,
+         error_message = NULL,
+         completed_at = now(),
+         updated_at = now()
+     WHERE id = $1`,
+    [batchId, rawRows.length, processedCount, skippedParse],
+  );
+
   return NextResponse.json({
     ok: true,
+    batchId,
+    status: "completed",
+    row_count: rawRows.length,
+    processed_count: processedCount,
+    error_count: skippedParse,
     inserted,
     skipped_duplicates: skippedDuplicates,
     skipped_parse: skippedParse,

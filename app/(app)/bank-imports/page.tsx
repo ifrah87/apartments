@@ -3,8 +3,20 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 
-type UploadResult  = { ok: true; key: string; size: number } | { ok: false; error: string };
-type ProcessResult = { ok: true; inserted: number; skipped_duplicates: number; skipped_parse: number } | { ok: false; error: string };
+type UploadResult  = { ok: true; key: string; size: number; batchId?: string } | { ok: false; error: string };
+type ProcessSuccess = {
+  ok: true;
+  batchId?: string;
+  status?: string;
+  row_count?: number;
+  processed_count?: number;
+  error_count?: number;
+  inserted: number;
+  skipped_duplicates: number;
+  skipped_parse: number;
+};
+type ProcessFailure = { ok: false; error: string; batchId?: string };
+type ProcessResult = ProcessSuccess | ProcessFailure;
 
 const fmtBytes = (n: number) =>
   n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(2)} MB`;
@@ -19,6 +31,7 @@ export default function BankImportsPage() {
   const [uploadResult,  setUploadResult]  = useState<UploadResult | null>(null);
   const [processResult, setProcessResult] = useState<ProcessResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryBatchId, setRetryBatchId] = useState<string | null>(null);
 
   // ── Upload ──────────────────────────────────────────────────────────────
   async function handleUpload(e: React.FormEvent) {
@@ -59,13 +72,42 @@ export default function BankImportsPage() {
       const res  = await fetch("/api/bank-imports/process", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ key: uploadResult.key }),
+        body:    JSON.stringify({ key: uploadResult.key, batchId: uploadResult.batchId }),
       });
       const data: ProcessResult = await res.json();
       setProcessResult(data);
-      if (!data.ok) setError(data.error);
+      if (!data.ok) {
+        setError(data.error);
+        setRetryBatchId(data.batchId ?? uploadResult.batchId ?? null);
+      } else {
+        setRetryBatchId(null);
+      }
     } catch {
       setError("Network error during processing.");
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function handleRetry() {
+    if (!retryBatchId) return;
+    setProcessing(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/bank-imports/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchId: retryBatchId, retry: true }),
+      });
+      const data: ProcessResult = await res.json();
+      setProcessResult(data);
+      if (!data.ok) {
+        setError(data.error);
+      } else {
+        setRetryBatchId(null);
+      }
+    } catch {
+      setError("Network error during retry.");
     } finally {
       setProcessing(false);
     }
@@ -134,6 +176,7 @@ export default function BankImportsPage() {
           <p className="text-sm font-semibold text-emerald-800">Uploaded successfully</p>
           <p className="break-all font-mono text-xs text-emerald-700">{uploadResult.key}</p>
           <p className="text-xs text-emerald-600">{fmtBytes(uploadResult.size)}</p>
+          {uploadResult.batchId && <p className="text-xs text-slate-500">Batch: {uploadResult.batchId}</p>}
 
           {/* Step 2 */}
           <div className="border-t border-emerald-200 pt-4">
@@ -153,6 +196,11 @@ export default function BankImportsPage() {
       {processResult?.ok && (
         <div className="max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="mb-3 text-sm font-semibold text-slate-900">Import complete</p>
+          <div className="mb-3 grid grid-cols-3 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+            <Stat value={processResult.row_count ?? 0} label="Rows in file" color="text-slate-700" />
+            <Stat value={processResult.processed_count ?? 0} label="Rows processed" color="text-indigo-700" />
+            <Stat value={processResult.error_count ?? 0} label="Error rows" color="text-rose-600" />
+          </div>
           <div className="grid grid-cols-3 gap-4 text-center">
             <Stat value={processResult.inserted}           label="Inserted"          color="text-emerald-700" />
             <Stat value={processResult.skipped_duplicates} label="Duplicates skipped" color="text-amber-600" />
@@ -171,6 +219,18 @@ export default function BankImportsPage() {
       {error && (
         <div className="max-w-lg rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {error}
+          {retryBatchId && (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={handleRetry}
+                disabled={processing}
+                className="rounded-full border border-rose-300 bg-white px-4 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+              >
+                {processing ? "Retrying…" : "Retry failed batch"}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

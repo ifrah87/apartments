@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
-import { readJsonFile, updateJsonFile } from "@/lib/storage/jsonStore";
+import { updateJsonFile } from "@/lib/storage/jsonStore";
+import { getInvoiceDraft } from "@/src/modules/billing/repository";
 
 export const runtime = "nodejs";
 
@@ -42,8 +43,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "Missing tenantId or period." }, { status: 400 });
   }
 
-  const drafts = await readJsonFile<InvoiceDraft[]>(DRAFTS_FILE, []);
-  const draft = drafts.find((item) => item.tenantId === tenantId && item.period === period) || null;
+  const draft = await getInvoiceDraft(tenantId, period);
   return NextResponse.json({ ok: true, draft });
 }
 

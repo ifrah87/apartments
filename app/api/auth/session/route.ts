@@ -15,8 +15,13 @@ export async function GET(request: Request) {
   const cookie = request.headers.get("cookie") || "";
   const match = cookie.match(/(?:^|; )session=([^;]+)/);
   if (!match) return NextResponse.json({ authenticated: false });
-  const token = decodeURIComponent(match[1]);
-  const session = await verifySession(token, getAuthSecret());
+  let session: Awaited<ReturnType<typeof verifySession>> = null;
+  try {
+    const token = decodeURIComponent(match[1]);
+    session = await verifySession(token, getAuthSecret());
+  } catch {
+    return NextResponse.json({ authenticated: false });
+  }
   if (!session) return NextResponse.json({ authenticated: false });
   return NextResponse.json({
     authenticated: true,

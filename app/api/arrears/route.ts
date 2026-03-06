@@ -7,19 +7,18 @@ export async function GET() {
   try {
     const { rows } = await query(`
       SELECT
-        COALESCE(SUM(CASE WHEN age_days <= 30  THEN total_amount ELSE 0 END), 0) AS current_30,
+        COALESCE(SUM(CASE WHEN age_days <= 30  THEN outstanding ELSE 0 END), 0) AS current_30,
         COALESCE(SUM(CASE WHEN age_days > 30
-                           AND age_days <= 60  THEN total_amount ELSE 0 END), 0) AS days_30_60,
-        COALESCE(SUM(CASE WHEN age_days > 60   THEN total_amount ELSE 0 END), 0) AS days_60_plus,
-        COALESCE(SUM(total_amount), 0)                                            AS total_outstanding,
+                           AND age_days <= 60  THEN outstanding ELSE 0 END), 0) AS days_30_60,
+        COALESCE(SUM(CASE WHEN age_days > 60   THEN outstanding ELSE 0 END), 0) AS days_60_plus,
+        COALESCE(SUM(outstanding), 0)                                             AS total_outstanding,
         COUNT(*)                                                                  AS invoice_count
       FROM (
         SELECT
-          total_amount,
+          GREATEST(0, COALESCE(total_amount, 0) - COALESCE(amount_paid, 0)) AS outstanding,
           EXTRACT(EPOCH FROM (NOW() - COALESCE(due_date, invoice_date))) / 86400 AS age_days
         FROM public.invoices
-        WHERE LOWER(status) NOT IN ('paid', 'partially_paid')
-          AND total_amount > 0
+        WHERE GREATEST(0, COALESCE(total_amount, 0) - COALESCE(amount_paid, 0)) > 0
       ) sub
     `);
 

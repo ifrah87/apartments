@@ -1,4 +1,4 @@
-import { getRequestBaseUrl } from "@/lib/utils/baseUrl";
+import { query } from "@/lib/db";
 
 export type RentSummary = {
   rentCollectedMTD: number;
@@ -11,126 +11,92 @@ export type RentSummary = {
 };
 
 export async function calculateRentSummary(propertyFilter?: string): Promise<RentSummary> {
-  const baseUrl = await getRequestBaseUrl();
-  const [tenantsRes, paymentsRes] = await Promise.all([
-    fetch(`${baseUrl}/api/tenants`, { cache: "no-store" }),
-    fetch(`${baseUrl}/api/payments`, { cache: "no-store" }),
-  ]);
-
-  const tenantsPayload = await safeJson(tenantsRes);
-  const paymentsPayload = await safeJson(paymentsRes);
-  const tenants =
-    tenantsPayload?.ok === false
-      ? []
-      : (tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload) ?? [];
-  const payments =
-    paymentsPayload?.ok === false
-      ? []
-      : (paymentsPayload?.ok ? paymentsPayload.data : paymentsPayload) ?? [];
-
-  const normalizedFilter = (propertyFilter || "").toLowerCase();
-  const matchesProperty = (value?: string | null) => {
-    if (!normalizedFilter) return true;
-    return (value || "").toLowerCase() === normalizedFilter;
-  };
-
-  const filteredTenants = tenants.filter(
-    (t: any) => matchesProperty(t.property_id) || matchesProperty(t.building),
-  );
-  const filteredPayments = payments.filter((p: any) => matchesProperty(p.property_id));
-
-  const referenceDate = deriveReferenceDate(filteredPayments.length ? filteredPayments : payments);
-  const thisMonth = referenceDate.getMonth();
-  const thisYear = referenceDate.getFullYear();
-
-  // 1. Rent Collected (MTD)
-  const rentCollectedMTD = filteredPayments
-    .filter((p: any) => {
-      const d = safeDate(p.date);
-      if (!d) return false;
-      return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
-    })
-    .reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
-
-  // 2. Overdue tenants
-  const overdue = filteredTenants.filter(
-    (t: any) => (t.status || "").toLowerCase() === "overdue"
-  );
-
-  const overdueTotal = overdue.reduce(
-    (sum: number, t: any) =>
-      sum + (Number(t.rent_due) || Number(t.rent) || 0),
-    0
-  );
-
-  // 3. Upcoming payments (due within 7 days of reference date)
-  const upcoming = filteredTenants.filter((t: any) => {
-    const due = resolveDueDate(t, referenceDate);
-    if (!due) return false;
-    const diffDays = (due.getTime() - referenceDate.getTime()) / DAY_IN_MS;
-    return diffDays >= 0 && diffDays <= 7;
-  });
-
-  const upcomingTotal = upcoming.reduce(
-    (sum: number, t: any) =>
-      sum + (Number(t.rent_due) || Number(t.rent) || 0),
-    0
-  );
-
-  return {
-    rentCollectedMTD,
-    overdueTenants: overdue.length,
-    overdueTotal,
-    upcomingPayments: upcoming.length,
-    upcomingTotal,
-    atRiskTenants: 0,
-    atRiskBalance: 0,
-  };
-}
-
-const DAY_IN_MS = 1000 * 60 * 60 * 24;
-
-async function safeJson(res: Response) {
-  if (!res.ok) return null;
-  const contentType = res.headers.get("content-type") || "";
-  if (!contentType.includes("application/json")) return null;
   try {
-    return await res.json();
+    const normalizedFilter = String(propertyFilter || "").trim().toLowerCase();
+    const propertyClause = normalizedFilter
+      ? `AND lower(coalesce(u.property_id::text, '')) = $1`
+      : "";
+    const propertyParams = normalizedFilter ? [normalizedFilter] : [];
+
+    const monthStart = new Date();
+    monthStart.setUTCDate(1);
+    monthStart.setUTCHours(0, 0, 0, 0);
+    const nextMonthStart = new Date(monthStart);
+    nextMonthStart.setUTCMonth(nextMonthStart.getUTCMonth() + 1);
+    const today = new Date();
+    const sevenDays = new Date(today);
+    sevenDays.setUTCDate(sevenDays.getUTCDate() + 7);
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
+
+    const [collectedRes, overdueRes, upcomingRes, atRiskRes] = await Promise.all([
+      query<{ amount: number }>(
+        `SELECT COALESCE(SUM(ba.allocated_amount), 0) AS amount
+         FROM public.bank_allocations ba
+         JOIN public.bank_transactions bt ON bt.id = ba.transaction_id
+         JOIN public.invoices i ON i.id::text = ba.invoice_id::text
+         LEFT JOIN public.units u ON u.id::text = i.unit_id::text
+         WHERE bt.txn_date >= $${propertyParams.length + 1}
+           AND bt.txn_date < $${propertyParams.length + 2}
+           ${propertyClause}`,
+        [...propertyParams, monthStart.toISOString().slice(0, 10), nextMonthStart.toISOString().slice(0, 10)],
+      ),
+      query<{ overdue_tenants: number; overdue_total: number }>(
+        `SELECT
+           COUNT(DISTINCT i.tenant_id)::int AS overdue_tenants,
+           COALESCE(SUM(GREATEST(0, COALESCE(i.total_amount, 0) - COALESCE(i.amount_paid, 0))), 0) AS overdue_total
+         FROM public.invoices i
+         LEFT JOIN public.units u ON u.id::text = i.unit_id::text
+         WHERE GREATEST(0, COALESCE(i.total_amount, 0) - COALESCE(i.amount_paid, 0)) > 0
+           AND COALESCE(i.due_date, i.invoice_date) < $${propertyParams.length + 1}
+           ${propertyClause}`,
+        [...propertyParams, today.toISOString().slice(0, 10)],
+      ),
+      query<{ upcoming_count: number; upcoming_total: number }>(
+        `SELECT
+           COUNT(DISTINCT i.tenant_id)::int AS upcoming_count,
+           COALESCE(SUM(GREATEST(0, COALESCE(i.total_amount, 0) - COALESCE(i.amount_paid, 0))), 0) AS upcoming_total
+         FROM public.invoices i
+         LEFT JOIN public.units u ON u.id::text = i.unit_id::text
+         WHERE GREATEST(0, COALESCE(i.total_amount, 0) - COALESCE(i.amount_paid, 0)) > 0
+           AND COALESCE(i.due_date, i.invoice_date) >= $${propertyParams.length + 1}
+           AND COALESCE(i.due_date, i.invoice_date) <= $${propertyParams.length + 2}
+           ${propertyClause}`,
+        [...propertyParams, today.toISOString().slice(0, 10), sevenDays.toISOString().slice(0, 10)],
+      ),
+      query<{ at_risk_tenants: number; at_risk_total: number }>(
+        `SELECT
+           COUNT(DISTINCT i.tenant_id)::int AS at_risk_tenants,
+           COALESCE(SUM(GREATEST(0, COALESCE(i.total_amount, 0) - COALESCE(i.amount_paid, 0))), 0) AS at_risk_total
+         FROM public.invoices i
+         LEFT JOIN public.units u ON u.id::text = i.unit_id::text
+         WHERE GREATEST(0, COALESCE(i.total_amount, 0) - COALESCE(i.amount_paid, 0)) > 0
+           AND COALESCE(i.due_date, i.invoice_date) < $${propertyParams.length + 1}
+           ${propertyClause}`,
+        [...propertyParams, thirtyDaysAgo.toISOString().slice(0, 10)],
+      ),
+    ]);
+
+    return {
+      rentCollectedMTD: Number(collectedRes.rows[0]?.amount || 0),
+      overdueTenants: Number(overdueRes.rows[0]?.overdue_tenants || 0),
+      overdueTotal: Number(overdueRes.rows[0]?.overdue_total || 0),
+      upcomingPayments: Number(upcomingRes.rows[0]?.upcoming_count || 0),
+      upcomingTotal: Number(upcomingRes.rows[0]?.upcoming_total || 0),
+      atRiskTenants: Number(atRiskRes.rows[0]?.at_risk_tenants || 0),
+      atRiskBalance: Number(atRiskRes.rows[0]?.at_risk_total || 0),
+    };
   } catch (err) {
-    console.warn("Failed to parse JSON response in rent summary", err);
-    return null;
+    console.error("calculateRentSummary failed, using safe defaults", err);
+    return {
+      rentCollectedMTD: 0,
+      overdueTenants: 0,
+      overdueTotal: 0,
+      upcomingPayments: 0,
+      upcomingTotal: 0,
+      atRiskTenants: 0,
+      atRiskBalance: 0,
+    };
   }
 }
 
-function safeDate(value?: string | number | null): Date | null {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function deriveReferenceDate(payments: any[]): Date {
-  const dates = payments
-    .map((p) => safeDate(p.date))
-    .filter((d): d is Date => Boolean(d));
-  if (!dates.length) {
-    return new Date();
-  }
-  return dates.reduce((latest, current) => (current > latest ? current : latest));
-}
-
-function resolveDueDate(tenant: any, referenceDate: Date): Date | null {
-  const explicitDate = safeDate(tenant.due_date || tenant.next_due_date);
-  if (explicitDate) {
-    return explicitDate;
-  }
-
-  const dueDayRaw = tenant.due_day || tenant.dueDay;
-  const dueDay = Number(dueDayRaw);
-  if (!Number.isFinite(dueDay)) return null;
-
-  const due = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), dueDay);
-  if (due < referenceDate) {
-    due.setMonth(due.getMonth() + 1);
-  }
-  return due;
-}

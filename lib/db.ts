@@ -45,10 +45,15 @@ export async function query<T extends QueryResultRow = any>(
   try {
     return await pool.query<T>(text, params);
   } catch (err) {
-    // Retry once on stale-connection errors (idle connection was closed by server)
+    // Retry once on transient connection errors (idle close / timeout / reset)
     const msg = err instanceof Error ? err.message : "";
-    // Only retry on stale-connection errors, not pool exhaustion timeouts
-    if (msg.includes("ECONNRESET") || msg.includes("EPIPE") || msg === "Connection terminated unexpectedly") {
+    const isTransientConnectionError =
+      msg.includes("ECONNRESET") ||
+      msg.includes("EPIPE") ||
+      msg === "Connection terminated unexpectedly" ||
+      msg.includes("Connection terminated due to connection timeout");
+    // Only retry on transient connection errors, not syntax/query logic failures.
+    if (isTransientConnectionError) {
       return await pool.query<T>(text, params);
     }
     throw err;

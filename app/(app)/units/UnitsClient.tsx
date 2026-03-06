@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
 import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
@@ -90,7 +89,6 @@ export default function UnitsClient() {
   const [error, setError] = useState<string | null>(null);
   const unitInputRef = useRef<HTMLInputElement | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const searchParams = useSearchParams();
 
   const loadProperties = async () => {
     try {
@@ -173,13 +171,12 @@ export default function UnitsClient() {
   }, [selectedPropertyId]);
 
   useEffect(() => {
-    const paramId = searchParams.get("propertyId");
-    if (paramId && paramId !== selectedPropertyId) {
-      setSelectedPropertyId(paramId);
-      setCurrentPropertyId(paramId);
-      setForm((prev) => ({ ...prev, propertyId: paramId }));
-    }
-  }, [searchParams, selectedPropertyId]);
+    const paramId = new URLSearchParams(window.location.search).get("propertyId");
+    if (!paramId) return;
+    setCurrentPropertyId(paramId);
+    setSelectedPropertyId(paramId);
+    setForm((prev) => ({ ...prev, propertyId: paramId }));
+  }, []);
 
   const tenantIndex = useMemo(() => {
     const map = new Map<string, TenantRecord>();

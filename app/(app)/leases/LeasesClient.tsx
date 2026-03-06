@@ -771,7 +771,7 @@ export default function LeasesClient() {
                   Property: l.property ?? "",
                   Rent: l.rent ?? 0,
                   Deposit: l.deposit ?? 0,
-                  Cycle: l.billingCycle ?? "",
+                  Cycle: l.cycle ?? "",
                   "Start Date": l.startDate ?? "",
                   "End Date": l.endDate ?? "",
                   Status: l.status,

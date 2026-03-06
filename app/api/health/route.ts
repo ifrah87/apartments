@@ -3,6 +3,7 @@ import { query } from "@/lib/db";
 
 export async function GET() {
   const start = Date.now();
+  const isProduction = process.env.NODE_ENV === "production";
   const env = { hasDatabaseUrl: Boolean(process.env.DATABASE_URL) };
 
   try {
@@ -32,26 +33,45 @@ export async function GET() {
       return acc;
     }, {} as Record<string, boolean>);
 
-    return NextResponse.json({
-      ok: true,
-      data: {
-        db: { connected: true, latencyMs },
-        tables,
-        env,
-        timestamp: new Date().toISOString(),
-      },
-    });
-  } catch (err) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: err instanceof Error ? err.message : "Database connection failed",
-        data: {
-          db: { connected: false },
-          env,
-          timestamp: new Date().toISOString(),
-        },
-      },
+      isProduction
+        ? {
+            ok: true,
+            data: {
+              db: { connected: true, latencyMs },
+              timestamp: new Date().toISOString(),
+            },
+          }
+        : {
+            ok: true,
+            data: {
+              db: { connected: true, latencyMs },
+              tables,
+              env,
+              timestamp: new Date().toISOString(),
+            },
+          },
+    );
+  } catch {
+    return NextResponse.json(
+      isProduction
+        ? {
+            ok: false,
+            error: "Service unavailable",
+            data: {
+              db: { connected: false },
+              timestamp: new Date().toISOString(),
+            },
+          }
+        : {
+            ok: false,
+            error: "Database connection failed",
+            data: {
+              db: { connected: false },
+              env,
+              timestamp: new Date().toISOString(),
+            },
+          },
       { status: 500 },
     );
   }

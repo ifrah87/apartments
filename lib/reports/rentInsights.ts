@@ -3,6 +3,8 @@ import { listManualPayments, type ManualPayment } from "@/lib/reports/manualPaym
 import { createStatement, normalizeId, type ChargeEntry, type PaymentEntry, type StatementRow } from "@/lib/reports/tenantStatement";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { opt } from "@/src/lib/utils/normalize";
+import { listActiveLeaseOccupancy } from "@/lib/leases/activeLease";
+import { query } from "@/lib/db";
 
 type RawPayment = {
   date: string;
@@ -69,6 +71,16 @@ type ReportingContext = {
   paymentIndex: Map<string, NormalizedPayment[]>;
   deposits: Map<string, DepositInfo>;
   charges: Map<string, ChargeEntry[]>;
+  activeLeaseUnitKeys: Set<string>;
+  activeLeaseTenantKeys: Set<string>;
+};
+
+type TenantFinanceSnapshot = {
+  rentDueByTenant: Map<string, number>;
+  collectedByTenant: Map<string, number>;
+  outstandingByTenant: Map<string, number>;
+  oldestOutstandingByTenant: Map<string, Date>;
+  lastPaymentByTenant: Map<string, string>;
 };
 
 function toNumber(value: unknown, fallback = 0) {
@@ -83,6 +95,10 @@ function tenantPropertyId(tenant: TenantRecord) {
 
 function tenantUnit(tenant: TenantRecord) {
   return opt(tenant.unit);
+}
+
+function unitKey(propertyId: string | undefined, unit: string | undefined) {
+  return `${String(propertyId || "").trim().toLowerCase()}::${String(unit || "").trim().toLowerCase()}`;
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -220,8 +236,120 @@ async function loadContext(): Promise<ReportingContext> {
   const paymentIndex = buildPaymentIndex(payments);
   const depositIndex = buildDepositIndex(deposits);
   const chargeIndex = buildChargeIndex(rawCharges);
+  const activeLeaseRows = await listActiveLeaseOccupancy(new Date()).catch(() => []);
+  const activeLeaseUnitKeys = new Set(
+    activeLeaseRows.map((row) => unitKey(String(row.property_id || ""), String(row.unit_number || ""))),
+  );
+  const activeLeaseTenantKeys = new Set(
+    activeLeaseRows.map((row) =>
+      `${normalizeId(row.tenant_id)}::${unitKey(String(row.property_id || ""), String(row.unit_number || ""))}`,
+    ),
+  );
 
-  return { tenants, payments, units, paymentIndex, deposits: depositIndex, charges: chargeIndex };
+  return {
+    tenants,
+    payments,
+    units,
+    paymentIndex,
+    deposits: depositIndex,
+    charges: chargeIndex,
+    activeLeaseUnitKeys,
+    activeLeaseTenantKeys,
+  };
+}
+
+function toDateOnly(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+async function loadTenantFinanceSnapshot(tenantIds: string[], start: Date, end: Date): Promise<TenantFinanceSnapshot> {
+  const normalizedTenantIds = tenantIds.filter(Boolean);
+  const snapshot: TenantFinanceSnapshot = {
+    rentDueByTenant: new Map<string, number>(),
+    collectedByTenant: new Map<string, number>(),
+    outstandingByTenant: new Map<string, number>(),
+    oldestOutstandingByTenant: new Map<string, Date>(),
+    lastPaymentByTenant: new Map<string, string>(),
+  };
+  if (!normalizedTenantIds.length) return snapshot;
+
+  const periodStart = toDateOnly(start);
+  const periodEnd = toDateOnly(end);
+
+  const [dueRes, outstandingRes] = await Promise.all([
+    query<{ tenant_id: string; rent_due: number }>(
+      `SELECT
+         i.tenant_id::text AS tenant_id,
+         COALESCE(SUM(COALESCE(i.total_amount, 0)), 0)::numeric AS rent_due
+       FROM public.invoices i
+       WHERE i.tenant_id::text = ANY($1::text[])
+         AND i.invoice_date >= $2
+         AND i.invoice_date <= $3
+       GROUP BY i.tenant_id::text`,
+      [normalizedTenantIds, periodStart, periodEnd],
+    ),
+    query<{ tenant_id: string; outstanding: number; oldest_due: string | null }>(
+      `SELECT
+         i.tenant_id::text AS tenant_id,
+         COALESCE(SUM(GREATEST(0, COALESCE(i.total_amount, 0) - COALESCE(i.amount_paid, 0))), 0)::numeric AS outstanding,
+         MIN(COALESCE(i.due_date, i.invoice_date)) FILTER (
+           WHERE GREATEST(0, COALESCE(i.total_amount, 0) - COALESCE(i.amount_paid, 0)) > 0
+         )::text AS oldest_due
+       FROM public.invoices i
+       WHERE i.tenant_id::text = ANY($1::text[])
+       GROUP BY i.tenant_id::text`,
+      [normalizedTenantIds],
+    ),
+  ]);
+
+  for (const row of dueRes.rows) {
+    snapshot.rentDueByTenant.set(normalizeId(row.tenant_id), Number(row.rent_due || 0));
+  }
+  for (const row of outstandingRes.rows) {
+    const tenantId = normalizeId(row.tenant_id);
+    snapshot.outstandingByTenant.set(tenantId, Number(row.outstanding || 0));
+    if (row.oldest_due) {
+      const oldest = new Date(row.oldest_due);
+      if (!Number.isNaN(oldest.getTime())) {
+        snapshot.oldestOutstandingByTenant.set(tenantId, oldest);
+      }
+    }
+  }
+
+  try {
+    const collectedRes = await query<{ tenant_id: string; collected_in_period: number; last_payment_date: string | null }>(
+      `SELECT
+         i.tenant_id::text AS tenant_id,
+         COALESCE(SUM(
+           CASE
+             WHEN bt.txn_date >= $2 AND bt.txn_date <= $3 THEN ba.allocated_amount
+             ELSE 0
+           END
+         ), 0)::numeric AS collected_in_period,
+         MAX(bt.txn_date)::text AS last_payment_date
+       FROM public.bank_allocations ba
+       JOIN public.bank_transactions bt ON bt.id = ba.transaction_id
+       JOIN public.invoices i ON i.id::text = ba.invoice_id::text
+       WHERE i.tenant_id::text = ANY($1::text[])
+       GROUP BY i.tenant_id::text`,
+      [normalizedTenantIds, periodStart, periodEnd],
+    );
+    for (const row of collectedRes.rows) {
+      const tenantId = normalizeId(row.tenant_id);
+      snapshot.collectedByTenant.set(tenantId, Number(row.collected_in_period || 0));
+      if (row.last_payment_date) {
+        snapshot.lastPaymentByTenant.set(tenantId, row.last_payment_date);
+      }
+    }
+  } catch (err: any) {
+    const code = err?.code;
+    const message = err instanceof Error ? err.message : String(err);
+    if (code !== "42P01" && !message.includes('relation "bank_allocations" does not exist')) {
+      throw err;
+    }
+  }
+
+  return snapshot;
 }
 
 function getPropertyName(id: string | undefined, properties: PropertyInfo[]) {
@@ -323,11 +451,18 @@ export async function buildRentRollReport(filters: RentRollFilters, properties: 
   const propertyFilter = (filters.propertyId || "").toLowerCase();
   const rows: RentRollRow[] = [];
   const unitTypes = new Set<string>();
+  const finance = await loadTenantFinanceSnapshot(
+    ctx.tenants.map((tenant) => normalizeId(tenant.id)),
+    start,
+    end,
+  );
 
   ctx.tenants.forEach((tenant) => {
     const tenantProperty = (tenantPropertyId(tenant) || "").toLowerCase();
     if (propertyFilter && tenantProperty !== propertyFilter) return;
     const tenantId = normalizeId(tenant.id);
+    const tupleKey = `${tenantId}::${unitKey(tenantPropertyId(tenant) || "", tenantUnit(tenant) || "")}`;
+    if (!ctx.activeLeaseTenantKeys.has(tupleKey)) return;
     const monthlyRent = toNumber(tenant.monthly_rent);
     const leaseStart = deriveLeaseStart(tenantId, ctx);
     const leaseEnd = deriveLeaseEnd(leaseStart);
@@ -351,21 +486,28 @@ export async function buildRentRollReport(filters: RentRollFilters, properties: 
       payments: rangePayments,
       additionalCharges: rangeCharges,
     });
-    const rentDue = statement.rows
+    const statementRentDue = statement.rows
       .filter((row) => row.entryType === "charge" && isWithinRange(row.date, start, end))
       .reduce((sum, row) => sum + row.charge, 0);
-    const rentReceived = statement.rows
+    const statementRentReceived = statement.rows
       .filter((row) => row.entryType === "payment" && isWithinRange(row.date, start, end))
       .reduce((sum, row) => sum + row.payment, 0);
-    const balance = Number(statement.totals.balance.toFixed(2));
-    const oldest = findOldestOutstanding(statement.rows);
+    const statementBalance = Number(statement.totals.balance.toFixed(2));
+    const rentDue = Number((finance.rentDueByTenant.get(tenantId) ?? statementRentDue).toFixed(2));
+    const rentReceived = Number((finance.collectedByTenant.get(tenantId) ?? statementRentReceived).toFixed(2));
+    const balance = Number((finance.outstandingByTenant.get(tenantId) ?? statementBalance).toFixed(2));
+    const oldest = finance.oldestOutstandingByTenant.get(tenantId) ?? findOldestOutstanding(statement.rows);
     const arrearsStatus = describeArrears(balance, oldest, end);
     const depositInfo = ctx.deposits.get(tenantId);
     const depositHeld = depositInfo
       ? Number((depositInfo.received - depositInfo.released).toFixed(2))
       : 0;
     const lastPayment = tenantPayments[tenantPayments.length - 1];
-    const paymentMethod = lastPayment ? (lastPayment.source === "manual" ? "Manual" : "Bank") : "—";
+    const paymentMethod = finance.lastPaymentByTenant.has(tenantId)
+      ? "Bank"
+      : lastPayment
+        ? (lastPayment.source === "manual" ? "Manual" : "Bank")
+        : "—";
 
     const dim = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
     let prorated = 0;
@@ -399,6 +541,8 @@ export async function buildRentRollReport(filters: RentRollFilters, properties: 
   const knownUnitsProperty = propertyFilter && propertyFilter !== "t1" ? [] : ctx.units;
   knownUnitsProperty.forEach((unit) => {
     const unitLabel = String(unit.unit);
+    const leaseUnitKey = unitKey(unit.property_id || "", unitLabel);
+    if (ctx.activeLeaseUnitKeys.has(leaseUnitKey)) return;
     const occupied = rows.some(
       (row) => row.unit === unitLabel && (row.propertyId || "").toLowerCase() === (filters.propertyId || "t1").toLowerCase(),
     );
@@ -590,35 +734,31 @@ export async function buildOverdueRentReport(
   const statusFilter = filters.tenantStatus || "all";
 
   const rows: OverdueRow[] = [];
+  const finance = await loadTenantFinanceSnapshot(
+    ctx.tenants.map((tenant) => normalizeId(tenant.id)),
+    start,
+    today,
+  );
 
   ctx.tenants.forEach((tenant) => {
     if (propertyFilter && (tenantPropertyId(tenant) || "").toLowerCase() !== propertyFilter) return;
     const tenantId = normalizeId(tenant.id);
+    const tupleKey = `${tenantId}::${unitKey(tenantPropertyId(tenant) || "", tenantUnit(tenant) || "")}`;
+    if (!ctx.activeLeaseTenantKeys.has(tupleKey)) return;
     const payments = ctx.paymentIndex.get(tenantId) || [];
-    const tenantCharges = ctx.charges.get(tenantId) || [];
-    const periodPayments = payments.filter((p) => {
-      const d = new Date(p.date);
-      return d >= start && d <= today;
-    });
-    const periodCharges = tenantCharges.filter((charge) => {
-      const d = new Date(charge.date);
-      return d >= start && d <= today;
-    });
-    const statement = createStatement({
-      tenant,
-      start,
-      end: today,
-      payments: buildPaymentEntries(periodPayments),
-      additionalCharges: periodCharges,
-    });
-    const outstanding = statement.totals.balance;
+    const outstanding = Number((finance.outstandingByTenant.get(tenantId) ?? 0).toFixed(2));
     if (outstanding <= 0) return;
-    const oldest = findOldestOutstanding(statement.rows);
+    const oldest = finance.oldestOutstandingByTenant.get(tenantId) ?? null;
     const daysOverdue = oldest ? Math.floor((today.getTime() - oldest.getTime()) / (1000 * 60 * 60 * 24)) : 0;
     if (daysOverdue < daysFilter) return;
 
-    const lastPayment = periodPayments.length ? periodPayments[periodPayments.length - 1] : undefined;
-    const tenantStatus = lastPayment && today.getTime() - new Date(lastPayment.date).getTime() < 120 * 86400000 ? "active" : "moved_out";
+    const lastBankPaymentDate = finance.lastPaymentByTenant.get(tenantId);
+    const fallbackLastPayment = payments.length ? payments[payments.length - 1] : undefined;
+    const lastPaymentDate = lastBankPaymentDate || fallbackLastPayment?.date;
+    const lastPaymentAmount = finance.lastPaymentByTenant.has(tenantId)
+      ? undefined
+      : fallbackLastPayment?.amount;
+    const tenantStatus = lastPaymentDate && today.getTime() - new Date(lastPaymentDate).getTime() < 120 * 86400000 ? "active" : "moved_out";
     if (statusFilter !== "all" && tenantStatus !== statusFilter) return;
 
     const monthsPastDue = Math.max(1, Math.round(outstanding / Math.max(1, toNumber(tenant.monthly_rent))));
@@ -629,8 +769,8 @@ export async function buildOverdueRentReport(
       propertyName: getPropertyName(tenantPropertyId(tenant), properties),
       unit: tenantUnit(tenant) || "—",
       monthlyRent: toNumber(tenant.monthly_rent),
-      lastPaymentDate: lastPayment ? lastPayment.date : undefined,
-      lastPaymentAmount: lastPayment ? lastPayment.amount : undefined,
+      lastPaymentDate: lastPaymentDate,
+      lastPaymentAmount,
       outstandingBalance: outstanding,
       daysOverdue,
       contactEmail: fakeEmail(tenant.name),
@@ -694,6 +834,8 @@ export async function buildLeaseExpiryReport(
   ctx.tenants.forEach((tenant) => {
     if (propertyFilter && (tenantPropertyId(tenant) || "").toLowerCase() !== propertyFilter) return;
     const tenantId = normalizeId(tenant.id);
+    const tupleKey = `${tenantId}::${unitKey(tenantPropertyId(tenant) || "", tenantUnit(tenant) || "")}`;
+    if (!ctx.activeLeaseTenantKeys.has(tupleKey)) return;
     const leaseStart = deriveLeaseStart(tenantId, ctx);
     const leaseEnd = deriveLeaseEnd(leaseStart);
     if (!leaseEnd) return;

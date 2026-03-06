@@ -1,6 +1,6 @@
 type SessionPayload = {
   sub: string;
-  role: "admin" | "reception";
+  role: "admin" | "manager" | "accountant" | "reception";
   name?: string | null;
   phone?: string | null;
   exp: number;

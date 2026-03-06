@@ -183,6 +183,7 @@ export type MeterReadingInput = {
   reading_value?: number | string;
   proof_url?: string | null;
   baseline?: boolean;
+  allow_negative_usage?: boolean;
 };
 
 function toNumber(value: unknown) {
@@ -255,6 +256,7 @@ export async function createReading(payload: MeterReadingInput): Promise<MeterRe
   const readingDate = toDateOnlyString(payload.reading_date?.trim());
   const readingValue = toNumber(payload.reading_value);
   const isBaseline = payload.baseline === true;
+  const allowNegativeUsage = payload.allow_negative_usage === true;
 
   if (!unit) throw badRequest("Unit is required.");
   if (!meterType) throw badRequest("Meter type is required.");
@@ -282,6 +284,11 @@ export async function createReading(payload: MeterReadingInput): Promise<MeterRe
     }
   }
   const usage = Number((readingValue - (prevValue ?? 0)).toFixed(2));
+  if (!isBaseline && usage < 0 && !allowNegativeUsage) {
+    throw badRequest(
+      "Reading is lower than previous reading. Enable explicit override (allow_negative_usage) for meter reset/correction.",
+    );
+  }
   const billableUsage = Math.max(usage, 0);
   const amount = Number((billableUsage * METER_RATE).toFixed(2));
 
