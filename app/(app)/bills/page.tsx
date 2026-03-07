@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useConfirm } from "@/components/ConfirmProvider";
 import SectionCard from "@/components/ui/SectionCard";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -163,6 +164,75 @@ function formatQuantity(value: number) {
 
 function normalizeUnitValue(value: string) {
   return value.replace(/^unit\s+/i, "").trim().toLowerCase();
+}
+
+function deriveInvoiceLineItemAmount(item: Record<string, unknown>) {
+  const totalCents = Number(item.total_cents ?? 0);
+  return (
+    Number(item.amount ?? 0) ||
+    Number(item.total ?? 0) ||
+    (Number.isFinite(totalCents) && totalCents !== 0 ? totalCents / 100 : 0) ||
+    Number(item.qty ?? 0) * Number(item.unit_cents ?? 0) / 100 ||
+    0
+  );
+}
+
+function classifyInvoiceLineItems(lineItems: unknown) {
+  const totals = {
+    rentAmount: 0,
+    cleaningAmount: 0,
+    electricityAmount: 0,
+    otherAmount: 0,
+  };
+  if (!Array.isArray(lineItems)) return totals;
+
+  lineItems.forEach((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
+    const record = item as Record<string, unknown>;
+    const description = String(record.description ?? "").toLowerCase();
+    const meta =
+      record.meta && typeof record.meta === "object" && !Array.isArray(record.meta)
+        ? (record.meta as Record<string, unknown>)
+        : null;
+    const kind = String(meta?.kind ?? "").trim().toUpperCase();
+    const serviceCode = String(meta?.service_code ?? "").trim().toUpperCase();
+    const serviceName = String(meta?.service_name ?? "").trim().toLowerCase();
+    const amount = deriveInvoiceLineItemAmount(record);
+    if (!(amount > 0)) return;
+
+    if (kind === "RENT" || description.includes("rent")) {
+      totals.rentAmount += amount;
+      return;
+    }
+
+    if (
+      kind === "METER_ELECTRICITY" ||
+      serviceCode === "ELECTRICITY" ||
+      serviceName.includes("electric") ||
+      description.includes("electric")
+    ) {
+      totals.electricityAmount += amount;
+      return;
+    }
+
+    if (
+      serviceCode.includes("CLEAN") ||
+      serviceName.includes("clean") ||
+      description.includes("clean")
+    ) {
+      totals.cleaningAmount += amount;
+      return;
+    }
+
+    totals.otherAmount += amount;
+  });
+
+  return {
+    rentAmount: Number(totals.rentAmount.toFixed(2)),
+    cleaningAmount: Number(totals.cleaningAmount.toFixed(2)),
+    electricityAmount: Number(totals.electricityAmount.toFixed(2)),
+    otherAmount: Number(totals.otherAmount.toFixed(2)),
+  };
 }
 
 function buildUnitIdentityKey(input: Pick<UnitCard, "unit" | "unitNumber" | "tenant" | "propertyKey">) {
@@ -337,6 +407,58 @@ function normalizeInvoice(row: any): InvoiceRow {
   const invoiceDate = row?.invoiceDate ?? row?.invoice_date ?? "";
   const dueDate = row?.dueDate ?? row?.due_date ?? "";
   const period = formatInvoicePeriod(String(invoiceDate)) || String(row?.period ?? "");
+  const total = Number(row?.total ?? 0);
+  const rentAmount = Number(row?.rentAmount ?? 0);
+  const cleaningAmount = Number(row?.cleaningAmount ?? 0);
+  const lineItems = Array.isArray(row?.lineItems)
+    ? row.lineItems
+    : Array.isArray(row?.line_items)
+      ? row.line_items
+      : [];
+  const lineItemBreakdown = classifyInvoiceLineItems(lineItems);
+  const explicitElectricity = Number(row?.electricityAmount ?? row?.electricity_amount ?? 0);
+  let electricityAmount = Number.isFinite(explicitElectricity) ? explicitElectricity : 0;
+
+  if (!(electricityAmount > 0)) {
+    if (lineItemBreakdown.electricityAmount > 0) {
+      electricityAmount = lineItemBreakdown.electricityAmount;
+    }
+  }
+
+  if (!(electricityAmount > 0)) {
+    const snapshot = normalizeDraftMeterSnapshot(row?.meterSnapshot ?? row?.meter_snapshot ?? null);
+    const fromSnapshotAmount = Number(snapshot?.amount ?? 0);
+    if (Number.isFinite(fromSnapshotAmount) && fromSnapshotAmount > 0) {
+      electricityAmount = Number(fromSnapshotAmount.toFixed(2));
+    } else {
+      const usage = Number(snapshot?.usage ?? 0);
+      const rate = Number(snapshot?.rate ?? 0);
+      const computed = usage > 0 && rate > 0 ? usage * rate : 0;
+      if (computed > 0) {
+        electricityAmount = Number(computed.toFixed(2));
+      }
+    }
+  }
+
+  if (!(electricityAmount > 0)) {
+    // Legacy rows can miss electricityAmount even when total includes it.
+    // Only infer from the residual if the invoice has no other non-electric charges.
+    const inferred = total - rentAmount - cleaningAmount;
+    if (lineItemBreakdown.otherAmount <= 0 && Number.isFinite(inferred) && inferred > 0) {
+      electricityAmount = Number(inferred.toFixed(2));
+    }
+  }
+
+  // Keep electricity aligned with the bill total only when there are no other
+  // non-electric service charges to account for the residual.
+  const residualFromBill = total - rentAmount - cleaningAmount;
+  if (lineItemBreakdown.otherAmount <= 0 && Number.isFinite(residualFromBill) && residualFromBill > 0) {
+    const normalizedResidual = Number(residualFromBill.toFixed(2));
+    if (!(electricityAmount > 0) || Math.abs(electricityAmount - normalizedResidual) > 0.01) {
+      electricityAmount = normalizedResidual;
+    }
+  }
+
   return {
     id: String(row?.id ?? ""),
     unitId: String(row?.unitId ?? row?.unit_id ?? ""),
@@ -346,11 +468,11 @@ function normalizeInvoice(row: any): InvoiceRow {
     period,
     invoiceDate: invoiceDate ? String(invoiceDate) : undefined,
     dueDate: dueDate ? String(dueDate) : undefined,
-    total: Number(row?.total ?? 0),
-    rentAmount: Number(row?.rentAmount ?? 0),
-    cleaningAmount: Number(row?.cleaningAmount ?? 0),
-    electricityAmount: Number(row?.electricityAmount ?? 0),
-    outstanding: Number(row?.outstanding ?? row?.total ?? 0),
+    total,
+    rentAmount,
+    cleaningAmount,
+    electricityAmount,
+    outstanding: Number(row?.outstanding ?? total ?? 0),
     status: normalizedStatus,
   };
 }
@@ -394,6 +516,16 @@ export default function BillsPage() {
   const [rentTarget, setRentTarget] = useState<number>(37350);
   const [activeLeaseRent, setActiveLeaseRent] = useState<number>(0);
   const [activeLeaseCount, setActiveLeaseCount] = useState<number>(0);
+
+  const reloadInvoices = async () => {
+    const invoicesRes = await fetch("/api/bills", { cache: "no-store" });
+    const invoicesPayload = await invoicesRes.json().catch(() => null);
+    if (!invoicesRes.ok || invoicesPayload?.ok === false) {
+      throw new Error(invoicesPayload?.error || "Failed to reload invoices.");
+    }
+    const invoicesData = invoicesPayload?.ok ? invoicesPayload.data : invoicesPayload;
+    setInvoices(Array.isArray(invoicesData) ? invoicesData.map(normalizeInvoice) : []);
+  };
 
   useEffect(() => {
     const loadData = async () => {
@@ -825,21 +957,7 @@ export default function BillsPage() {
       setEditingDueDate(nextDueDate);
       setMeterSnapshot(refreshedSnapshot);
       setLineItems(syncElectricityLine(refreshedItems, refreshedSnapshot));
-      const totalAmount = Number(reloadData?.total_amount ?? payload?.data?.total_amount ?? computeTotal(lineItems));
-      setInvoices((prev) =>
-        prev.map((row) =>
-          row.id === editingInvoice.id
-            ? {
-                ...row,
-                total: totalAmount,
-                outstanding: totalAmount,
-                period: updatedInvoice.period,
-                invoiceDate: nextInvoiceDate,
-                dueDate: nextDueDate,
-              }
-            : row,
-        ),
-      );
+      await reloadInvoices();
       setToast({ type: "success", message: "Saved" });
     } catch (err) {
       console.error(err);
@@ -857,6 +975,7 @@ export default function BillsPage() {
   const billingUnits = useMemo<BillingUnit[]>(() => {
     const billedInvoices = invoices.filter((invoice) => getInvoicePeriodLabel(invoice) === billingPeriod);
     const billedUnitIds = new Set(billedInvoices.map((invoice) => invoice.unitId));
+    const unitIdsWithAnyInvoice = new Set(invoices.map((invoice) => invoice.unitId).filter(Boolean));
     const unitPropertyById = new Map(units.map((unit) => [unit.id, unit.propertyKey ?? ""]));
     const billedUnitKeys = new Set(
       billedInvoices.map((invoice) =>
@@ -886,11 +1005,13 @@ export default function BillsPage() {
           `${String(unit.propertyKey || "").toLowerCase()}::${normalizeUnitValue(unit.unitNumber || unit.unit)}`,
         );
         const isAlreadyBilled = billedUnitIds.has(unit.id) || billedUnitKeys.has(key);
+        const isFirstInvoiceForUnit = !unitIdsWithAnyInvoice.has(unit.id);
+        const canGenerateWithoutCurrentReading = isFirstInvoiceForUnit;
         const nextStatus: BillingUnit["status"] = !unit.hasTenant
           ? "waiting"
           : isAlreadyBilled && !allowMeterBypass
             ? "already_billed"
-            : !hasCurrentMeterReading && !allowMeterBypass
+            : !hasCurrentMeterReading && !allowMeterBypass && !canGenerateWithoutCurrentReading
               ? "waiting"
               : "ready";
         const nextUnit: BillingUnit = {
@@ -950,15 +1071,8 @@ export default function BillsPage() {
     }
   }, [historyMonth, historyMonthOptions]);
 
-  const visibleInvoices = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
+  const periodInvoices = useMemo(() => {
     const filtered = invoices.filter((invoice) => {
-      const matchesQuery =
-        !normalized ||
-        invoice.unitLabel.toLowerCase().includes(normalized) ||
-        invoice.tenantName.toLowerCase().includes(normalized);
-      if (!matchesQuery) return false;
-
       const { month, year } = getInvoiceMonthYear(invoice);
       if (historyMonth !== "All Months" && month !== historyMonth) return false;
       if (historyYear !== "All Years" && year !== historyYear) return false;
@@ -970,21 +1084,39 @@ export default function BillsPage() {
       if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
       return a.unitLabel.localeCompare(b.unitLabel);
     });
-  }, [query, invoices, historyMonth, historyYear]);
+  }, [invoices, historyMonth, historyYear]);
+
+  const visibleInvoices = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    const filtered = periodInvoices.filter((invoice) => {
+      const matchesQuery =
+        !normalized ||
+        invoice.unitLabel.toLowerCase().includes(normalized) ||
+        invoice.tenantName.toLowerCase().includes(normalized);
+      if (!matchesQuery) return false;
+      return true;
+    });
+    return filtered.sort((a, b) => {
+      const numA = parseInt(a.unitLabel.replace(/\D/g, ""), 10);
+      const numB = parseInt(b.unitLabel.replace(/\D/g, ""), 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.unitLabel.localeCompare(b.unitLabel);
+    });
+  }, [query, periodInvoices]);
 
   const rentBilled = useMemo(
-    () => Number(visibleInvoices.reduce((sum, inv) => sum + (inv.rentAmount ?? 0), 0).toFixed(2)),
-    [visibleInvoices],
+    () => Number(periodInvoices.reduce((sum, inv) => sum + (inv.rentAmount ?? 0), 0).toFixed(2)),
+    [periodInvoices],
   );
 
   const cleaningBilled = useMemo(
-    () => Number(visibleInvoices.reduce((sum, inv) => sum + (inv.cleaningAmount ?? 0), 0).toFixed(2)),
-    [visibleInvoices],
+    () => Number(periodInvoices.reduce((sum, inv) => sum + (inv.cleaningAmount ?? 0), 0).toFixed(2)),
+    [periodInvoices],
   );
 
   const electricityBilled = useMemo(
-    () => Number(visibleInvoices.reduce((sum, inv) => sum + (inv.electricityAmount ?? 0), 0).toFixed(2)),
-    [visibleInvoices],
+    () => Number(periodInvoices.reduce((sum, inv) => sum + (inv.electricityAmount ?? 0), 0).toFixed(2)),
+    [periodInvoices],
   );
 
   const handleDeleteInvoice = async (invoice: InvoiceRow) => {
@@ -1006,12 +1138,7 @@ export default function BillsPage() {
         alert(payload?.error || "Failed to delete invoice.");
         return;
       }
-        const data = payload?.data;
-        if (Array.isArray(data)) {
-          setInvoices(data.map(normalizeInvoice));
-        } else {
-          setInvoices((prev) => prev.filter((row) => row.id !== invoice.id));
-        }
+      await reloadInvoices();
     } catch (err) {
       console.error("Failed to delete invoice", err);
       alert("Failed to delete invoice.");
@@ -1224,14 +1351,7 @@ export default function BillsPage() {
       if (!res.ok || payload?.ok === false) {
         throw new Error(payload?.error || "Failed to create invoice.");
       }
-      if (Array.isArray(payload?.data)) {
-        setInvoices(payload.data.map(normalizeInvoice));
-      } else {
-        const reload = await fetch("/api/bills", { cache: "no-store" });
-        const reloadPayload = await reload.json().catch(() => null);
-        const reloadData = reloadPayload?.ok ? reloadPayload.data : reloadPayload;
-        setInvoices(Array.isArray(reloadData) ? reloadData.map(normalizeInvoice) : []);
-      }
+      await reloadInvoices();
       closeDraft();
     } catch (err) {
       console.error("Failed to create invoice", err);
@@ -1279,11 +1399,7 @@ export default function BillsPage() {
         setToast({ type: "error", message: payload?.error || "Failed to apply deposit." });
         return;
       }
-      setInvoices((prev) =>
-        prev.map((inv) =>
-          inv.id === invoice.id ? { ...inv, status: "Paid" } : inv,
-        ),
-      );
+      await reloadInvoices();
       setToast({ type: "success", message: `Deposit applied — invoice marked as Paid.` });
     } catch {
       setToast({ type: "error", message: "Failed to apply deposit." });
@@ -1323,13 +1439,7 @@ export default function BillsPage() {
         setToast({ type: "error", message: payload?.error || "Failed to update status." });
         return;
       }
-      setInvoices((prev) =>
-        prev.map((inv) =>
-          inv.id === invoice.id
-            ? { ...inv, status: nextStatus === "paid" ? "Paid" : "Unpaid" }
-            : inv,
-        ),
-      );
+      await reloadInvoices();
       setToast({ type: "success", message: `Invoice marked as ${nextStatus === "paid" ? "Paid" : "Unpaid"}.` });
     } catch {
       setToast({ type: "error", message: "Failed to update invoice status." });
@@ -1407,33 +1517,33 @@ export default function BillsPage() {
 
       <SectionCard className="p-5">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+          <Link href="/reports/rent-roll" className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4 transition hover:border-accent/40 hover:bg-panel-2/80">
             <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Monthly Revenue</p>
             <p className="text-xl font-semibold text-slate-100">{formatCurrency(activeLeaseRent)}</p>
             <p className="mt-1 text-xs text-slate-500">{activeLeaseCount} active {activeLeaseCount === 1 ? "lease" : "leases"}</p>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+          </Link>
+          <Link href="/reports/occupancy" className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4 transition hover:border-accent/40 hover:bg-panel-2/80">
             <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Full Occupancy Target</p>
             <p className="text-xl font-semibold text-slate-400">{formatCurrency(rentTarget)}</p>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+          </Link>
+          <Link href="/reports/ledger" className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4 transition hover:border-accent/40 hover:bg-panel-2/80">
             <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Rent Billed</p>
             <p className="text-xl font-semibold text-slate-100">{formatCurrency(rentBilled)}</p>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+          </Link>
+          <Link href="/reports/account-transactions" className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4 transition hover:border-accent/40 hover:bg-panel-2/80">
             <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Cleaning Billed</p>
             <p className="text-xl font-semibold text-slate-100">{formatCurrency(cleaningBilled)}</p>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+          </Link>
+          <Link href="/reports/utility-charges" className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4 transition hover:border-accent/40 hover:bg-panel-2/80">
             <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Electricity Billed</p>
             <p className="text-xl font-semibold text-slate-100">{formatCurrency(electricityBilled)}</p>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4">
+          </Link>
+          <Link href="/reports/kpi-dashboard" className="rounded-xl border border-white/10 bg-panel-2/60 px-5 py-4 transition hover:border-accent/40 hover:bg-panel-2/80">
             <p className="mb-1 text-xs uppercase tracking-widest text-slate-400">Difference</p>
             <p className={`text-xl font-semibold ${rentBilled >= rentTarget ? "text-emerald-400" : "text-rose-400"}`}>
               {rentBilled >= rentTarget ? "+" : ""}{formatCurrency(rentBilled - rentTarget)}
             </p>
-          </div>
+          </Link>
         </div>
       </SectionCard>
 

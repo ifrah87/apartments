@@ -5,6 +5,9 @@ import { normalizeId } from "@/lib/reports/tenantStatement";
 import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { opt } from "@/src/lib/utils/normalize";
 import { listActiveLeaseOccupancy } from "@/lib/leases/activeLease";
+import { query } from "@/lib/db";
+import { datasetsRepo } from "@/lib/repos";
+import type { LeaseAgreement } from "@/lib/leases";
 
 type UnitInventory = {
   property_id: string;
@@ -124,6 +127,24 @@ function getPropertyName(id: string | undefined, properties: PropertyInfo[]) {
   return match?.name || id;
 }
 
+function toDayStart(value: string | undefined | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function isLeaseAgreementActive(lease: LeaseAgreement, asOf: Date) {
+  if (String(lease.status || "").toLowerCase() !== "active") return false;
+  const start = toDayStart(lease.startDate);
+  if (!start) return false;
+  const end = toDayStart(lease.endDate);
+  if (start > asOf) return false;
+  if (end && end < asOf) return false;
+  return true;
+}
+
 export async function buildOccupancyReport(filters: OccupancyFilters, properties: PropertyInfo[]): Promise<OccupancyReportResult> {
   const [units, turnover, tenants, activeLeaseRows] = await Promise.all([
     fetchJson<UnitInventory[]>("/api/unit-inventory").catch(() => [] as UnitInventory[]),
@@ -202,7 +223,185 @@ export async function buildOccupancyReport(filters: OccupancyFilters, properties
 }
 
 export async function calculateOccupancySummary(propertyId?: string): Promise<OccupancySummary> {
-  const properties = await fetchPropertyOptions();
-  const { summary } = await buildOccupancyReport({ propertyId }, properties);
-  return summary;
+  try {
+    const normalizedPropertyId = String(propertyId || "").trim().toLowerCase();
+    const whereParts: string[] = [];
+    const params: Array<string> = [];
+
+    if (normalizedPropertyId) {
+      params.push(normalizedPropertyId);
+      whereParts.push(`lower(coalesce(u.property_id::text, '')) = $${params.length}`);
+    }
+
+    const asOfDateKey = new Date().toISOString().slice(0, 10);
+    params.push(asOfDateKey);
+    const asOfParam = `$${params.length}`;
+    const whereClause = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
+
+    const { rows } = await query<{
+      property_id: string | null;
+      unit_number: string | number | null;
+      unit_rent: number | null;
+      unit_status: string | null;
+      lease_id: string | null;
+      lease_rent: number | null;
+    }>(
+      `SELECT
+         u.property_id::text AS property_id,
+         u.unit_number,
+         u.rent AS unit_rent,
+         lower(coalesce(u.status, '')) AS unit_status,
+         lease.id AS lease_id,
+         lease.rent AS lease_rent
+       FROM public.units u
+       LEFT JOIN LATERAL (
+         SELECT l.id, l.rent
+         FROM public.leases l
+         WHERE l.unit_id = u.id
+           AND lower(l.status) = 'active'
+           AND l.start_date <= ${asOfParam}
+           AND (l.end_date IS NULL OR l.end_date >= ${asOfParam})
+         ORDER BY l.start_date DESC
+         LIMIT 1
+       ) lease ON TRUE
+       ${whereClause}`,
+      params,
+    );
+
+    const totalUnits = rows.length;
+    const occupiedUnitsFromDb = rows.filter((row) => Boolean(row.lease_id)).length;
+    const expectedRentFromDb = rows.reduce((sum, row) => {
+      if (!row.lease_id) return sum;
+      return sum + Number(row.lease_rent ?? row.unit_rent ?? 0);
+    }, 0);
+
+    if (occupiedUnitsFromDb > 0) {
+      const vacantUnits = Math.max(0, totalUnits - occupiedUnitsFromDb);
+      return {
+        totalUnits,
+        occupiedUnits: occupiedUnitsFromDb,
+        vacantUnits,
+        occupancyRate: totalUnits ? Math.round((occupiedUnitsFromDb / totalUnits) * 100) : 0,
+        expectedRent: Number(expectedRentFromDb.toFixed(2)),
+        averageDaysVacant: 0,
+      };
+    }
+
+    const asOfDay = new Date();
+    asOfDay.setHours(0, 0, 0, 0);
+    const allProperties = await fetchPropertyOptions().catch(() => [] as PropertyInfo[]);
+    const aliasToPropertyId = new Map<string, string>();
+    allProperties.forEach((property) => {
+      const id = (property.id || "").toLowerCase();
+      if (!id) return;
+      aliasToPropertyId.set(id, id);
+      if (property.code) aliasToPropertyId.set(property.code.toLowerCase(), id);
+      if (property.name) aliasToPropertyId.set(property.name.toLowerCase(), id);
+    });
+    const propertyAliasSet = normalizedPropertyId
+      ? new Set(
+          allProperties
+            .filter((property) => (property.id || "").toLowerCase() === normalizedPropertyId)
+            .flatMap((property) =>
+              [property.id, property.code, property.name]
+                .filter((value): value is string => Boolean(value))
+                .map((value) => value.toLowerCase()),
+            ),
+        )
+      : new Set<string>();
+
+    const unitRowMap = new Map<
+      string,
+      { unitKey: string; unitRent: number }
+    >();
+    const unitFallbackMap = new Map<string, string | null>();
+    rows.forEach((row) => {
+      const propertyKey = String(row.property_id || "").toLowerCase();
+      const unitKey = String(row.unit_number || "").toLowerCase();
+      if (!unitKey) return;
+      const canonicalKey = `${propertyKey}::${unitKey}`;
+      unitRowMap.set(canonicalKey, {
+        unitKey: canonicalKey,
+        unitRent: Number(row.unit_rent || 0),
+      });
+      const fallbackKey = `::${unitKey}`;
+      const existing = unitFallbackMap.get(fallbackKey);
+      if (existing === undefined) {
+        unitFallbackMap.set(fallbackKey, canonicalKey);
+      } else if (existing !== canonicalKey) {
+        unitFallbackMap.set(fallbackKey, null);
+      }
+    });
+
+    const leaseAgreements = await datasetsRepo.getDataset<LeaseAgreement[]>("lease_agreements", []);
+    const activeLeases = (Array.isArray(leaseAgreements) ? leaseAgreements : []).filter((lease) => {
+      if (!lease || typeof lease !== "object") return false;
+      if (!isLeaseAgreementActive(lease, asOfDay)) return false;
+      if (!normalizedPropertyId) return true;
+      const leaseProperty = String(lease.property || "").toLowerCase();
+      if (!leaseProperty) return false;
+      if (leaseProperty === normalizedPropertyId) return true;
+      if (propertyAliasSet.has(leaseProperty)) return true;
+      const resolved = aliasToPropertyId.get(leaseProperty);
+      return Boolean(resolved && resolved === normalizedPropertyId);
+    });
+
+    const occupiedFromDataset = new Map<string, number>();
+    activeLeases
+      .sort((a, b) => {
+        const aStart = toDayStart(a.startDate)?.getTime() ?? 0;
+        const bStart = toDayStart(b.startDate)?.getTime() ?? 0;
+        return bStart - aStart;
+      })
+      .forEach((lease) => {
+        const leaseUnit = String(lease.unit || "").toLowerCase();
+        if (!leaseUnit) return;
+        const leasePropertyRaw = String(lease.property || "").toLowerCase();
+        const leasePropertyResolved = aliasToPropertyId.get(leasePropertyRaw) || leasePropertyRaw;
+        const primaryKey = `${leasePropertyResolved}::${leaseUnit}`;
+        let matchedKey = unitRowMap.has(primaryKey) ? primaryKey : null;
+        if (!matchedKey) {
+          const fallback = unitFallbackMap.get(`::${leaseUnit}`);
+          matchedKey = fallback || null;
+        }
+        if (!matchedKey) return;
+        if (occupiedFromDataset.has(matchedKey)) return;
+        const baseRent = unitRowMap.get(matchedKey)?.unitRent || 0;
+        occupiedFromDataset.set(matchedKey, Number(lease.rent || baseRent || 0));
+      });
+
+    if (occupiedFromDataset.size > 0) {
+      const occupiedUnits = occupiedFromDataset.size;
+      const vacantUnits = Math.max(0, totalUnits - occupiedUnits);
+      const expectedRent = Array.from(occupiedFromDataset.values()).reduce((sum, rent) => sum + rent, 0);
+      return {
+        totalUnits,
+        occupiedUnits,
+        vacantUnits,
+        occupancyRate: totalUnits ? Math.round((occupiedUnits / totalUnits) * 100) : 0,
+        expectedRent: Number(expectedRent.toFixed(2)),
+        averageDaysVacant: 0,
+      };
+    }
+
+    const occupiedFromUnitStatus = rows.filter((row) => row.unit_status === "occupied").length;
+    const expectedRentFromUnitStatus = rows.reduce((sum, row) => {
+      if (row.unit_status !== "occupied") return sum;
+      return sum + Number(row.unit_rent || 0);
+    }, 0);
+    const vacantUnits = Math.max(0, totalUnits - occupiedFromUnitStatus);
+    return {
+      totalUnits,
+      occupiedUnits: occupiedFromUnitStatus,
+      vacantUnits,
+      occupancyRate: totalUnits ? Math.round((occupiedFromUnitStatus / totalUnits) * 100) : 0,
+      expectedRent: Number(expectedRentFromUnitStatus.toFixed(2)),
+      averageDaysVacant: 0,
+    };
+  } catch (err) {
+    console.warn("calculateOccupancySummary fallback to dataset report", err);
+    const properties = await fetchPropertyOptions();
+    const { summary } = await buildOccupancyReport({ propertyId }, properties);
+    return summary;
+  }
 }

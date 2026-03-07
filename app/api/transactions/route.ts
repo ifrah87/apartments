@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     const rawLimit       = Number(searchParams.get("limit") ?? "500");
     const limit          = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 2000) : 500;
 
-    const conditions: string[] = [];
+    const conditions: string[] = ["COALESCE(bt.is_deleted, false) = false"];
     const params: unknown[] = [];
 
     if (start) {

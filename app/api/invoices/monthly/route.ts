@@ -589,6 +589,43 @@ async function loadTenantRecord(tenantId: string | null, unit: UnitLookupRow | n
     }
   }
 
+  // Fallback for legacy/stale tenant IDs:
+  // if the invoice tenant_id no longer exists, resolve tenant from unit + property.
+  if (unit?.unit_number !== undefined && unit?.unit_number !== null) {
+    const unitNumber = String(unit.unit_number).trim();
+    if (unitNumber) {
+      try {
+        const tenantByUnitRes = await query(
+          `SELECT id, name, building, property_id, unit, monthly_rent, due_day, reference
+           FROM public.tenants
+           WHERE unit = $1
+             AND ($2::text IS NULL OR property_id = $2 OR building = $2)
+           ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+           LIMIT 1`,
+          [unitNumber, unit.property_id ?? null],
+        );
+        const tenantRow = tenantByUnitRes.rows[0] as Partial<TenantRecord> | undefined;
+        if (tenantRow) {
+          return {
+            id: String(tenantRow.id || tenantId || ""),
+            name: String(tenantRow.name || "Tenant"),
+            building: tenantRow.building ?? undefined,
+            property_id: tenantRow.property_id ?? (unit.property_id ?? undefined),
+            unit: tenantRow.unit ?? unitNumber,
+            monthly_rent:
+              tenantRow.monthly_rent !== null && tenantRow.monthly_rent !== undefined
+                ? Number(tenantRow.monthly_rent)
+                : undefined,
+            due_day: tenantRow.due_day !== null && tenantRow.due_day !== undefined ? Number(tenantRow.due_day) : undefined,
+            reference: tenantRow.reference ?? undefined,
+          };
+        }
+      } catch (err) {
+        console.warn("Failed to resolve tenant by unit for invoice export:", err);
+      }
+    }
+  }
+
   return {
     id: tenantId || "",
     name: tenantId || "Tenant",
@@ -708,15 +745,6 @@ async function renderInvoicesPdf(invoices: InvoicePayload[], reference: Date, co
 
     doc.fillColor("#b8972a").font("Inter-Bold").fontSize(8).text("BILLED TO", fromX, sectionY, { characterSpacing: 1.2 });
     doc.fillColor("#1a1a1a").font("Inter-Bold").fontSize(13).text(payload.tenant.name, fromX, sectionY + 12);
-    doc.fillColor("#6b6b6b").font("Inter").fontSize(10);
-    const tenantLines = [
-      payload.tenant.unit ? `Unit ${payload.tenant.unit}` : "Unit -",
-      payload.propertyLabel || company.name,
-      monthLabel(payload.issueDate),
-    ];
-    tenantLines.forEach((line, idx) => {
-      doc.text(line, fromX, sectionY + 28 + idx * 13);
-    });
 
     y = sectionY + 82;
     const totals = summarizeLineItems(payload.line_items || []);
@@ -1026,11 +1054,6 @@ function buildInvoiceSection(
         <div>
           <div class="party-label">Billed To</div>
           <div class="party-name">${escapeHtml(tenant.name)}</div>
-          <div class="party-detail">
-            ${escapeHtml(unitLabel)}<br>
-            ${escapeHtml(propertyLabel)}<br>
-            ${escapeHtml(extractBillingPeriodSubtitle(issueDate))}
-          </div>
         </div>
       </div>
 
@@ -1105,6 +1128,8 @@ export async function GET(req: NextRequest) {
         `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, period, line_items, meter_snapshot
          FROM public.invoices
          WHERE id = $1
+           AND COALESCE(is_deleted, false) = false
+           AND LOWER(COALESCE(status, '')) <> 'void'
          LIMIT 1`,
         [requestedInvoiceId],
       );
@@ -1141,6 +1166,8 @@ export async function GET(req: NextRequest) {
         `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, period, line_items, meter_snapshot
          FROM public.invoices
          WHERE invoice_date >= $1 AND invoice_date <= $2
+           AND COALESCE(is_deleted, false) = false
+           AND LOWER(COALESCE(status, '')) <> 'void'
          ORDER BY invoice_date ASC, id ASC`,
         [start, end],
       );

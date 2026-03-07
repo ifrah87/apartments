@@ -56,9 +56,8 @@ function formatDate(value: string) {
 
 function defaultDates() {
   const end = new Date();
-  const start = new Date(end.getFullYear(), end.getMonth() - 2, 1);
   return {
-    start: start.toISOString().slice(0, 10),
+    start: "",
     end: end.toISOString().slice(0, 10),
   };
 }
@@ -80,7 +79,10 @@ async function fetchTenants(): Promise<Tenant[]> {
 async function fetchStatement(tenantId: string, start: string, end: string): Promise<StatementResponse | null> {
   if (!tenantId) return null;
   const baseUrl = await getRequestBaseUrl();
-  const res = await fetch(`${baseUrl}/api/tenants/${tenantId}/statement?start=${start}&end=${end}`, {
+  const params = new URLSearchParams();
+  if (start) params.set("start", start);
+  if (end) params.set("end", end);
+  const res = await fetch(`${baseUrl}/api/tenants/${tenantId}/statement?${params.toString()}`, {
     cache: "no-store",
   });
   if (!res.ok) return null;
@@ -120,7 +122,9 @@ export default async function TenantLedgerPage({ searchParams }: { searchParams:
   const start = sp.start || defaults.start;
   const end = sp.end || defaults.end;
   const statement = tenantId ? await fetchStatement(tenantId, start, end) : null;
-  const exportParams = new URLSearchParams({ start, end, format: "csv" });
+  const exportParams = new URLSearchParams({ format: "csv" });
+  if (start) exportParams.set("start", start);
+  if (end) exportParams.set("end", end);
   const exportHref = tenantId ? `/api/tenants/${tenantId}/statement?${exportParams.toString()}` : null;
 
   return (

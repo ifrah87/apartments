@@ -17,6 +17,7 @@ export async function GET() {
          COALESCE(AVG(COALESCE(l.rent, 0)), 0)::numeric AS avg_rent
        FROM public.leases l
        WHERE lower(l.status) = 'active'
+         AND COALESCE(l.is_deleted, false) = false
          AND l.start_date <= $1
          AND (l.end_date IS NULL OR l.end_date >= $1)`,
       [today],

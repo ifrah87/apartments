@@ -1,8 +1,6 @@
+import crypto from "crypto";
 import { query } from "@/lib/db";
-import { readJsonFile } from "@/lib/storage/jsonStore";
 import type { InvoiceLineItem, MeterSnapshot } from "../types";
-
-const DRAFTS_FILE = "invoice_drafts.json";
 
 export type InvoiceListFilters = {
   unitId?: string | null;
@@ -28,6 +26,7 @@ export type InvoiceListItem = {
 
 export type InvoiceDetails = {
   id: string;
+  lease_id: string | null;
   tenant_id: string | null;
   unit_id: string | null;
   invoice_number: string | null;
@@ -152,7 +151,10 @@ function normalizeInvoicePeriod(invoiceDate: unknown, period: unknown) {
 }
 
 export async function listInvoices(filters: InvoiceListFilters = {}): Promise<InvoiceListItem[]> {
-  const conditions: string[] = [];
+  const conditions: string[] = [
+    `COALESCE(i.is_deleted, false) = false`,
+    `LOWER(COALESCE(i.status, '')) <> 'void'`,
+  ];
   const params: unknown[] = [];
 
   if (filters.unitId) {
@@ -286,9 +288,11 @@ export async function listInvoices(filters: InvoiceListFilters = {}): Promise<In
 
 export async function getInvoiceById(id: string): Promise<InvoiceDetails | null> {
   const invoiceRes = await query(
-    `SELECT id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, period, line_items, meter_snapshot
+    `SELECT id, lease_id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, notes, meta, period, line_items, meter_snapshot
      FROM public.invoices
-     WHERE id = $1`,
+     WHERE id = $1
+       AND COALESCE(is_deleted, false) = false
+       AND LOWER(COALESCE(status, '')) <> 'void'`,
     [id],
   );
 
@@ -331,6 +335,7 @@ export async function getInvoiceById(id: string): Promise<InvoiceDetails | null>
 
   return {
     id: String(invoiceRow.id),
+    lease_id: invoiceRow.lease_id ? String(invoiceRow.lease_id) : null,
     tenant_id: invoiceRow.tenant_id ? String(invoiceRow.tenant_id) : null,
     unit_id: invoiceRow.unit_id ? String(invoiceRow.unit_id) : null,
     invoice_number: invoiceRow.invoice_number ? String(invoiceRow.invoice_number) : null,
@@ -349,6 +354,128 @@ export async function getInvoiceById(id: string): Promise<InvoiceDetails | null>
 }
 
 export async function getInvoiceDraft(tenantId: string, period: string): Promise<InvoiceDraft | null> {
-  const drafts = await readJsonFile<InvoiceDraft[]>(DRAFTS_FILE, []);
-  return drafts.find((draft) => draft.tenantId === tenantId && draft.period === period) ?? null;
+  const res = await query<{
+    id: string;
+    tenant_id: string;
+    period: string;
+    line_items: unknown;
+    notes: string | null;
+    invoice_number: string | null;
+    issue_date: string | Date | null;
+    due_date: string | Date | null;
+    reference: string | null;
+    currency: string | null;
+    created_at: string | Date;
+    updated_at: string | Date;
+  }>(
+    `SELECT
+       id,
+       tenant_id,
+       period,
+       line_items,
+       notes,
+       invoice_number,
+       issue_date,
+       due_date,
+       reference,
+       currency,
+       created_at,
+       updated_at
+     FROM public.invoice_drafts
+     WHERE tenant_id::text = $1::text
+       AND period = $2
+       AND COALESCE(is_deleted, false) = false
+     LIMIT 1`,
+    [tenantId, period],
+  );
+  const row = res.rows[0];
+  if (!row) return null;
+  return {
+    id: String(row.id),
+    tenantId: String(row.tenant_id),
+    period: String(row.period),
+    lineItems: Array.isArray(row.line_items) ? (row.line_items as InvoiceDraft["lineItems"]) : [],
+    notes: row.notes ?? undefined,
+    invoiceNumber: row.invoice_number ?? undefined,
+    issueDate: row.issue_date ? String(row.issue_date).slice(0, 10) : undefined,
+    dueDate: row.due_date ? String(row.due_date).slice(0, 10) : undefined,
+    reference: row.reference ?? undefined,
+    currency: row.currency ?? undefined,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+export async function saveInvoiceDraft(input: {
+  tenantId: string;
+  period: string;
+  lineItems: InvoiceDraft["lineItems"];
+  notes?: string;
+  invoiceNumber?: string;
+  issueDate?: string;
+  dueDate?: string;
+  reference?: string;
+  currency?: string;
+}): Promise<InvoiceDraft> {
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  const res = await query<{
+    id: string;
+    tenant_id: string;
+    period: string;
+    line_items: unknown;
+    notes: string | null;
+    invoice_number: string | null;
+    issue_date: string | Date | null;
+    due_date: string | Date | null;
+    reference: string | null;
+    currency: string | null;
+    created_at: string | Date;
+    updated_at: string | Date;
+  }>(
+    `INSERT INTO public.invoice_drafts
+      (id, tenant_id, period, line_items, notes, invoice_number, issue_date, due_date, reference, currency, is_deleted, created_at, updated_at)
+     VALUES
+      ($1, $2, $3, $4::jsonb, $5, $6, $7::date, $8::date, $9, $10, false, now(), now())
+     ON CONFLICT (tenant_id, period)
+     DO UPDATE SET
+       line_items = EXCLUDED.line_items,
+       notes = EXCLUDED.notes,
+       invoice_number = EXCLUDED.invoice_number,
+       issue_date = EXCLUDED.issue_date,
+       due_date = EXCLUDED.due_date,
+       reference = EXCLUDED.reference,
+       currency = EXCLUDED.currency,
+       is_deleted = false,
+       updated_at = now()
+     RETURNING
+       id, tenant_id, period, line_items, notes, invoice_number, issue_date, due_date, reference, currency, created_at, updated_at`,
+    [
+      id,
+      input.tenantId,
+      input.period,
+      JSON.stringify(input.lineItems || []),
+      input.notes ?? null,
+      input.invoiceNumber ?? null,
+      input.issueDate ?? null,
+      input.dueDate ?? null,
+      input.reference ?? null,
+      input.currency ?? null,
+    ],
+  );
+  const row = res.rows[0];
+  return {
+    id: String(row.id),
+    tenantId: String(row.tenant_id),
+    period: String(row.period),
+    lineItems: Array.isArray(row.line_items) ? (row.line_items as InvoiceDraft["lineItems"]) : [],
+    notes: row.notes ?? undefined,
+    invoiceNumber: row.invoice_number ?? undefined,
+    issueDate: row.issue_date ? String(row.issue_date).slice(0, 10) : undefined,
+    dueDate: row.due_date ? String(row.due_date).slice(0, 10) : undefined,
+    reference: row.reference ?? undefined,
+    currency: row.currency ?? undefined,
+    createdAt: String(row.created_at || now),
+    updatedAt: String(row.updated_at || now),
+  };
 }

@@ -16,6 +16,10 @@ export async function GET() {
       "properties",
       "bank_transactions",
       "meter_readings",
+      "invoices",
+      "bank_allocations",
+      "bank_import_batches",
+      "bank_reconciliation_events",
     ];
 
     const tableChecks = await Promise.all(
@@ -33,6 +37,30 @@ export async function GET() {
       return acc;
     }, {} as Record<string, boolean>);
 
+    const criticalColumns = [
+      { table: "invoices", column: "amount_paid" },
+      { table: "bank_transactions", column: "invoice_id" },
+    ];
+    const columnChecks = await Promise.all(
+      criticalColumns.map(async (item) => {
+        const { rows } = await query<{ exists: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1
+             FROM information_schema.columns
+             WHERE table_schema = 'public'
+               AND table_name = $1
+               AND column_name = $2
+           ) AS exists`,
+          [item.table, item.column],
+        );
+        return { key: `${item.table}.${item.column}`, exists: Boolean(rows[0]?.exists) };
+      }),
+    );
+    const columns = columnChecks.reduce((acc, item) => {
+      acc[item.key] = item.exists;
+      return acc;
+    }, {} as Record<string, boolean>);
+
     return NextResponse.json(
       isProduction
         ? {
@@ -47,6 +75,7 @@ export async function GET() {
             data: {
               db: { connected: true, latencyMs },
               tables,
+              columns,
               env,
               timestamp: new Date().toISOString(),
             },
@@ -72,7 +101,7 @@ export async function GET() {
               timestamp: new Date().toISOString(),
             },
           },
-      { status: 500 },
+      { status: 503 },
     );
   }
 }

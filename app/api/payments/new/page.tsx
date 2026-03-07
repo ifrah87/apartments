@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type LeaseOpt = { id:number; label:string };
+type LeaseOpt = { id: string; label: string };
 
 export default function NewPaymentPage() {
   const [leases, setLeases] = useState<LeaseOpt[]>([]);
@@ -25,7 +25,7 @@ export default function NewPaymentPage() {
       method: "POST",
       headers: { "Content-Type":"application/json" },
       body: JSON.stringify({
-        lease_id: Number(fd.get("lease_id")),
+        lease_id: String(fd.get("lease_id") || ""),
         paid_on: fd.get("paid_on"),
         amount: Number(fd.get("amount")),
         method: fd.get("method"),

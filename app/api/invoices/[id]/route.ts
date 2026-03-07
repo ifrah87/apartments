@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
-import { datasetsRepo } from "@/lib/repos";
 import type { InvoiceLineItem, MeterSnapshot } from "@/lib/invoices/types";
 import { getInvoiceById } from "@/src/modules/billing/repository";
 
 type RouteParams = Promise<{ id: string }>;
-
-const INVOICES_KEY = "billing_invoices";
 
 function toNumber(value: unknown, fallback = 0) {
   if (value === undefined || value === null || value === "") return fallback;
@@ -164,6 +161,8 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
                   ELSE amount_paid
                 END
           WHERE id = $2
+           AND COALESCE(is_deleted, false) = false
+           AND LOWER(COALESCE(status, '')) <> 'void'
           RETURNING id, status, total_amount, amount_paid`,
         [nextStatus, id],
       );
@@ -180,24 +179,7 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
           },
         });
       }
-      // Fallback: update status in legacy billing_invoices dataset
-      let found = false;
-      await datasetsRepo.updateDataset<any[]>(
-        INVOICES_KEY,
-        (current) => {
-          if (!Array.isArray(current)) return current ?? [];
-          return current.map((item) => {
-            if (item?.id !== id) return item;
-            found = true;
-            return { ...item, status: nextStatus === "paid" ? "Paid" : nextStatus === "partially_paid" ? "Partially Paid" : "Unpaid" };
-          });
-        },
-        [],
-      );
-      if (!found) {
-        return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
-      }
-      return NextResponse.json({ ok: true, data: { id, status: nextStatus } });
+      return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
     }
 
     // Fast path: record a payment against this invoice (accumulates amount_paid, auto-sets status)
@@ -214,6 +196,8 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
                   ELSE 'partially_paid'
                 END
           WHERE id = $2
+           AND COALESCE(is_deleted, false) = false
+           AND LOWER(COALESCE(status, '')) <> 'void'
           RETURNING id, status, total_amount, amount_paid`,
         [paymentAmount, id],
       );
@@ -236,7 +220,9 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
     const existingInvoiceRes = await query(
       `SELECT id, unit_id, invoice_date, due_date, period
        FROM public.invoices
-       WHERE id = $1`,
+       WHERE id = $1
+         AND COALESCE(is_deleted, false) = false
+         AND LOWER(COALESCE(status, '')) <> 'void'`,
       [id],
     );
     if (!existingInvoiceRes.rows.length) {
@@ -312,9 +298,10 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
            line_items = $7::jsonb,
            meter_snapshot = $8::jsonb,
            total_amount = $9,
-           status = COALESCE($10, 'draft'),
+           status = COALESCE($10, status),
            period = $11
-       WHERE id = $12`,
+       WHERE id = $12
+         AND COALESCE(is_deleted, false) = false`,
       [
         totalCents,
         0,
@@ -331,28 +318,6 @@ export async function PATCH(req: NextRequest, context: { params: RouteParams }) 
       ],
     );
     await query("COMMIT");
-
-    await datasetsRepo.updateDataset<any[]>(
-      INVOICES_KEY,
-      (current) =>
-        Array.isArray(current)
-          ? current.map((item) =>
-              item?.id === id
-                ? {
-                    ...item,
-                    total: totalAmount,
-                    outstanding: totalAmount,
-                    period: nextPeriod ?? item?.period,
-                    invoiceDate: nextInvoiceDate ?? item?.invoiceDate,
-                    dueDate: nextDueDate ?? item?.dueDate,
-                    invoice_date: nextInvoiceDate ?? item?.invoice_date,
-                    due_date: nextDueDate ?? item?.due_date,
-                  }
-                : item,
-            )
-          : [],
-      [],
-    );
 
     const refreshedLines = await query(
       `SELECT id, invoice_id, line_index, description, quantity, unit_price_cents, total_cents, meta, created_at

@@ -110,6 +110,16 @@ export default async function DashboardPage({
   const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
   const qs = new URLSearchParams({ start, end, unreconciled: "1" }).toString();
   const ledgerLink = `/reports/ledger?${qs}`;
+  const occupancyParams = new URLSearchParams();
+  if (propertyFilter) occupancyParams.set("property", propertyFilter);
+  const occupancyReportLink = occupancyParams.size
+    ? `/reports/occupancy?${occupancyParams.toString()}`
+    : "/reports/occupancy";
+  const vacantUnitsReportLink = (() => {
+    const params = new URLSearchParams(occupancyParams);
+    params.set("status", "vacant");
+    return `/reports/occupancy?${params.toString()}`;
+  })();
 
   const lastUpdated = bank.lastUpdatedISO ? new Date(bank.lastUpdatedISO) : null;
   const lastUpdatedText = lastUpdated
@@ -132,9 +142,9 @@ export default async function DashboardPage({
     {
       label: "Rent collected (MTD)",
       value: formatCurrency(rent.rentCollectedMTD),
-      subtitle: "Monthly rental income",
+      subtitle: "Collected against this month's bills",
       accent: "cyan" as const,
-      href: ledgerLink,
+      href: "/bills",
     },
     {
       label: "Upcoming payments",
@@ -155,14 +165,14 @@ export default async function DashboardPage({
       value: `${occupancy.occupancyRate}%`,
       subtitle: `${occupancy.occupiedUnits}/${occupancy.totalUnits} occupied`,
       accent: "cyan" as const,
-      href: "/reports/occupancy",
+      href: occupancyReportLink,
     },
     {
       label: "Vacant units",
       value: occupancy.vacantUnits,
       subtitle: `${occupancy.averageDaysVacant} avg days vacant`,
       accent: "cyan" as const,
-      href: "/reports/occupancy",
+      href: vacantUnitsReportLink,
     },
   ];
 

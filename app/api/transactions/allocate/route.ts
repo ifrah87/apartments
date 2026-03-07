@@ -89,7 +89,7 @@ async function sumAllocatedForTransaction(id: string) {
   const { rows } = await query<{ allocated: number; txn_amount: number }>(
     `SELECT
        COALESCE((SELECT SUM(allocated_amount) FROM public.bank_allocations WHERE transaction_id = $1), 0) AS allocated,
-       COALESCE((SELECT CASE WHEN deposit > 0 THEN deposit ELSE withdrawal END FROM public.bank_transactions WHERE id = $1), 0) AS txn_amount`,
+       COALESCE((SELECT CASE WHEN deposit > 0 THEN deposit ELSE withdrawal END FROM public.bank_transactions WHERE id = $1 AND COALESCE(is_deleted, false) = false), 0) AS txn_amount`,
     [id],
   );
   const allocated = Number(rows[0]?.allocated || 0);
@@ -116,7 +116,9 @@ async function syncInvoiceBalance(
               WHEN $2 >= COALESCE(total_amount, 0) - 0.01 THEN 'paid'
               ELSE 'partially_paid'
             END
-      WHERE id::text = $1::text`,
+      WHERE id::text = $1::text
+        AND COALESCE(is_deleted, false) = false
+        AND LOWER(COALESCE(status, '')) <> 'void'`,
     [invoiceId, paid],
   );
 }
@@ -140,7 +142,8 @@ export async function POST(req: NextRequest) {
          status,
          CASE WHEN deposit > 0 THEN deposit ELSE withdrawal END AS allocation_amount
        FROM public.bank_transactions
-       WHERE id = $1`,
+       WHERE id = $1
+         AND COALESCE(is_deleted, false) = false`,
       [id],
     );
     if (!statusRows.length) {
@@ -199,6 +202,7 @@ export async function POST(req: NextRequest) {
         await client.query("DELETE FROM public.bank_allocations WHERE transaction_id = $1", [id]);
 
         // Insert new splits
+        const aggregatedAllocations = new Map<string, number>();
         for (let i = 0; i < splits.length; i++) {
           const s = splits[i];
           const amount = Number(s.amount || 0);
@@ -211,14 +215,19 @@ export async function POST(req: NextRequest) {
           );
           if (s.invoice_id && amount > 0) {
             affectedInvoiceIds.add(String(s.invoice_id));
-            await client.query(
-              `INSERT INTO public.bank_allocations (transaction_id, invoice_id, allocated_amount, created_by)
-               VALUES ($1, $2, $3, $4)
-               ON CONFLICT (transaction_id, invoice_id)
-               DO UPDATE SET allocated_amount = EXCLUDED.allocated_amount`,
-              [id, s.invoice_id, amount, actorId],
-            );
+            const key = String(s.invoice_id);
+            aggregatedAllocations.set(key, Number((aggregatedAllocations.get(key) || 0) + amount));
           }
+        }
+
+        for (const [invoiceId, amount] of aggregatedAllocations.entries()) {
+          await client.query(
+            `INSERT INTO public.bank_allocations (transaction_id, invoice_id, allocated_amount, created_by)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (transaction_id, invoice_id)
+             DO UPDATE SET allocated_amount = EXCLUDED.allocated_amount`,
+            [id, invoiceId, amount, actorId],
+          );
         }
 
         // Mark parent as REVIEWED; clear individual fields (detail lives in splits)
@@ -230,7 +239,8 @@ export async function POST(req: NextRequest) {
                   property_id  = NULL,
                   unit_id      = NULL,
                   alloc_notes  = $2
-            WHERE id = $1`,
+            WHERE id = $1
+              AND COALESCE(is_deleted, false) = false`,
           [id, `Split: ${splits.length} line${splits.length !== 1 ? "s" : ""}`],
         );
 
@@ -263,73 +273,95 @@ export async function POST(req: NextRequest) {
     // ── Single-line coding ───────────────────────────────────────────────────
     const { tenant_id, property_id, unit_id, account_code, notes, invoice_id } = body;
     const status = requestedStatus;
-    const affectedInvoiceIds = new Set<string>();
+    const client = await pool.connect();
+    try {
+      await ensureBankAllocationsTable((sql, params) => client.query(sql, params));
+      await ensureReconciliationEventsTable((sql, params) => client.query(sql, params));
+      await ensureBankTransactionsColumns((sql, params) => client.query(sql, params));
+      await ensureBankTransactionSplitsColumns((sql, params) => client.query(sql, params));
+      await client.query("BEGIN");
 
-    const oldInvoiceRows = await query<{ invoice_id: string }>(
-      `SELECT DISTINCT invoice_id
-       FROM public.bank_allocations
-       WHERE transaction_id = $1
-         AND invoice_id IS NOT NULL`,
-      [id],
-    );
-    oldInvoiceRows.rows.forEach((row) => {
-      if (row.invoice_id) affectedInvoiceIds.add(String(row.invoice_id));
-    });
-
-    // Remove any existing splits when re-coding as single line
-    await query("DELETE FROM public.bank_transaction_splits WHERE transaction_id = $1", [id]);
-    await query("DELETE FROM public.bank_allocations WHERE transaction_id = $1", [id]);
-    if (invoice_id && defaultAllocationAmount > 0) {
-      affectedInvoiceIds.add(String(invoice_id));
-      await query(
-        `INSERT INTO public.bank_allocations (transaction_id, invoice_id, allocated_amount, created_by)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (transaction_id, invoice_id)
-         DO UPDATE SET allocated_amount = EXCLUDED.allocated_amount`,
-        [id, invoice_id, defaultAllocationAmount, actorId],
+      const affectedInvoiceIds = new Set<string>();
+      const oldInvoiceRows = await client.query<{ invoice_id: string }>(
+        `SELECT DISTINCT invoice_id
+         FROM public.bank_allocations
+         WHERE transaction_id = $1
+           AND invoice_id IS NOT NULL`,
+        [id],
       );
-    }
-    for (const linkedInvoiceId of affectedInvoiceIds) {
-      await syncInvoiceBalance(query, linkedInvoiceId);
-    }
+      oldInvoiceRows.rows.forEach((row) => {
+        if (row.invoice_id) affectedInvoiceIds.add(String(row.invoice_id));
+      });
 
-    const { rows } = await query(
-      `UPDATE public.bank_transactions
-          SET tenant_id    = $2,
-              property_id  = $3,
-              unit_id      = $4,
-              account_code = $5,
-              alloc_notes  = $6,
-              status       = $7,
-              invoice_id   = $8
-        WHERE id = $1
-        RETURNING
-          id,
-          txn_date AS date,
-          CASE WHEN deposit > 0 THEN deposit ELSE -withdrawal END AS amount,
-          payee, particulars, status,
-          tenant_id, property_id, unit_id, account_code, alloc_notes, invoice_id`,
-      [id, tenant_id ?? null, property_id ?? null, unit_id ?? null,
-       account_code ?? null, notes ?? null, status, invoice_id ?? null],
-    );
+      await client.query("DELETE FROM public.bank_transaction_splits WHERE transaction_id = $1", [id]);
+      await client.query("DELETE FROM public.bank_allocations WHERE transaction_id = $1", [id]);
 
-    if (!rows.length) {
-      return NextResponse.json({ ok: false, error: "Transaction not found" }, { status: 404 });
+      if (invoice_id && defaultAllocationAmount > 0) {
+        affectedInvoiceIds.add(String(invoice_id));
+        await client.query(
+          `INSERT INTO public.bank_allocations (transaction_id, invoice_id, allocated_amount, created_by)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (transaction_id, invoice_id)
+           DO UPDATE SET allocated_amount = EXCLUDED.allocated_amount`,
+          [id, invoice_id, defaultAllocationAmount, actorId],
+        );
+      }
+
+      for (const linkedInvoiceId of affectedInvoiceIds) {
+        await syncInvoiceBalance((sql, params) => client.query(sql, params), linkedInvoiceId);
+      }
+
+      const { rows } = await client.query(
+        `UPDATE public.bank_transactions
+            SET tenant_id    = $2,
+                property_id  = $3,
+                unit_id      = $4,
+                account_code = $5,
+                alloc_notes  = $6,
+                status       = $7,
+                invoice_id   = $8
+          WHERE id = $1
+            AND COALESCE(is_deleted, false) = false
+          RETURNING
+            id,
+            txn_date AS date,
+            CASE WHEN deposit > 0 THEN deposit ELSE -withdrawal END AS amount,
+            payee, particulars, status,
+            tenant_id, property_id, unit_id, account_code, alloc_notes, invoice_id`,
+        [id, tenant_id ?? null, property_id ?? null, unit_id ?? null,
+         account_code ?? null, notes ?? null, status, invoice_id ?? null],
+      );
+
+      if (!rows.length) {
+        await client.query("ROLLBACK");
+        return NextResponse.json({ ok: false, error: "Transaction not found" }, { status: 404 });
+      }
+
+      await recordReconciliationEvent(
+        (sql, params) => client.query(sql, params),
+        {
+          transactionId: String(id),
+          action: isExplicitUncode
+            ? "marked_unreconciled"
+            : invoice_id
+              ? "invoice_allocation_saved"
+              : "coding_saved",
+          details: {
+            invoice_id: invoice_id ?? null,
+            status,
+          },
+          actorId,
+        },
+      );
+
+      await client.query("COMMIT");
+      return NextResponse.json({ ok: true, data: rows[0] });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
     }
-    await recordReconciliationEvent(query, {
-      transactionId: String(id),
-      action: isExplicitUncode
-        ? "marked_unreconciled"
-        : invoice_id
-          ? "invoice_allocation_saved"
-          : "coding_saved",
-      details: {
-        invoice_id: invoice_id ?? null,
-        status,
-      },
-      actorId,
-    });
-    return NextResponse.json({ ok: true, data: rows[0] });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to allocate transaction";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });

@@ -13,7 +13,11 @@ export async function PATCH(
     await query("BEGIN");
 
     const leaseRes = await query(
-      `SELECT unit_id FROM public.leases WHERE id = $1 AND status = 'active'`,
+      `SELECT unit_id
+       FROM public.leases
+       WHERE id = $1
+         AND status = 'active'
+         AND COALESCE(is_deleted, false) = false`,
       [id],
     );
 
@@ -29,7 +33,8 @@ export async function PATCH(
        SET status = 'ended',
            end_date = $2,
            updated_at = now()
-       WHERE id = $1`,
+       WHERE id = $1
+         AND COALESCE(is_deleted, false) = false`,
       [id, endDate],
     );
 

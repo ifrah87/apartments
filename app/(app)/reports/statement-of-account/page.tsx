@@ -43,9 +43,8 @@ function fmtDate(value: string) {
 
 function defaultDates() {
   const end = new Date();
-  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() - 5, 1));
   return {
-    start: start.toISOString().slice(0, 10),
+    start: "",
     end: end.toISOString().slice(0, 10),
   };
 }
@@ -91,10 +90,10 @@ export default function StatementOfAccountPage() {
     setError("");
     setStatement(null);
     try {
-      const res = await fetch(
-        `/api/tenants/${selectedId}/statement?start=${start}&end=${end}`,
-        { cache: "no-store" },
-      );
+      const params = new URLSearchParams();
+      if (start) params.set("start", start);
+      if (end) params.set("end", end);
+      const res = await fetch(`/api/tenants/${selectedId}/statement?${params.toString()}`, { cache: "no-store" });
       const p = await res.json();
       if (!p?.ok) {
         setError(p?.error || "Failed to load statement.");
@@ -127,7 +126,10 @@ export default function StatementOfAccountPage() {
 
   function downloadCsv() {
     if (!selectedId) return;
-    const url = `/api/tenants/${selectedId}/statement?start=${start}&end=${end}&format=csv`;
+    const params = new URLSearchParams({ format: "csv" });
+    if (start) params.set("start", start);
+    if (end) params.set("end", end);
+    const url = `/api/tenants/${selectedId}/statement?${params.toString()}`;
     const a = document.createElement("a");
     a.href = url;
     a.download = `statement_${selectedTenant?.name.replace(/\s+/g, "_") || selectedId}.csv`;

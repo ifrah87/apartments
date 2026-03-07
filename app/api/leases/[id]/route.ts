@@ -11,9 +11,23 @@ export async function DELETE(
   try {
     await query("BEGIN");
 
-    await query("DELETE FROM public.payments WHERE lease_id = $1", [leaseId]);
-    await query("DELETE FROM public.lease_charges WHERE lease_id = $1", [leaseId]);
-    const res = await query("DELETE FROM public.leases WHERE id = $1 RETURNING id", [leaseId]);
+    await query(
+      `UPDATE public.payments
+          SET is_deleted = true,
+              deleted_at = now()
+        WHERE lease_id = $1`,
+      [leaseId],
+    );
+    const res = await query(
+      `UPDATE public.leases
+          SET is_deleted = true,
+              deleted_at = now(),
+              status = 'ended',
+              updated_at = now()
+        WHERE id = $1
+        RETURNING id`,
+      [leaseId],
+    );
 
     await query("COMMIT");
 

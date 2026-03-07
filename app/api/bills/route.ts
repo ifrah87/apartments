@@ -7,8 +7,7 @@ import { query } from "@/lib/db";
 import { dateOnlyToUtcTimestamp, toDateOnlyString } from "@/lib/dateOnly";
 import { createStatement } from "@/lib/reports/tenantStatement";
 import { buildInvoiceLineItems } from "@/lib/invoices/lineItems";
-import type { LeaseAgreement } from "@/lib/leases";
-import { getActiveLeaseForUnit } from "@/lib/leases/activeLease";
+import { getActiveLeaseByUnit } from "@/src/lib/leases/getActiveLease";
 
 export const runtime = "nodejs";
 
@@ -151,41 +150,6 @@ type ElectricityReadings = {
   usage: number | null;
   reason?: string;
 };
-
-type LeaseRow = {
-  id: string;
-  tenant_id: string;
-  rent: number | null;
-  start_date: string;
-  end_date: string | null;
-  status: string;
-};
-
-type ResolvedLease = {
-  id: string;
-  tenant_id: string;
-  rent: number | null;
-  start_date: string;
-  end_date: string | null;
-  status: string;
-  source: "db" | "dataset" | "occupied";
-};
-
-async function getActiveLeaseForUnitInPeriod(unitId: string, periodStart: string, periodEnd: string) {
-  const { rows } = await query<LeaseRow>(
-    `SELECT id, tenant_id, rent, start_date, end_date, status
-     FROM public.leases
-     WHERE unit_id = $1
-       AND COALESCE(is_deleted, false) = false
-       AND lower(status) = 'active'
-       AND start_date <= $3
-       AND (end_date IS NULL OR end_date >= $2)
-     ORDER BY start_date DESC
-     LIMIT 1`,
-    [unitId, periodStart, periodEnd],
-  );
-  return rows[0] ?? null;
-}
 
 function normalizeServiceList(value: unknown): ServiceRecord[] {
   if (!Array.isArray(value)) return [];
@@ -674,9 +638,11 @@ type StoredInvoiceDbRow = {
   due_date: string | Date | null;
   status: string | null;
   total_amount: string | number | null;
+  amount_paid: string | number | null;
   total_cents: string | number | null;
   line_items: unknown;
   line_items_from_lines: unknown;
+  meter_snapshot?: unknown;
   created_at?: string | Date | null;
   updated_at?: string | Date | null;
   tenant_name?: string | null;
@@ -684,7 +650,6 @@ type StoredInvoiceDbRow = {
   unit_number?: string | number | null;
 };
 
-const INVOICES_KEY = "billing_invoices";
 const INITIAL_READINGS_KEY = "initial-readings";
 const MONTHS = [
   "January",
@@ -712,50 +677,6 @@ function normalizeStoredInvoiceStatus(value: unknown): StoredInvoice["status"] {
   if (raw === "paid") return "Paid";
   if (raw === "partially paid" || raw === "partial" || raw === "partially_paid") return "Partially Paid";
   return "Unpaid";
-}
-
-function toInvoiceSortTs(invoice: Pick<StoredInvoice, "invoiceDate" | "updatedAt" | "createdAt">) {
-  return (
-    dateOnlyToUtcTimestamp(invoice.invoiceDate) ||
-    dateOnlyToUtcTimestamp(invoice.updatedAt) ||
-    dateOnlyToUtcTimestamp(invoice.createdAt) ||
-    0
-  );
-}
-
-function normalizeLegacyStoredInvoice(raw: unknown): StoredInvoice | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const row = raw as Record<string, unknown>;
-  const id = String(row.id || "").trim();
-  if (!id) return null;
-  const total = Number(row.total ?? 0);
-  const rentAmount = Number(row.rentAmount ?? 0);
-  const cleaningAmount = Number(row.cleaningAmount ?? 0);
-  const electricityAmount = Number(row.electricityAmount ?? 0);
-  const status = normalizeStoredInvoiceStatus(row.status);
-  return {
-    id,
-    tenantId: String(row.tenantId ?? row.tenant_id ?? ""),
-    tenantName: String(row.tenantName ?? row.tenant ?? "Tenant"),
-    unitId: String(row.unitId ?? row.unit_id ?? ""),
-    unitLabel: String(row.unitLabel ?? row.unit ?? "Unit"),
-    invoiceDate: String(row.invoiceDate ?? row.invoice_date ?? ""),
-    total: Number.isFinite(total) ? total : 0,
-    rentAmount: Number.isFinite(rentAmount) ? rentAmount : 0,
-    cleaningAmount: Number.isFinite(cleaningAmount) ? cleaningAmount : 0,
-    electricityAmount: Number.isFinite(electricityAmount) ? electricityAmount : 0,
-    outstanding:
-      status === "Paid"
-        ? 0
-        : Number.isFinite(Number(row.outstanding))
-          ? Number(row.outstanding)
-          : Number.isFinite(total)
-            ? total
-            : 0,
-    status,
-    createdAt: String(row.createdAt ?? row.created_at ?? row.invoiceDate ?? row.invoice_date ?? ""),
-    updatedAt: String(row.updatedAt ?? row.updated_at ?? row.invoiceDate ?? row.invoice_date ?? ""),
-  };
 }
 
 function deriveLineItemAmount(item: Record<string, unknown>) {
@@ -815,10 +736,25 @@ function deriveStoredInvoiceAmounts(lineItems: unknown) {
   };
 }
 
+function deriveElectricityFromSnapshot(snapshot: unknown) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return 0;
+  const row = snapshot as Record<string, unknown>;
+  const amountDirect = toNumberOrNull(row.amount);
+  if (amountDirect !== null && Number.isFinite(amountDirect) && amountDirect > 0) {
+    return Number(amountDirect.toFixed(2));
+  }
+  const usage = toNumberOrNull(row.usage);
+  const rate = toNumberOrNull(row.rate);
+  if (usage !== null && rate !== null && Number.isFinite(usage) && Number.isFinite(rate) && usage > 0 && rate > 0) {
+    return Number((usage * rate).toFixed(2));
+  }
+  return 0;
+}
+
 async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
   const { rows } = await query<StoredInvoiceDbRow>(
-    `SELECT i.id, i.tenant_id, i.unit_id, i.invoice_date, i.due_date, i.status, i.total_amount, i.total_cents,
-            i.line_items, i.created_at,
+    `SELECT i.id, i.tenant_id, i.unit_id, i.invoice_date, i.due_date, i.status, i.total_amount, i.amount_paid, i.total_cents,
+            i.line_items, i.meter_snapshot, i.created_at,
             t.name AS tenant_name, t.unit AS tenant_unit,
             u.unit_number,
             COALESCE(
@@ -835,14 +771,20 @@ async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
      LEFT JOIN public.tenants t ON t.id = i.tenant_id
      LEFT JOIN public.units u ON u.id = i.unit_id
      LEFT JOIN public.invoice_lines il ON il.invoice_id = i.id
+     WHERE COALESCE(i.is_deleted, false) = false
+       AND lower(COALESCE(i.status, '')) <> 'void'
      GROUP BY i.id, i.tenant_id, i.unit_id, i.invoice_date, i.due_date, i.status, i.total_amount, i.total_cents,
-              i.line_items, i.created_at, t.name, t.unit, u.unit_number
+            i.amount_paid, i.line_items, i.meter_snapshot, i.created_at, t.name, t.unit, u.unit_number
      ORDER BY i.invoice_date DESC, i.created_at DESC, i.id DESC`,
   );
 
   return rows.map((row) => {
     const amounts = deriveStoredInvoiceAmounts(row.line_items_from_lines ?? row.line_items);
+    const electricityFromSnapshot = deriveElectricityFromSnapshot(row.meter_snapshot);
+    const electricityAmount =
+      amounts.electricityAmount > 0 ? amounts.electricityAmount : electricityFromSnapshot;
     const total = toNumberOrNull(row.total_amount) ?? (toNumberOrNull(row.total_cents) ?? 0) / 100;
+    const amountPaid = toNumberOrNull(row.amount_paid) ?? 0;
     const normalizedStatus = normalizeStoredInvoiceStatus(row.status);
     const invoiceDate = toDateOnlyString(row.invoice_date || "") || "";
     const updatedAt = invoiceDate;
@@ -860,8 +802,8 @@ async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
       total: Number(total.toFixed(2)),
       rentAmount: amounts.rentAmount,
       cleaningAmount: amounts.cleaningAmount,
-      electricityAmount: amounts.electricityAmount,
-      outstanding: normalizedStatus === "Paid" ? 0 : Number(total.toFixed(2)),
+      electricityAmount: Number(electricityAmount.toFixed(2)),
+      outstanding: Number(Math.max(0, total - amountPaid).toFixed(2)),
       status: normalizedStatus,
       createdAt,
       updatedAt,
@@ -972,69 +914,9 @@ function parsePeriod(period?: string) {
   return { reference, periodKey: `${year}-${String(month).padStart(2, "0")}` };
 }
 
-function buildTenantIndex(tenants: TenantRecord[]) {
-  const map = new Map<string, TenantRecord>();
-  tenants.forEach((tenant) => {
-    const unit = opt(tenant.unit) || "";
-    if (!unit) return;
-    const property = opt(tenant.property_id) || opt(tenant.building) || "";
-    map.set(`${property}::${unit}`.toLowerCase(), tenant);
-    map.set(`::${unit}`.toLowerCase(), tenant);
-  });
-  return map;
-}
-
-function coerceLeaseStatus(value: unknown) {
-  return String(value ?? "").trim().toLowerCase();
-}
-
-function buildLeaseIndex(leases: LeaseAgreement[]) {
-  const map = new Map<string, LeaseAgreement>();
-  leases.forEach((lease) => {
-    if (String(lease?.status || "").toLowerCase() !== "active") return;
-    const unit = String(lease?.unit || "").trim();
-    if (!unit) return;
-    const property = String(lease?.property || "").trim().toLowerCase();
-    const start = lease?.startDate ? new Date(lease.startDate).getTime() : 0;
-    const key = `${property}::${unit}`.toLowerCase();
-    const fallbackKey = `::${unit}`.toLowerCase();
-    const existing = map.get(key);
-    if (!existing || start >= (existing.startDate ? new Date(existing.startDate).getTime() : 0)) {
-      map.set(key, lease);
-    }
-    const existingFallback = map.get(fallbackKey);
-    if (!existingFallback || start >= (existingFallback.startDate ? new Date(existingFallback.startDate).getTime() : 0)) {
-      map.set(fallbackKey, lease);
-    }
-  });
-  return map;
-}
-
 export async function GET() {
   try {
-    // Return DB + legacy dataset invoices so older records remain visible.
-    let dbData: StoredInvoice[] = [];
-    try {
-      dbData = await listStoredInvoicesFromDb();
-    } catch (err) {
-      console.warn("⚠️ failed to load bills from invoices table; using dataset-only fallback", err);
-    }
-
-    const rawLegacy = await datasetsRepo.getDataset<StoredInvoice[]>(INVOICES_KEY, []);
-    const legacyData = (Array.isArray(rawLegacy) ? rawLegacy : [])
-      .map((item) => normalizeLegacyStoredInvoice(item))
-      .filter((item): item is StoredInvoice => item !== null);
-
-    const merged = new Map<string, StoredInvoice>();
-    legacyData.forEach((invoice) => merged.set(invoice.id, invoice));
-    dbData.forEach((invoice) => merged.set(invoice.id, invoice));
-
-    const data = Array.from(merged.values()).sort((a, b) => {
-      const diff = toInvoiceSortTs(b) - toInvoiceSortTs(a);
-      if (diff !== 0) return diff;
-      return String(b.id).localeCompare(String(a.id));
-    });
-
+    const data = await listStoredInvoicesFromDb();
     return NextResponse.json({ ok: true, data });
   } catch (err) {
     console.error("❌ failed to load bills", err);
@@ -1104,14 +986,11 @@ export async function POST(req: NextRequest) {
     const electricityEndExclusive = new Date(Date.UTC(electricityReference.getUTCFullYear(), electricityReference.getUTCMonth() + 1, 1));
     const electricityEndKey = electricityEndExclusive.toISOString().slice(0, 10);
 
-    const [units, tenants, charges, leasesData] = await Promise.all([
+    const [units, tenants, charges] = await Promise.all([
       unitsRepo.listUnits(),
       tenantsRepo.listTenants(),
       datasetsRepo.getDataset<ChargeRow[]>("tenant_charges", []),
-      datasetsRepo.getDataset<LeaseAgreement[]>("lease_agreements", []),
     ]);
-
-    const tenantIndex = buildTenantIndex(tenants);
 
     const chargeIndex = new Map<
       string,
@@ -1141,107 +1020,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Unit not found." }, { status: 404 });
     }
 
-    let lease: ResolvedLease | null = null;
-    const referenceDateKey = toDateOnlyString(reference);
-    const billingPeriodStartKey = toDateOnlyString(start);
-    const billingPeriodEndKey = toDateOnlyString(end);
-    const propertyKey = String(unit.property_id || "").trim().toLowerCase();
-    const unitKey = String(unit.unit || "").trim().toLowerCase();
-    try {
-      const activeLease =
-        (await getActiveLeaseForUnitInPeriod(unit.id, billingPeriodStartKey, billingPeriodEndKey)) ||
-        (await getActiveLeaseForUnit(unit.id, end));
-      if (activeLease) {
-        lease = {
-          ...activeLease,
-          source: "db",
-        };
-      }
-    } catch (err) {
-      console.warn("⚠️ failed to load active lease from db", err);
-    }
-
-    if (!lease) {
-      const datasetLeases = Array.isArray(leasesData) ? leasesData : [];
-      const activeDatasetLease = datasetLeases
-        .filter((entry) => coerceLeaseStatus(entry?.status) === "active")
-        .filter((entry) => String(entry?.unit || "").trim().toLowerCase() === unitKey)
-        .filter((entry) => {
-          const leaseProperty = String(entry?.property || "").trim().toLowerCase();
-          return !leaseProperty || !propertyKey || leaseProperty === propertyKey;
-        })
-        .filter((entry) => {
-          const start = toDateOnlyString(entry?.startDate || "");
-          const end = toDateOnlyString(entry?.endDate || "");
-          if (start && start > billingPeriodEndKey) return false;
-          if (end && end < billingPeriodStartKey) return false;
-          return true;
-        })
-        .sort((a, b) => {
-          const aStart = dateOnlyToUtcTimestamp(a?.startDate || "") || 0;
-          const bStart = dateOnlyToUtcTimestamp(b?.startDate || "") || 0;
-          return bStart - aStart;
-        })[0];
-
-      if (activeDatasetLease) {
-        const tenantFromUnit =
-          tenantIndex.get(`${propertyKey}::${unitKey}`) ||
-          tenantIndex.get(`::${unitKey}`) ||
-          null;
-        const tenantFromName = tenants.find((row) => {
-          const rowName = String(row.name || "").trim().toLowerCase();
-          const leaseName = String(activeDatasetLease.tenantName || "").trim().toLowerCase();
-          if (!rowName || !leaseName || rowName !== leaseName) return false;
-          const rowProperty = String(row.property_id || row.building || "").trim().toLowerCase();
-          return !propertyKey || !rowProperty || rowProperty === propertyKey;
-        });
-        const resolvedTenantId = String(tenantFromUnit?.id || tenantFromName?.id || "").trim();
-        if (resolvedTenantId) {
-          lease = {
-            id: String(activeDatasetLease.id || `dataset-lease-${unit.id}`),
-            tenant_id: resolvedTenantId,
-            rent: Number(activeDatasetLease.rent || 0),
-            start_date: toDateOnlyString(activeDatasetLease.startDate || "") || referenceDateKey,
-            end_date: toDateOnlyString(activeDatasetLease.endDate || "") || null,
-            status: String(activeDatasetLease.status || "Active"),
-            source: "dataset",
-          };
-        }
-      }
-    }
-
-    if (!lease) {
-      const occupiedTenant =
-        tenantIndex.get(`${propertyKey}::${unitKey}`) ||
-        tenantIndex.get(`::${unitKey}`) ||
-        null;
-      const unitStatus = String(unit.status || "").trim().toLowerCase();
-      const isOccupiedUnit = unitStatus === "occupied" || unitStatus.startsWith("occ");
-      const occupiedRent = toNumberOrNull(occupiedTenant?.monthly_rent);
-
-      if (occupiedTenant && (isOccupiedUnit || occupiedRent !== null)) {
-        lease = {
-          id: `occupied-${unit.id}-${occupiedTenant.id}`,
-          tenant_id: String(occupiedTenant.id),
-          rent: occupiedRent,
-          start_date: referenceDateKey,
-          end_date: null,
-          status: "occupied",
-          source: "occupied",
-        };
-      }
-    }
+    const lease = await getActiveLeaseByUnit(unit.id);
 
     if (!lease) {
       const response: Record<string, unknown> = {
         ok: false,
-        error: "Unit is not ready: no active lease for the selected billing period.",
+        error: "Unit is not ready: no active lease exists for this unit.",
         unit: { id: unit.id, unit: unit.unit },
         reason: "no active lease",
       };
       if (debugEnabled) {
         console.info("Bills debug", response);
-        return NextResponse.json({ ...response, debug: { lease: null, lease_sources: ["db", "dataset", "occupied"] } }, { status: 400 });
+        return NextResponse.json({ ...response, debug: { lease: null, lease_sources: ["public.leases"] } }, { status: 400 });
       }
       return NextResponse.json(response, { status: 400 });
     }
@@ -1251,26 +1041,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Missing tenant_id on active lease." }, { status: 400 });
     }
 
-    const tenant =
-      tenants.find((row) => String(row.id) === tenantId) ||
-      ({
-        id: tenantId,
-        name:
-          lease.source === "dataset"
-            ? (
-                (Array.isArray(leasesData) ? leasesData : []).find((entry) => String(entry.id) === lease?.id)?.tenantName ||
-                "Tenant"
-              )
-            : "Tenant",
-        property_id: unit.property_id ?? null,
-        building: null,
-        unit: unit.unit,
-        monthly_rent: null,
-        due_day: null,
-        reference: null,
-      } satisfies TenantRecord);
+    const tenant = tenants.find((row) => String(row.id) === tenantId);
+    if (!tenant) {
+      return NextResponse.json({ ok: false, error: "Active lease tenant not found in tenants table." }, { status: 400 });
+    }
 
-    const rentValue = toNumberOrNull(lease.rent) ?? toNumberOrNull((tenant as any)?.monthly_rent) ?? 0;
+    const rentValue = toNumberOrNull(lease.rent_amount) ?? 0;
     const rentCents = Math.round(rentValue * 100);
     const rentLabel = `Monthly Rent (${reference.toLocaleString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" })})`;
 
@@ -1410,10 +1186,10 @@ export async function POST(req: NextRequest) {
       if (debugEnabled) {
         response.debug = {
           lease: {
-            id: lease.id,
+            id: lease.lease_id,
             tenant_id: tenantId,
             rent: rentValue,
-            source: lease.source,
+            source: "public.leases",
           },
           meter: electricityDebugPayload,
           invoice: {
@@ -1461,8 +1237,16 @@ export async function POST(req: NextRequest) {
     }));
     const id = stableUuid(`inv-${unit.id}-${periodKey}`);
     let savedInvoiceId = id;
+    const leaseSnapshotMeta = {
+      lease_id: lease.lease_id,
+      tenant_id: tenantId,
+      unit_id: unit.id,
+      rent_amount: Number(rentValue.toFixed(2)),
+      deposit_amount: Number((lease.deposit_amount ?? 0).toFixed(2)),
+    };
     const invoicePayload = {
       id,
+      lease_id: lease.lease_id,
       tenant_id: tenantId,
       unit_id: unit.id,
       invoice_number: null as string | null,
@@ -1474,7 +1258,10 @@ export async function POST(req: NextRequest) {
       tax_cents: 0,
       total_cents: totalCents,
       notes: null,
-      meta: meterSnapshot ? { meter_snapshot: meterSnapshot } : null,
+      meta: {
+        lease_snapshot: leaseSnapshotMeta,
+        ...(meterSnapshot ? { meter_snapshot: meterSnapshot } : {}),
+      },
       period: periodKey,
       line_items: lineItemsJson,
       meter_snapshot: meterSnapshot,
@@ -1490,6 +1277,7 @@ export async function POST(req: NextRequest) {
         `SELECT id, invoice_number
          FROM public.invoices
          WHERE unit_id = $1 AND period = $2
+           AND COALESCE(is_deleted, false) = false
          LIMIT 1`,
         [unit.id, periodKey],
       );
@@ -1503,9 +1291,10 @@ export async function POST(req: NextRequest) {
           period: periodKey,
         }));
       const invoiceRes = await query(
-        `INSERT INTO public.invoices (id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, subtotal_cents, tax_cents, total_cents, notes, meta, period, line_items, meter_snapshot, total_amount)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15::jsonb,$16::jsonb,$17)
+        `INSERT INTO public.invoices (id, lease_id, tenant_id, unit_id, invoice_number, invoice_date, due_date, status, currency, subtotal_cents, tax_cents, total_cents, notes, meta, period, line_items, meter_snapshot, total_amount)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16::jsonb,$17::jsonb,$18)
          ON CONFLICT (unit_id, period) DO UPDATE SET
+           lease_id = EXCLUDED.lease_id,
            tenant_id = EXCLUDED.tenant_id,
            invoice_number = CASE
              WHEN public.invoices.invoice_number ~ '^Inv-[0-9]+$' THEN public.invoices.invoice_number
@@ -1529,6 +1318,7 @@ export async function POST(req: NextRequest) {
          RETURNING id, invoice_number`,
         [
           invoicePayload.id,
+          invoicePayload.lease_id,
           invoicePayload.tenant_id,
           invoicePayload.unit_id,
           invoicePayload.invoice_number,
@@ -1576,7 +1366,7 @@ export async function POST(req: NextRequest) {
       await query("COMMIT");
       if (debugEnabled) {
         console.info("Bills debug", {
-          lease: { id: lease.id, tenant_id: tenantId, rent: rentValue, source: lease.source },
+          lease: { id: lease.lease_id, tenant_id: tenantId, rent: rentValue, source: "public.leases" },
           meter: electricityDebugPayload,
           invoice: invoicePayload,
         });
@@ -1635,22 +1425,11 @@ export async function POST(req: NextRequest) {
       updatedAt: now,
     };
 
-    const updated = await datasetsRepo.updateDataset<StoredInvoice[]>(
-      INVOICES_KEY,
-      (current) => {
-        const map = new Map<string, StoredInvoice>();
-        (Array.isArray(current) ? current : []).forEach((item) => map.set(item.id, item));
-        const existing = map.get(created.id);
-        map.set(created.id, existing ? { ...existing, ...created, updatedAt: now } : created);
-        return Array.from(map.values());
-      },
-      [],
-    );
-
-    const response: Record<string, unknown> = { ok: true, invoiceId: savedInvoiceId, data: updated, created: [created] };
+    const freshData = await listStoredInvoicesFromDb();
+    const response: Record<string, unknown> = { ok: true, invoiceId: savedInvoiceId, data: freshData, created: [created] };
     if (debugEnabled) {
       response.debug = {
-        lease: { id: lease.id, tenant_id: tenantId, rent: rentValue, source: lease.source },
+        lease: { id: lease.lease_id, tenant_id: tenantId, rent: rentValue, source: "public.leases" },
         meter: electricityDebugPayload,
         invoice: invoicePayload,
       };
@@ -1672,13 +1451,18 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Invoice id is required." }, { status: 400 });
     }
 
-    const updated = await datasetsRepo.updateDataset<StoredInvoice[]>(
-      INVOICES_KEY,
-      (current) => (Array.isArray(current) ? current.filter((item) => item.id !== payload.id) : []),
-      [],
+    await query(
+      `UPDATE public.invoices
+          SET status = 'void',
+              is_deleted = true,
+              deleted_at = now(),
+              voided_at = now()
+        WHERE id = $1`,
+      [payload.id],
     );
 
-    return NextResponse.json({ ok: true, data: updated });
+    const data = await listStoredInvoicesFromDb();
+    return NextResponse.json({ ok: true, data });
   } catch (err) {
     console.error("❌ failed to delete bill", err);
     return handleError(err);

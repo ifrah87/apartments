@@ -658,15 +658,7 @@ export default function LeasesClient() {
       return;
     } catch (err) {
       console.error(err);
-      if (isEditing) {
-        setNotice("API unavailable. Lease updated locally only.");
-        setLeases((prev) => prev.map((item) => (item.id === payload.id ? payload : item)));
-      } else {
-        setNotice("API unavailable. Lease saved locally only.");
-        setLeases((prev) => [...prev, payload]);
-      }
-      setShowModal(false);
-      setEditingId(null);
+      setNotice(err instanceof Error ? err.message : "Failed to save lease. Nothing was saved.");
     } finally {
       setSaving(false);
     }

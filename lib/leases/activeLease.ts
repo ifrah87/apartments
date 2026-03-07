@@ -21,6 +21,7 @@ export async function getActiveLeaseForUnit(unitId: string, asOfDate?: string | 
     `SELECT id, unit_id, tenant_id, rent, start_date, end_date, status
      FROM public.leases
      WHERE unit_id = $1
+       AND COALESCE(is_deleted, false) = false
        AND lower(status) = 'active'
        AND start_date <= $2
        AND (end_date IS NULL OR end_date >= $2)
@@ -49,6 +50,7 @@ export async function listActiveLeaseOccupancy(asOfDate?: string | Date | null) 
      FROM public.leases l
      JOIN public.units u ON u.id = l.unit_id
      WHERE lower(l.status) = 'active'
+       AND COALESCE(l.is_deleted, false) = false
        AND l.start_date <= $1
        AND (l.end_date IS NULL OR l.end_date >= $1)`,
     [dateKey],
