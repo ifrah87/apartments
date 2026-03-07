@@ -171,6 +171,22 @@ type ResolvedLease = {
   source: "db" | "dataset" | "occupied";
 };
 
+async function getActiveLeaseForUnitInPeriod(unitId: string, periodStart: string, periodEnd: string) {
+  const { rows } = await query<LeaseRow>(
+    `SELECT id, tenant_id, rent, start_date, end_date, status
+     FROM public.leases
+     WHERE unit_id = $1
+       AND COALESCE(is_deleted, false) = false
+       AND lower(status) = 'active'
+       AND start_date <= $3
+       AND (end_date IS NULL OR end_date >= $2)
+     ORDER BY start_date DESC
+     LIMIT 1`,
+    [unitId, periodStart, periodEnd],
+  );
+  return rows[0] ?? null;
+}
+
 function normalizeServiceList(value: unknown): ServiceRecord[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as ServiceRecord[];
@@ -1126,10 +1142,15 @@ export async function POST(req: NextRequest) {
     }
 
     let lease: ResolvedLease | null = null;
+    const referenceDateKey = toDateOnlyString(reference);
+    const billingPeriodStartKey = toDateOnlyString(start);
+    const billingPeriodEndKey = toDateOnlyString(end);
     const propertyKey = String(unit.property_id || "").trim().toLowerCase();
     const unitKey = String(unit.unit || "").trim().toLowerCase();
     try {
-      const activeLease = await getActiveLeaseForUnit(unit.id, new Date());
+      const activeLease =
+        (await getActiveLeaseForUnitInPeriod(unit.id, billingPeriodStartKey, billingPeriodEndKey)) ||
+        (await getActiveLeaseForUnit(unit.id, end));
       if (activeLease) {
         lease = {
           ...activeLease,
@@ -1141,9 +1162,80 @@ export async function POST(req: NextRequest) {
     }
 
     if (!lease) {
+      const datasetLeases = Array.isArray(leasesData) ? leasesData : [];
+      const activeDatasetLease = datasetLeases
+        .filter((entry) => coerceLeaseStatus(entry?.status) === "active")
+        .filter((entry) => String(entry?.unit || "").trim().toLowerCase() === unitKey)
+        .filter((entry) => {
+          const leaseProperty = String(entry?.property || "").trim().toLowerCase();
+          return !leaseProperty || !propertyKey || leaseProperty === propertyKey;
+        })
+        .filter((entry) => {
+          const start = toDateOnlyString(entry?.startDate || "");
+          const end = toDateOnlyString(entry?.endDate || "");
+          if (start && start > billingPeriodEndKey) return false;
+          if (end && end < billingPeriodStartKey) return false;
+          return true;
+        })
+        .sort((a, b) => {
+          const aStart = dateOnlyToUtcTimestamp(a?.startDate || "") || 0;
+          const bStart = dateOnlyToUtcTimestamp(b?.startDate || "") || 0;
+          return bStart - aStart;
+        })[0];
+
+      if (activeDatasetLease) {
+        const tenantFromUnit =
+          tenantIndex.get(`${propertyKey}::${unitKey}`) ||
+          tenantIndex.get(`::${unitKey}`) ||
+          null;
+        const tenantFromName = tenants.find((row) => {
+          const rowName = String(row.name || "").trim().toLowerCase();
+          const leaseName = String(activeDatasetLease.tenantName || "").trim().toLowerCase();
+          if (!rowName || !leaseName || rowName !== leaseName) return false;
+          const rowProperty = String(row.property_id || row.building || "").trim().toLowerCase();
+          return !propertyKey || !rowProperty || rowProperty === propertyKey;
+        });
+        const resolvedTenantId = String(tenantFromUnit?.id || tenantFromName?.id || "").trim();
+        if (resolvedTenantId) {
+          lease = {
+            id: String(activeDatasetLease.id || `dataset-lease-${unit.id}`),
+            tenant_id: resolvedTenantId,
+            rent: Number(activeDatasetLease.rent || 0),
+            start_date: toDateOnlyString(activeDatasetLease.startDate || "") || referenceDateKey,
+            end_date: toDateOnlyString(activeDatasetLease.endDate || "") || null,
+            status: String(activeDatasetLease.status || "Active"),
+            source: "dataset",
+          };
+        }
+      }
+    }
+
+    if (!lease) {
+      const occupiedTenant =
+        tenantIndex.get(`${propertyKey}::${unitKey}`) ||
+        tenantIndex.get(`::${unitKey}`) ||
+        null;
+      const unitStatus = String(unit.status || "").trim().toLowerCase();
+      const isOccupiedUnit = unitStatus === "occupied" || unitStatus.startsWith("occ");
+      const occupiedRent = toNumberOrNull(occupiedTenant?.monthly_rent);
+
+      if (occupiedTenant && (isOccupiedUnit || occupiedRent !== null)) {
+        lease = {
+          id: `occupied-${unit.id}-${occupiedTenant.id}`,
+          tenant_id: String(occupiedTenant.id),
+          rent: occupiedRent,
+          start_date: referenceDateKey,
+          end_date: null,
+          status: "occupied",
+          source: "occupied",
+        };
+      }
+    }
+
+    if (!lease) {
       const response: Record<string, unknown> = {
         ok: false,
-        error: "Unit is not ready: no active lease for today.",
+        error: "Unit is not ready: no active lease for the selected billing period.",
         unit: { id: unit.id, unit: unit.unit },
         reason: "no active lease",
       };
