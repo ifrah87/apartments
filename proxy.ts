@@ -67,9 +67,9 @@ const SESSION_COOKIE_OPTS = {
 };
 
 // ---------------------------------------------------------------------------
-// Middleware
+// Proxy
 // ---------------------------------------------------------------------------
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const host = getHost(req);
   const { pathname } = req.nextUrl;
 
