@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { PoolClient } from "pg";
 import { normalizeId } from "@/lib/normalizeId";
-import { query } from "@/lib/db";
+import { pool, query } from "@/lib/db";
 
 type RouteParams = Promise<{ id: string }>;
 
@@ -12,17 +13,19 @@ function toNumber(value: unknown, fallback = 0) {
 
 export async function POST(req: NextRequest, context: { params: RouteParams }) {
   const { id } = await context.params;
+  let client: PoolClient | null = null;
   try {
     const body = await req.json().catch(() => ({}));
 
     const invoiceRes = await query<{
       id: string;
       tenant_id: string | null;
+      lease_id: string | null;
       total_amount: number | null;
       amount_paid: number | null;
       status: string | null;
     }>(
-      `SELECT id, tenant_id, total_amount, amount_paid, status
+      `SELECT id, tenant_id, lease_id, total_amount, amount_paid, status
        FROM public.invoices
        WHERE id = $1
          AND COALESCE(is_deleted, false) = false
@@ -56,14 +59,32 @@ export async function POST(req: NextRequest, context: { params: RouteParams }) {
     const nextPaid = Number(Math.min(invoiceTotal, currentPaid + deductAmount).toFixed(2));
     const nextStatus =
       nextPaid <= 0 ? "unpaid" : nextPaid >= invoiceTotal - 0.01 ? "paid" : "partially_paid";
+    const leaseId = String(invoice.lease_id || "").trim() || null;
 
-    await query(
+    client = await pool.connect();
+    await client.query("BEGIN");
+
+    await client.query(
       `UPDATE public.invoices
           SET amount_paid = $2,
               status = $3
-        WHERE id = $1`,
+        WHERE id = $1
+          AND COALESCE(is_deleted, false) = false
+          AND lower(COALESCE(status, '')) <> 'void'`,
       [id, nextPaid, nextStatus],
     );
+
+    await client.query(
+      `INSERT INTO public.deposit_transactions
+        (tenant_id, lease_id, invoice_id, tx_date, tx_type, amount, note, created_at)
+       VALUES
+        ($1, $2, $3, $4::date, 'APPLY_TO_INVOICE', $5::numeric, $6, now())`,
+      [tenantId || null, leaseId, id, noteDate, deductAmount, note],
+    );
+
+    await client.query("COMMIT");
+    client.release();
+    client = null;
 
     return NextResponse.json({
       ok: true,
@@ -78,6 +99,15 @@ export async function POST(req: NextRequest, context: { params: RouteParams }) {
       },
     });
   } catch (err) {
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore rollback errors
+      }
+      client.release();
+      client = null;
+    }
     console.error("Failed to allocate deposit payment", err);
     const msg = err instanceof Error ? err.message : "Unexpected error.";
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });

@@ -18,6 +18,13 @@ export async function DELETE(
         WHERE lease_id = $1`,
       [leaseId],
     );
+    await query(
+      `UPDATE public.lease_charges
+          SET is_deleted = true,
+              deleted_at = now()
+        WHERE lease_id = $1`,
+      [leaseId],
+    );
     const res = await query(
       `UPDATE public.leases
           SET is_deleted = true,
@@ -36,10 +43,11 @@ export async function DELETE(
     }
 
     return NextResponse.json({ ok: true, id: leaseId });
-  } catch (error: any) {
+  } catch (error: unknown) {
     await query("ROLLBACK");
+    const message = error instanceof Error ? error.message : "Delete failed";
     return NextResponse.json(
-      { ok: false, error: error?.message ?? "Delete failed" },
+      { ok: false, error: message },
       { status: 500 },
     );
   }

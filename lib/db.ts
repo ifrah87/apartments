@@ -18,11 +18,11 @@ const ca = caRaw.includes("\\n") ? caRaw.replace(/\\n/g, "\n") : caRaw;
 
 const poolConfig = {
   connectionString: normalizedConnectionString,
-  connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT_MS || 5000),
-  query_timeout: Number(process.env.PGQUERY_TIMEOUT_MS || 8000),
-  statement_timeout: Number(process.env.PGSTATEMENT_TIMEOUT_MS || 8000),
+  connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT_MS || 10000),
+  query_timeout: Number(process.env.PGQUERY_TIMEOUT_MS || 20000),
+  statement_timeout: Number(process.env.PGSTATEMENT_TIMEOUT_MS || 20000),
   idleTimeoutMillis: 30000,
-  max: Number(process.env.PGPOOL_MAX || 4),
+  max: Number(process.env.PGPOOL_MAX || 10),
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
   ssl: !isLocalDatabase && ca ? { ca, rejectUnauthorized: true } : undefined,
@@ -82,11 +82,14 @@ async function ensureOperationalColumns() {
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS leases_external_id_uidx ON public.leases(external_id) WHERE external_id IS NOT NULL`);
   await pool.query(`DROP INDEX IF EXISTS public.uq_leases_one_active_per_unit`);
   await pool.query(`DROP INDEX IF EXISTS public.uniq_active_lease_per_unit`);
+  await pool.query(`ALTER TABLE IF EXISTS public.tenants ADD COLUMN IF NOT EXISTS phone text`);
   await pool.query(`ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false`);
   await pool.query(`ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS deleted_at timestamptz`);
   await pool.query(`ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS invoice_id text`);
   await pool.query(`ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS tenant_id uuid`);
   await pool.query(`ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS bank_transaction_id uuid`);
+  await pool.query(`ALTER TABLE IF EXISTS public.lease_charges ADD COLUMN IF NOT EXISTS is_deleted boolean NOT NULL DEFAULT false`);
+  await pool.query(`ALTER TABLE IF EXISTS public.lease_charges ADD COLUMN IF NOT EXISTS deleted_at timestamptz`);
   await pool.query(
     `CREATE TABLE IF NOT EXISTS public.invoice_drafts (
       id text PRIMARY KEY,
@@ -108,6 +111,32 @@ async function ensureOperationalColumns() {
   await pool.query(
     `CREATE UNIQUE INDEX IF NOT EXISTS invoice_drafts_tenant_period_uidx
        ON public.invoice_drafts(tenant_id, period)`,
+  );
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS public.deposit_transactions (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id text,
+      lease_id text,
+      invoice_id text,
+      tx_date date NOT NULL,
+      tx_type text NOT NULL,
+      amount numeric(12,2) NOT NULL CHECK (amount > 0),
+      note text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`,
+  );
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS lease_charges_active_lease_idx
+       ON public.lease_charges(lease_id)
+       WHERE COALESCE(is_deleted, false) = false`,
+  );
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS deposit_transactions_invoice_idx
+       ON public.deposit_transactions(invoice_id, created_at DESC)`,
+  );
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS deposit_transactions_lease_idx
+       ON public.deposit_transactions(lease_id, created_at DESC)`,
   );
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS unique_active_lease_per_unit ON public.leases(unit_id) WHERE status = 'active' AND COALESCE(is_deleted, false) = false`);
 }
@@ -139,10 +168,11 @@ async function ensureOperationalColumnsOnce(force = false) {
   await schemaBootstrapPromise;
 }
 
-export async function query<T extends QueryResultRow = any>(
+export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
-  params?: any[],
+  params?: unknown[],
 ): Promise<QueryResult<T>> {
+  const isProduction = process.env.NODE_ENV === "production";
   const now = Date.now();
   if (circuitOpenUntilMs > now) {
     throw new Error("Database temporarily unavailable (connection circuit open)");
@@ -154,14 +184,16 @@ export async function query<T extends QueryResultRow = any>(
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       const result = await pool.query<T>(text, params);
-      // Run schema safety net lazily after first successful DB query.
-      void ensureOperationalColumnsOnce(false);
+      // Run schema safety net lazily only in non-production environments.
+      if (!isProduction) {
+        void ensureOperationalColumnsOnce(false);
+      }
       transientFailureCount = 0;
       circuitOpenUntilMs = 0;
       return result;
     } catch (err) {
-      // Auto-heal known schema drift once, then retry immediately.
-      if (isSchemaDriftError(err)) {
+      // Auto-heal known schema drift once in non-production, then retry immediately.
+      if (!isProduction && isSchemaDriftError(err)) {
         await ensureOperationalColumnsOnce(true);
         if (attempt < maxAttempts) continue;
       }

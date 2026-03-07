@@ -7,7 +7,7 @@
     "dev:reset": "bash scripts/dev-reset.sh",
     "build": "NEXT_DISABLE_TURBOPACK=1 next build",
     "start": "next start",
-    "lint": "eslint .",
+    "lint": "eslint \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
     "test": "tsx tests/tenantStatement.test.ts",
     "db:push": "drizzle-kit push",
