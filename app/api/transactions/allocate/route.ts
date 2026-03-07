@@ -55,6 +55,14 @@ async function ensureReconciliationEventsTable(run: (sql: string, params?: any[]
   );
 }
 
+async function ensureBankTransactionsColumns(run: (sql: string, params?: any[]) => Promise<any>) {
+  await run(`ALTER TABLE IF EXISTS public.bank_transactions ADD COLUMN IF NOT EXISTS invoice_id text`);
+}
+
+async function ensureBankTransactionSplitsColumns(run: (sql: string, params?: any[]) => Promise<any>) {
+  await run(`ALTER TABLE IF EXISTS public.bank_transaction_splits ADD COLUMN IF NOT EXISTS invoice_id text`);
+}
+
 async function resolveActor(req: NextRequest) {
   const token = req.cookies.get("session")?.value;
   if (!token) return null;
@@ -123,6 +131,8 @@ export async function POST(req: NextRequest) {
 
     await ensureBankAllocationsTable(query);
     await ensureReconciliationEventsTable(query);
+    await ensureBankTransactionsColumns(query);
+    await ensureBankTransactionSplitsColumns(query);
     const actorId = await resolveActor(req);
 
     const { rows: statusRows } = await query<{ status: string; allocation_amount: number }>(
@@ -165,6 +175,8 @@ export async function POST(req: NextRequest) {
       try {
         await ensureBankAllocationsTable((sql, params) => client.query(sql, params));
         await ensureReconciliationEventsTable((sql, params) => client.query(sql, params));
+        await ensureBankTransactionsColumns((sql, params) => client.query(sql, params));
+        await ensureBankTransactionSplitsColumns((sql, params) => client.query(sql, params));
         await client.query("BEGIN");
         const affectedInvoiceIds = new Set<string>();
 
