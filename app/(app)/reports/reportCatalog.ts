@@ -31,6 +31,7 @@ export const REPORT_ROUTES = {
   journalEntries: "/reports/journal-entries",
   chartOfAccounts: "/reports/chart-of-accounts",
   rentRoll: "/reports/rent-roll",
+  receivables: "/reports/receivables",
   rentLedger: "/reports/ledger",
   overdueRent: "/reports/overdue-rent",
   rentCharges: "/reports/rent-charges",
@@ -75,6 +76,7 @@ export const REPORT_GROUPS = [
     key: "rent",
     items: [
       { key: "rentRoll", href: REPORT_ROUTES.rentRoll, Icon: ScrollText },
+      { key: "receivables", href: REPORT_ROUTES.receivables, Icon: Wallet },
       { key: "rentLedger", href: REPORT_ROUTES.rentLedger, Icon: CircleDollarSign },
       { key: "overdueRent", href: REPORT_ROUTES.overdueRent, Icon: CalendarClock },
       { key: "rentCharges", href: REPORT_ROUTES.rentCharges, Icon: ScrollText },

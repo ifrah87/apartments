@@ -5,6 +5,7 @@ import { badRequest, notFound, type RepoError } from "./errors";
 export type TenantRecord = {
   id: string;
   name: string;
+  phone?: string | null;
   building?: string | null;
   property_id?: string | null;
   unit?: string | null;
@@ -33,6 +34,7 @@ async function ensureTenantsTable() {
     `CREATE TABLE IF NOT EXISTS tenants (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      phone TEXT,
       building TEXT,
       property_id TEXT,
       unit TEXT,
@@ -67,6 +69,7 @@ function normalizeTenantRow(row: any): TenantRecord {
   return {
     id: String(row.id),
     name: row.name,
+    phone: row.phone ?? null,
     building: row.building ?? null,
     property_id: row.property_id ?? null,
     unit: row.unit ?? null,
@@ -84,6 +87,7 @@ function normalizeTenantInput(payload: TenantInput, requireName = true) {
   return {
     id: payload.id ? String(payload.id) : undefined,
     name: name ?? payload.name,
+    phone: payload.phone ?? null,
     building: payload.building ?? null,
     property_id: payload.property_id ?? null,
     unit: payload.unit ?? null,
@@ -110,7 +114,7 @@ export async function listTenants(filters: TenantFilters = {}): Promise<TenantRe
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return withTenantsTable(async () => {
     const { rows } = await query(
-      `SELECT id, name, building, property_id, unit, monthly_rent, due_day, reference
+      `SELECT id, name, phone, building, property_id, unit, monthly_rent, due_day, reference
        FROM tenants
        ${where}
        ORDER BY name ASC`,
@@ -125,7 +129,7 @@ export async function getTenant(id: string): Promise<TenantRecord | null> {
   if (!id) throw badRequest("Tenant id is required.");
   return withTenantsTable(async () => {
     const { rows } = await query(
-      `SELECT id, name, building, property_id, unit, monthly_rent, due_day, reference
+      `SELECT id, name, phone, building, property_id, unit, monthly_rent, due_day, reference
        FROM tenants
        WHERE id = $1`,
       [id],
@@ -140,10 +144,11 @@ export async function createTenant(payload: TenantInput): Promise<TenantRecord> 
   const id = normalized.id ?? randomUUID();
   return withTenantsTable(async () => {
     const { rows } = await query(
-      `INSERT INTO tenants (id, name, building, property_id, unit, monthly_rent, due_day, reference)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      `INSERT INTO tenants (id, name, phone, building, property_id, unit, monthly_rent, due_day, reference)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name,
+         phone = EXCLUDED.phone,
          building = EXCLUDED.building,
          property_id = EXCLUDED.property_id,
          unit = EXCLUDED.unit,
@@ -151,10 +156,11 @@ export async function createTenant(payload: TenantInput): Promise<TenantRecord> 
          due_day = EXCLUDED.due_day,
          reference = EXCLUDED.reference,
          updated_at = now()
-       RETURNING id, name, building, property_id, unit, monthly_rent, due_day, reference`,
+       RETURNING id, name, phone, building, property_id, unit, monthly_rent, due_day, reference`,
       [
         id,
         normalized.name,
+        normalized.phone,
         normalized.building,
         normalized.property_id,
         normalized.unit,
@@ -175,6 +181,7 @@ export async function updateTenant(id: string, payload: TenantInput): Promise<Te
 
   const mapping: Array<[keyof typeof normalized, string]> = [
     ["name", "name"],
+    ["phone", "phone"],
     ["building", "building"],
     ["property_id", "property_id"],
     ["unit", "unit"],
@@ -201,7 +208,7 @@ export async function updateTenant(id: string, payload: TenantInput): Promise<Te
       `UPDATE tenants
        SET ${fields.join(", ")}, updated_at = now()
        WHERE id = $${params.length}
-       RETURNING id, name, building, property_id, unit, monthly_rent, due_day, reference`,
+       RETURNING id, name, phone, building, property_id, unit, monthly_rent, due_day, reference`,
       params,
     );
     if (!rows.length) throw notFound("Tenant not found.");
@@ -228,10 +235,11 @@ export async function upsertTenants(entries: TenantInput[]) {
       }
 
       const { rows } = await query<{ inserted: boolean }>(
-        `INSERT INTO tenants (id, name, building, property_id, unit, monthly_rent, due_day, reference)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        `INSERT INTO tenants (id, name, phone, building, property_id, unit, monthly_rent, due_day, reference)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          ON CONFLICT (id) DO UPDATE SET
            name = EXCLUDED.name,
+           phone = EXCLUDED.phone,
            building = EXCLUDED.building,
            property_id = EXCLUDED.property_id,
            unit = EXCLUDED.unit,
@@ -243,6 +251,7 @@ export async function upsertTenants(entries: TenantInput[]) {
         [
           normalized.id,
           normalized.name ?? "",
+          normalized.phone,
           normalized.building,
           normalized.property_id,
           normalized.unit,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { RepoError, tenantsRepo } from "@/lib/repos";
+import type { TenantRecord } from "@/src/lib/repos/tenantsRepo";
 import { LeaseAgreement, LeaseAgreementStatus, LeaseBillingCycle } from "@/lib/leases";
 import { query } from "@/lib/db";
 
@@ -33,17 +34,42 @@ function normalizeCycle(cycle?: string): LeaseBillingCycle {
   return "Monthly";
 }
 
-async function syncTenantFromLease(lease: LeaseAgreement) {
-  if (!lease?.tenantName || !lease?.unit) return;
+async function upsertTenantFromLease(lease: LeaseAgreement, preferredTenantId?: string | null): Promise<TenantRecord | null> {
+  if (!lease?.tenantName || !lease?.unit) return null;
   const propertyKey = lease.property ? String(lease.property) : "";
   try {
-    await tenantsRepo.createTenant({
+    const tenantPayload = {
       name: lease.tenantName,
+      phone: lease.tenantPhone || null,
       unit: lease.unit,
       property_id: propertyKey || null,
-    });
+      building: propertyKey || null,
+      monthly_rent: toNumber(lease.rent),
+    };
+    if (preferredTenantId) {
+      try {
+        return await tenantsRepo.updateTenant(preferredTenantId, tenantPayload);
+      } catch {
+        return await tenantsRepo.createTenant({ id: preferredTenantId, ...tenantPayload });
+      }
+    }
+    const existing = await query<{ id: string }>(
+      `SELECT id
+       FROM public.tenants
+       WHERE lower(trim(name)) = lower(trim($1))
+         AND (trim(COALESCE(unit, '')) = trim($2) OR trim($2) = '')
+         AND ($3::text = '' OR property_id::text = $3::text OR building::text = $3::text)
+       ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+       LIMIT 1`,
+      [lease.tenantName, lease.unit, propertyKey],
+    );
+    if (existing.rows[0]?.id) {
+      return await tenantsRepo.updateTenant(String(existing.rows[0].id), tenantPayload);
+    }
+    return await tenantsRepo.createTenant(tenantPayload);
   } catch (err) {
     console.warn("⚠️ failed to sync tenant from lease", err);
+    return null;
   }
 }
 
@@ -61,6 +87,10 @@ function fromSqlLeaseStatus(status?: string): LeaseAgreementStatus {
 }
 
 async function resolveUnitAndTenant(lease: LeaseAgreement) {
+  return resolveUnitAndTenantWithPreferredTenant(lease);
+}
+
+async function resolveUnitAndTenantWithPreferredTenant(lease: LeaseAgreement, preferredTenantId?: string | null) {
   const unitValue = String(lease.unit || "").trim();
   const propertyValue = String(lease.property || "").trim();
   const tenantName = String(lease.tenantName || "").trim();
@@ -78,6 +108,10 @@ async function resolveUnitAndTenant(lease: LeaseAgreement) {
   const unitId = unitRes.rows[0]?.id;
   if (!unitId) return null;
 
+  if (preferredTenantId) {
+    return { unitId, tenantId: String(preferredTenantId) };
+  }
+
   const tenantRes = await query<{ id: string }>(
     `SELECT id
      FROM public.tenants
@@ -94,8 +128,8 @@ async function resolveUnitAndTenant(lease: LeaseAgreement) {
   return { unitId, tenantId };
 }
 
-async function upsertSqlLeaseFromAgreement(lease: LeaseAgreement) {
-  const resolved = await resolveUnitAndTenant(lease);
+async function upsertSqlLeaseFromAgreement(lease: LeaseAgreement, preferredTenantId?: string | null) {
+  const resolved = await resolveUnitAndTenantWithPreferredTenant(lease, preferredTenantId);
   if (!resolved) return;
   const startDate = String(lease.startDate || "").trim();
   if (!startDate) return;
@@ -129,6 +163,18 @@ async function softDeleteSqlLease(externalId: string) {
      WHERE external_id = $1`,
     [externalId],
   );
+}
+
+async function getSqlLeaseBinding(externalId: string) {
+  const { rows } = await query<{ tenant_id: string | null }>(
+    `SELECT tenant_id::text AS tenant_id
+     FROM public.leases
+     WHERE external_id = $1
+       AND COALESCE(is_deleted, false) = false
+     LIMIT 1`,
+    [externalId],
+  );
+  return rows[0] ?? null;
 }
 
 async function listAgreementsFromSql(): Promise<LeaseAgreement[]> {
@@ -213,8 +259,8 @@ export async function POST(req: NextRequest) {
       leaseDuration: payload.leaseDuration ? String(payload.leaseDuration) : "Manual Date / Open",
     };
 
-    await syncTenantFromLease(entry);
-    await upsertSqlLeaseFromAgreement(entry);
+    const tenant = await upsertTenantFromLease(entry);
+    await upsertSqlLeaseFromAgreement(entry, tenant?.id ?? null);
     const updated = await listAgreementsFromSql();
 
     return NextResponse.json({ ok: true, data: updated });
@@ -252,8 +298,9 @@ export async function PUT(req: NextRequest) {
       endDate: payload.endDate !== undefined ? String(payload.endDate) : currentLease.endDate,
       leaseDuration: payload.leaseDuration ? String(payload.leaseDuration) : currentLease.leaseDuration,
     };
-    await syncTenantFromLease(nextLease);
-    await upsertSqlLeaseFromAgreement(nextLease);
+    const binding = await getSqlLeaseBinding(String(payload.id));
+    const tenant = await upsertTenantFromLease(nextLease, binding?.tenant_id ?? null);
+    await upsertSqlLeaseFromAgreement(nextLease, tenant?.id ?? binding?.tenant_id ?? null);
     const updated = await listAgreementsFromSql();
 
     return NextResponse.json({ ok: true, data: updated });

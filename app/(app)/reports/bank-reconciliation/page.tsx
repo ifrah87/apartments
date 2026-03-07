@@ -43,6 +43,10 @@ type ReconciliationHistory = {
     created_by: string | null;
     created_at: string;
     invoice_number: string | null;
+    invoice_status: string | null;
+    total_amount: number | null;
+    amount_paid: number | null;
+    outstanding: number | null;
   }>;
   events: Array<{
     id: string;
@@ -711,9 +715,14 @@ export default function BankReconciliationPage() {
                                   <p className="text-[11px] text-slate-200">
                                     Matched {fmt.format(Number(alloc.allocated_amount || 0))} to{" "}
                                     {alloc.invoice_number || alloc.invoice_id}
+                                    {Number(alloc.outstanding || 0) > 0
+                                      ? ` · ${fmt.format(Number(alloc.outstanding || 0))} left unpaid`
+                                      : " · Paid in full"}
                                   </p>
                                   <p className="text-[10px] text-slate-500">
-                                    {alloc.created_by || "unknown user"} · {alloc.created_at ? new Date(alloc.created_at).toLocaleString() : "unknown time"}
+                                    {(alloc.invoice_status || "unpaid").replace(/_/g, " ")} ·{" "}
+                                    {alloc.created_by || "unknown user"} ·{" "}
+                                    {alloc.created_at ? new Date(alloc.created_at).toLocaleString() : "unknown time"}
                                   </p>
                                 </div>
                               ))}

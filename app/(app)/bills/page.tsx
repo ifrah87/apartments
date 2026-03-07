@@ -51,6 +51,7 @@ type InvoiceRow = {
   invoiceDate?: string;
   dueDate?: string;
   total: number;
+  amountPaid: number;
   rentAmount: number;
   cleaningAmount: number;
   electricityAmount: number;
@@ -311,6 +312,42 @@ function deriveDraftMeterSnapshot(
   return null;
 }
 
+function formatElectricityPendingReason(value: string) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "Electricity is pending for this preview.";
+  if (normalized === "missing current reading within billing window") {
+    return "No electricity reading exists inside the selected electricity period.";
+  }
+  if (normalized === "missing prev reading") {
+    return "A previous electricity reading could not be found to calculate usage.";
+  }
+  if (normalized === "electricity service not assigned") {
+    return "No electricity service is assigned to this unit/property.";
+  }
+  if (normalized === "missing electricity rate") {
+    return "The electricity service exists, but its billing rate is missing.";
+  }
+  if (normalized === "meter readings table missing") {
+    return "Electricity readings are unavailable because the meter readings table is missing.";
+  }
+  if (normalized === "missing unit number") {
+    return "This unit has no unit number mapped for electricity readings.";
+  }
+  return value;
+}
+
+function deriveElectricityPendingReason(lineItems: DraftLineItem[]) {
+  for (const item of lineItems) {
+    const meta = item?.meta;
+    if (!meta || typeof meta !== "object" || Array.isArray(meta)) continue;
+    const record = meta as Record<string, unknown>;
+    const kind = String(record.kind || "").trim().toUpperCase();
+    if (kind !== "METER_ELECTRICITY_PENDING") continue;
+    return formatElectricityPendingReason(String(record.reason || ""));
+  }
+  return "";
+}
+
 function parseInvoiceDate(value?: string) {
   if (!value) return null;
   const trimmed = value.trim();
@@ -469,10 +506,11 @@ function normalizeInvoice(row: any): InvoiceRow {
     invoiceDate: invoiceDate ? String(invoiceDate) : undefined,
     dueDate: dueDate ? String(dueDate) : undefined,
     total,
+    amountPaid: Number(row?.amountPaid ?? row?.amount_paid ?? 0),
     rentAmount,
     cleaningAmount,
     electricityAmount,
-    outstanding: Number(row?.outstanding ?? total ?? 0),
+    outstanding: Number(row?.outstanding ?? Math.max(0, total - Number(row?.amountPaid ?? row?.amount_paid ?? 0))),
     status: normalizedStatus,
   };
 }
@@ -1371,6 +1409,7 @@ export default function BillsPage() {
   };
 
   const previewMeterSnapshot = draftInvoice ? deriveDraftMeterSnapshot(draftInvoice.meterSnapshot ?? null, draftItems) : null;
+  const electricityPendingReason = draftInvoice ? deriveElectricityPendingReason(draftItems) : "";
 
   const handleViewInvoice = (invoice: InvoiceRow) => {
     window.open(buildInvoiceUrl(invoice, "pdf"), "_blank", "noopener,noreferrer");
@@ -1465,7 +1504,8 @@ export default function BillsPage() {
                 Electricity: inv.electricityAmount,
                 Cleaning: inv.cleaningAmount,
                 Total: inv.total,
-                Outstanding: inv.outstanding,
+                Paid: inv.amountPaid,
+                "Left to pay": inv.outstanding,
                 Status: inv.status,
               }))
             }
@@ -1602,7 +1642,8 @@ export default function BillsPage() {
                   Electricity: inv.electricityAmount,
                   Cleaning: inv.cleaningAmount,
                   Total: inv.total,
-                  Outstanding: inv.outstanding,
+                  Paid: inv.amountPaid,
+                  "Left to pay": inv.outstanding,
                   Status: inv.status,
                 }))
               }
@@ -1617,7 +1658,8 @@ export default function BillsPage() {
                 <th className="px-4 py-3">Unit / Tenant</th>
                 <th className="px-4 py-3">Period</th>
                 <th className="px-4 py-3">Total Amount</th>
-                <th className="px-4 py-3">Outstanding</th>
+                <th className="px-4 py-3">Paid</th>
+                <th className="px-4 py-3">Left to pay</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -1631,6 +1673,7 @@ export default function BillsPage() {
                   </td>
                   <td className="px-4 py-3">{getInvoicePeriodLabel(invoice)}</td>
                   <td className="px-4 py-3 text-slate-100">{formatCurrency(invoice.total)}</td>
+                  <td className="px-4 py-3 text-emerald-200">{formatCurrency(invoice.amountPaid)}</td>
                   <td
                     className={`px-4 py-3 ${
                       invoice.outstanding > 0 ? "text-rose-200" : "text-emerald-200"
@@ -1708,7 +1751,7 @@ export default function BillsPage() {
               ))}
               {!visibleInvoices.length ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">
                     No invoices available.
                   </td>
                 </tr>
@@ -2034,6 +2077,18 @@ export default function BillsPage() {
                       <p className="text-[11px] uppercase tracking-wide text-slate-500">Rate</p>
                       <p className="mt-1 text-sm text-slate-100">{formatCurrency(previewMeterSnapshot.rate)}</p>
                     </div>
+                  </div>
+                </div>
+              ) : electricityPendingReason ? (
+                <div className="rounded-xl border border-amber-300/30 bg-amber-500/10 p-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-amber-200">Electricity Pending</h3>
+                    <p className="text-xs text-amber-100/80">
+                      {electricityPendingReason}
+                    </p>
+                    <p className="mt-2 text-xs text-amber-100/70">
+                      Current electricity period: {draftInvoice.electricityPeriod}
+                    </p>
                   </div>
                 </div>
               ) : null}

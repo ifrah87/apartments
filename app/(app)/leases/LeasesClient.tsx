@@ -562,22 +562,6 @@ export default function LeasesClient() {
     setSaving(true);
     try {
       const resolvedPropertyId = propertyId.trim();
-      const tenantRes = await fetch("/api/tenants", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: payload.tenantName,
-          unit: payload.unit,
-          property_id: resolvedPropertyId,
-          building: propertyLabel,
-          monthly_rent: payload.rent,
-        }),
-      });
-      const tenantData = await tenantRes.json().catch(() => null);
-      if (!tenantRes.ok || tenantData?.ok === false) {
-        throw new Error(tenantData?.error || "Failed to save tenant.");
-      }
-
       if (!isEditing) {
         let latestUnits = units;
         try {

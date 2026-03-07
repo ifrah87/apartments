@@ -53,6 +53,7 @@ const REPORT_GROUPS: { title: string; items: ReportTileItem[] }[] = [
     title: "Rent Payments",
     items: [
       { name: "Rent Roll", desc: "Live rent vs payments snapshot.", href: "/reports/rent-roll", Icon: ScrollText },
+      { name: "Receivables", desc: "Open invoices, partial payments, and balances left to collect.", href: "/reports/receivables", Icon: Wallet },
       { name: "Rent Ledger", desc: "Payments received vs due.", href: "/reports/ledger", Icon: CircleDollarSign },
       { name: "Overdue Rent", desc: "Delinquent tenants & arrears.", href: "/reports/overdue-rent", Icon: CalendarClock },
       { name: "Rent Charges", desc: "Scheduled adjustments.", href: "/reports/rent-charges", Icon: ScrollText },

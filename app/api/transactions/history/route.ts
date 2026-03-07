@@ -34,6 +34,10 @@ export async function GET(req: NextRequest) {
         created_by: string | null;
         created_at: string;
         invoice_number: string | null;
+        invoice_status: string | null;
+        total_amount: number | null;
+        amount_paid: number | null;
+        outstanding: number | null;
       }>(
         `SELECT
            ba.id,
@@ -41,7 +45,11 @@ export async function GET(req: NextRequest) {
            ba.allocated_amount,
            ba.created_by,
            ba.created_at::text,
-           i.invoice_number
+           i.invoice_number,
+           i.status AS invoice_status,
+           i.total_amount,
+           i.amount_paid,
+           GREATEST(0, COALESCE(i.total_amount, 0) - COALESCE(i.amount_paid, 0))::numeric AS outstanding
          FROM public.bank_allocations ba
          LEFT JOIN public.invoices i ON i.id::text = ba.invoice_id::text
          WHERE ba.transaction_id = $1

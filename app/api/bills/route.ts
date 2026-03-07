@@ -620,7 +620,9 @@ type StoredInvoice = {
   unitId: string;
   unitLabel: string;
   invoiceDate: string;
+  dueDate?: string;
   total: number;
+  amountPaid: number;
   rentAmount: number;
   cleaningAmount: number;
   electricityAmount: number;
@@ -799,7 +801,9 @@ async function listStoredInvoicesFromDb(): Promise<StoredInvoice[]> {
       unitId: String(row.unit_id || ""),
       unitLabel: unitNumber ? `Unit ${unitNumber}` : tenantUnit ? `Unit ${tenantUnit}` : "Unit",
       invoiceDate,
+      dueDate: toDateOnlyString(row.due_date || "") || undefined,
       total: Number(total.toFixed(2)),
+      amountPaid: Number(amountPaid.toFixed(2)),
       rentAmount: amounts.rentAmount,
       cleaningAmount: amounts.cleaningAmount,
       electricityAmount: Number(electricityAmount.toFixed(2)),
@@ -1415,7 +1419,9 @@ export async function POST(req: NextRequest) {
       unitId: unit.id,
       unitLabel: unit.unit ? `Unit ${unit.unit}` : `Unit ${unit.id}`,
       invoiceDate: invoiceDate.toISOString().slice(0, 10),
+      dueDate: dueDate.toISOString().slice(0, 10),
       total: Number((totalCents / 100).toFixed(2)),
+      amountPaid: 0,
       rentAmount: Number((rentCentsTotal / 100).toFixed(2)),
       cleaningAmount: Number((cleaningCentsTotal / 100).toFixed(2)),
       electricityAmount: Number((electricityCentsTotal / 100).toFixed(2)),

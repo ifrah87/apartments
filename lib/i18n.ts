@@ -351,6 +351,7 @@ export const TRANSLATIONS: Record<Language, TranslationTree> = {
           desc: "Collections, adjustments, and deposit tracking.",
           items: {
             rentRoll: { name: "Rent Roll", desc: "Live rent vs payments snapshot." },
+            receivables: { name: "Receivables", desc: "Open invoices, partial payments, and balances left to collect." },
             rentLedger: { name: "Rent Ledger", desc: "Payments received vs due." },
             overdueRent: { name: "Overdue Rent", desc: "Delinquent tenants & arrears." },
             rentCharges: { name: "Rent Charges", desc: "Scheduled adjustments." },
@@ -718,6 +719,7 @@ export const TRANSLATIONS: Record<Language, TranslationTree> = {
           title: "Bixinta Kirada",
           items: {
             rentRoll: { name: "Rent Roll", desc: "Dulmar lacag la qaatay vs la bixiyay." },
+            receivables: { name: "Receivables", desc: "Biilasha furan, lacagaha qayb ahaan la bixiyay, iyo haraaga weli la sugayo." },
             rentLedger: { name: "Ledger-ka Kirada", desc: "Lacagaha la helay vs kuwa la rabay." },
             overdueRent: { name: "Kiro Dib U Dhacday", desc: "Deganayaasha dib u dhacay & lacagaha." },
             rentCharges: { name: "Eedeymaha Kiro", desc: "Habaynta la qorsheeyay." },
