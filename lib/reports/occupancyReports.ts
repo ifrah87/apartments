@@ -384,11 +384,78 @@ export async function calculateOccupancySummary(propertyId?: string): Promise<Oc
       };
     }
 
+    const tenantRows = await query<{
+      property_id: string | null;
+      building: string | null;
+      unit: string | null;
+    }>(
+      `SELECT property_id::text AS property_id, building::text AS building, unit::text AS unit
+       FROM public.tenants`,
+    ).then((res) => res.rows).catch(() => []);
+
+    const occupiedFromTenants = (() => {
+      const unitKeys = new Set(
+        rows
+          .map((row) => `${String(row.property_id || "").toLowerCase()}::${String(row.unit_number || "").toLowerCase()}`)
+          .filter((key) => !key.endsWith("::")),
+      );
+      const fallbackUnitKeyMap = new Map<string, string | null>();
+      rows.forEach((row) => {
+        const fallbackKey = `::${String(row.unit_number || "").toLowerCase()}`;
+        const resolvedKey = `${String(row.property_id || "").toLowerCase()}::${String(row.unit_number || "").toLowerCase()}`;
+        const existing = fallbackUnitKeyMap.get(fallbackKey);
+        if (existing === undefined) {
+          fallbackUnitKeyMap.set(fallbackKey, resolvedKey);
+        } else if (existing !== resolvedKey) {
+          fallbackUnitKeyMap.set(fallbackKey, null);
+        }
+      });
+
+      const matched = new Set<string>();
+      tenantRows.forEach((tenant) => {
+        const tenantUnit = String(tenant.unit || "").toLowerCase();
+        if (!tenantUnit) return;
+        const tenantProperty = String(tenant.property_id || tenant.building || "").toLowerCase();
+        const exact = `${tenantProperty}::${tenantUnit}`;
+        if (tenantProperty && unitKeys.has(exact)) {
+          matched.add(exact);
+          return;
+        }
+        const fallback = fallbackUnitKeyMap.get(`::${tenantUnit}`);
+        if (fallback) matched.add(fallback);
+      });
+      return matched.size;
+    })();
+
     const occupiedFromUnitStatus = rows.filter((row) => row.unit_status === "occupied").length;
     const expectedRentFromUnitStatus = rows.reduce((sum, row) => {
       if (row.unit_status !== "occupied") return sum;
       return sum + Number(row.unit_rent || 0);
     }, 0);
+    if (occupiedFromTenants > 0) {
+      const vacantUnits = Math.max(0, totalUnits - occupiedFromTenants);
+      const expectedRentFromTenants = rows.reduce((sum, row) => {
+        const key = `${String(row.property_id || "").toLowerCase()}::${String(row.unit_number || "").toLowerCase()}`;
+        const hasTenant = rows.length
+          ? tenantRows.some((tenant) => {
+              const tenantUnit = String(tenant.unit || "").toLowerCase();
+              if (!tenantUnit) return false;
+              const tenantProperty = String(tenant.property_id || tenant.building || "").toLowerCase();
+              if (tenantProperty) return `${tenantProperty}::${tenantUnit}` === key;
+              return tenantUnit === String(row.unit_number || "").toLowerCase();
+            })
+          : false;
+        return hasTenant ? sum + Number(row.unit_rent || 0) : sum;
+      }, 0);
+      return {
+        totalUnits,
+        occupiedUnits: occupiedFromTenants,
+        vacantUnits,
+        occupancyRate: totalUnits ? Math.round((occupiedFromTenants / totalUnits) * 100) : 0,
+        expectedRent: Number(expectedRentFromTenants.toFixed(2)),
+        averageDaysVacant: 0,
+      };
+    }
     const vacantUnits = Math.max(0, totalUnits - occupiedFromUnitStatus);
     return {
       totalUnits,

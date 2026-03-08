@@ -25,6 +25,13 @@ import {
 import SectionCard from "@/components/ui/SectionCard";
 
 type ReportTileItem = { name: string; desc: string; href: string; Icon: React.ElementType };
+type UnitRow = { id?: string | null; unit?: string | null; status?: string | null };
+type LeaseSummaryPayload = { activeCount?: number };
+type TenantRow = {
+  unit?: string | null;
+  property_id?: string | null;
+  building?: string | null;
+};
 
 const REPORT_GROUPS: { title: string; items: ReportTileItem[] }[] = [
   {
@@ -115,32 +122,48 @@ export default function ReportsPage() {
     let active = true;
     const load = async () => {
       try {
-        const [unitsRes, leasesRes, tenantsRes] = await Promise.all([
+        const [unitsRes, leaseSummaryRes, tenantsRes] = await Promise.all([
           fetch(`/api/units?ts=${Date.now()}`, { cache: "no-store" }),
-          fetch(`/api/lease-agreements?ts=${Date.now()}`, { cache: "no-store" }),
+          fetch(`/api/leases/summary?ts=${Date.now()}`, { cache: "no-store" }),
           fetch(`/api/tenants?ts=${Date.now()}`, { cache: "no-store" }),
         ]);
         const unitsPayload = await unitsRes.json().catch(() => null);
-        const leasesPayload = await leasesRes.json().catch(() => null);
+        const leaseSummaryPayload = await leaseSummaryRes.json().catch(() => null);
         const tenantsPayload = await tenantsRes.json().catch(() => null);
 
         const units = Array.isArray(unitsPayload?.ok ? unitsPayload.data : unitsPayload)
           ? (unitsPayload.ok ? unitsPayload.data : unitsPayload)
           : [];
-        const leases = Array.isArray(leasesPayload?.ok ? leasesPayload.data : leasesPayload)
-          ? (leasesPayload.ok ? leasesPayload.data : leasesPayload)
-          : [];
+        const leaseSummaryData = (leaseSummaryPayload?.ok
+          ? leaseSummaryPayload.data
+          : leaseSummaryPayload) as LeaseSummaryPayload | null;
         const tenants = Array.isArray(tenantsPayload?.ok ? tenantsPayload.data : tenantsPayload)
           ? (tenantsPayload.ok ? tenantsPayload.data : tenantsPayload)
           : [];
-
-        const activeLeases = leases.filter(
-          (lease: any) => String(lease?.status || "").toLowerCase() === "active",
+        const unitRows: UnitRow[] = Array.isArray(units) ? (units as UnitRow[]) : [];
+        const tenantRows: TenantRow[] = Array.isArray(tenants) ? (tenants as TenantRow[]) : [];
+        const totalUnits = unitRows.length;
+        const occupiedFromLeaseSummary = Number(leaseSummaryData?.activeCount || 0);
+        const occupiedFromUnitStatus = unitRows.filter((unit) =>
+          String(unit.status || "").toLowerCase().startsWith("occ"),
+        ).length;
+        const occupiedFromTenants = (() => {
+          const unitSet = new Set(
+            unitRows
+              .map((unit) => String(unit.unit || "").trim().toLowerCase())
+              .filter(Boolean),
+          );
+          const occupied = new Set(
+            tenantRows
+              .map((tenant) => String(tenant.unit || "").trim().toLowerCase())
+              .filter((unit) => Boolean(unit) && unitSet.has(unit)),
+          );
+          return occupied.size;
+        })();
+        const occupiedUnits = Math.min(
+          totalUnits,
+          Math.max(0, occupiedFromLeaseSummary || occupiedFromUnitStatus || occupiedFromTenants),
         );
-        const occupiedUnits = new Set(
-          activeLeases.map((lease: any) => String(lease?.unit || "").trim()).filter(Boolean),
-        ).size;
-        const totalUnits = Array.isArray(units) ? units.length : 0;
         const vacantUnits = Math.max(totalUnits - occupiedUnits, 0);
 
         if (active) {

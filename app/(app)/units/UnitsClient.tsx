@@ -167,16 +167,32 @@ export default function UnitsClient() {
   }, []);
 
   useEffect(() => {
+    if (!properties.length) {
+      loadData(selectedPropertyId || undefined);
+      return;
+    }
+    const isValidSelected = selectedPropertyId
+      ? properties.some((property) => property.id === selectedPropertyId)
+      : false;
+    if (selectedPropertyId && !isValidSelected) {
+      const resolved = resolveCurrentPropertyId(properties);
+      setSelectedPropertyId(resolved || "");
+      setForm((prev) => ({ ...prev, propertyId: resolved || "" }));
+      loadData(resolved || undefined);
+      return;
+    }
     loadData(selectedPropertyId || undefined);
-  }, [selectedPropertyId]);
+  }, [selectedPropertyId, properties]);
 
   useEffect(() => {
+    if (!properties.length) return;
     const paramId = new URLSearchParams(window.location.search).get("propertyId");
     if (!paramId) return;
+    if (!properties.some((property) => property.id === paramId)) return;
     setCurrentPropertyId(paramId);
     setSelectedPropertyId(paramId);
     setForm((prev) => ({ ...prev, propertyId: paramId }));
-  }, []);
+  }, [properties]);
 
   const tenantIndex = useMemo(() => {
     const map = new Map<string, TenantRecord>();

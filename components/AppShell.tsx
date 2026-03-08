@@ -13,8 +13,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/5 to-transparent" />
 
       <div className="relative z-10 min-h-screen lg:flex">
-        <header className="sticky top-0 z-40 border-b border-white/10 bg-app-surface/95 backdrop-blur lg:hidden">
-          <div className="flex items-center justify-between gap-3 px-3 py-3 sm:px-4">
+        <header className="z-40 px-3 py-3 sm:px-4 lg:hidden">
+          <div className="flex items-center">
             <button
               type="button"
               onClick={() => setMobileNavOpen(true)}
@@ -23,15 +23,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             >
               <Menu className="h-5 w-5" />
             </button>
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500 sm:text-[11px] sm:tracking-[0.28em]">Orfane</p>
-              <p className="truncate text-sm font-semibold text-slate-100">Property Manager</p>
-            </div>
-          </div>
-          <div className="px-3 pb-3 sm:px-4">
-            <Suspense fallback={<div className="h-10 w-full rounded-2xl bg-white/5" />}>
-              <HeaderActions />
-            </Suspense>
           </div>
         </header>
 

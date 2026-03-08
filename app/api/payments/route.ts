@@ -10,6 +10,12 @@ function handleError(err: unknown) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
+function isMissingAllocationSchema(err: unknown) {
+  const code = (err as { code?: string } | null)?.code;
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return code === "42P01" || /bank_allocations/i.test(message);
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -64,23 +70,37 @@ export async function GET(req: NextRequest) {
       GROUP BY bt.id, bt.txn_date, bt.payee, bt.particulars, u.property_id, i.tenant_id
       ORDER BY bt.txn_date DESC
     `;
-    const allocationResult = await query<{
+    let normalized: Array<{
       date: string;
       description: string;
       amount: number;
       type: string;
       property_id: string | null;
       tenant_id: string | null;
-    }>(allocationSql, allocationParams);
+    }> = [];
+    try {
+      const allocationResult = await query<{
+        date: string;
+        description: string;
+        amount: number;
+        type: string;
+        property_id: string | null;
+        tenant_id: string | null;
+      }>(allocationSql, allocationParams);
 
-    let normalized = allocationResult.rows.map((row) => ({
-      date: row.date,
-      description: row.description,
-      amount: Number(row.amount || 0),
-      type: row.type,
-      property_id: row.property_id ?? null,
-      tenant_id: row.tenant_id ?? null,
-    }));
+      normalized = allocationResult.rows.map((row) => ({
+        date: row.date,
+        description: row.description,
+        amount: Number(row.amount || 0),
+        type: row.type,
+        property_id: row.property_id ?? null,
+        tenant_id: row.tenant_id ?? null,
+      }));
+    } catch (err) {
+      if (!isMissingAllocationSchema(err)) throw err;
+      // Older DBs may not have reconciliation tables yet.
+      normalized = [];
+    }
 
     if (!normalized.length) {
       const transactions = await bankTransactionsRepo.listTransactions({
