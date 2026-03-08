@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { PoolClient } from "pg";
 import { bankTransactionsRepo, RepoError } from "@/lib/repos";
 import { normalizeId } from "@/lib/normalizeId";
 import { isUuid } from "@/lib/isUuid";
-import { query } from "@/lib/db";
+import { pool, query } from "@/lib/db";
 
 function handleError(err: unknown) {
   const status = err instanceof RepoError ? err.status : 500;
@@ -24,14 +25,10 @@ export async function GET(req: NextRequest) {
     const propertyId = searchParams.get("propertyId") ?? undefined;
     const tenantIdRaw = searchParams.get("tenantId"); // string | null
 
-    const tenantIdNormalized =
+    const tenantIdFilter =
       tenantIdRaw && tenantIdRaw.trim() !== ""
-        ? normalizeId(tenantIdRaw)
+        ? String(tenantIdRaw).trim()
         : undefined;
-
-    if (tenantIdNormalized && !isUuid(tenantIdNormalized)) {
-      return NextResponse.json({ ok: false, error: `Invalid tenant_id: ${tenantIdRaw}` }, { status: 400 });
-    }
 
     const allocationParams: unknown[] = [];
     const allocationWhere: string[] = [];
@@ -47,8 +44,8 @@ export async function GET(req: NextRequest) {
       allocationParams.push(propertyId);
       allocationWhere.push(`u.property_id::text = $${allocationParams.length}::text`);
     }
-    if (tenantIdNormalized) {
-      allocationParams.push(tenantIdNormalized);
+    if (tenantIdFilter) {
+      allocationParams.push(tenantIdFilter);
       allocationWhere.push(`i.tenant_id::text = $${allocationParams.length}::text`);
     }
     const allocationSql = `
@@ -107,7 +104,7 @@ export async function GET(req: NextRequest) {
         start,
         end,
         propertyId,
-        tenantId: tenantIdNormalized,
+        tenantId: tenantIdFilter,
       });
       normalized = transactions.map((txn) => ({
         date: txn.date,
@@ -127,6 +124,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  let client: PoolClient | null = null;
   try {
     const payload = (await req.json().catch(() => null)) as
       | {
@@ -188,17 +186,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "invoice_id is required (or resolvable from lease_id)." }, { status: 400 });
     }
 
-    await query("BEGIN");
+    client = await pool.connect();
+    await client.query("BEGIN");
 
-    const invoiceRes = await query<{
+    const invoiceRes = await client.query<{
       id: string;
       lease_id: string | null;
       tenant_id: string | null;
+      unit_id: string | null;
       total_amount: number | null;
       amount_paid: number | null;
       status: string | null;
     }>(
-      `SELECT id, lease_id, tenant_id, total_amount, amount_paid, status
+      `SELECT id, lease_id, tenant_id, unit_id, total_amount, amount_paid, status
        FROM public.invoices
        WHERE id::text = $1::text
          AND COALESCE(is_deleted, false) = false
@@ -207,27 +207,42 @@ export async function POST(req: NextRequest) {
       [resolvedInvoiceId],
     );
     if (!invoiceRes.rows.length) {
-      await query("ROLLBACK");
+      await client.query("ROLLBACK");
       return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
     }
 
     const invoice = invoiceRes.rows[0];
-    const resolvedLeaseId = String(leaseId || invoice.lease_id || "").trim();
-    const resolvedTenantId = normalizeId(tenantIdInput || String(invoice.tenant_id || ""));
+    let resolvedLeaseId = String(leaseId || invoice.lease_id || "").trim();
+    const resolvedTenantRaw = normalizeId(tenantIdInput || String(invoice.tenant_id || ""));
+    const tenantIdUuid = resolvedTenantRaw && isUuid(resolvedTenantRaw) ? resolvedTenantRaw : null;
+
     if (!resolvedLeaseId || !isUuid(resolvedLeaseId)) {
-      await query("ROLLBACK");
+      const leaseFallback = await client.query<{ id: string }>(
+        `SELECT id::text AS id
+         FROM public.leases
+         WHERE COALESCE(is_deleted, false) = false
+           AND lower(COALESCE(status, '')) = 'active'
+           AND (
+             ($1::text <> '' AND unit_id::text = $1::text)
+             OR
+             ($2::text <> '' AND tenant_id::text = $2::text)
+           )
+         ORDER BY start_date DESC NULLS LAST, created_at DESC NULLS LAST
+         LIMIT 1`,
+        [String(invoice.unit_id || ""), String(invoice.tenant_id || "")],
+      );
+      resolvedLeaseId = String(leaseFallback.rows[0]?.id || "");
+    }
+    if (!resolvedLeaseId || !isUuid(resolvedLeaseId)) {
+      await client.query("ROLLBACK");
       return NextResponse.json({ ok: false, error: "A valid lease_id is required for payment linkage." }, { status: 400 });
     }
-    if (!resolvedTenantId || !isUuid(resolvedTenantId)) {
-      await query("ROLLBACK");
-      return NextResponse.json({ ok: false, error: "A valid tenant_id is required for payment linkage." }, { status: 400 });
-    }
 
-    const result = await query<{ id: string }>(
+    const result = await client.query<{ id: string }>(
       `INSERT INTO public.payments (lease_id, invoice_id, tenant_id, payment_date, amount, method, reference, bank_transaction_id, is_deleted, deleted_at)
        VALUES ($1::uuid, $2::text, $3::uuid, $4::date, $5::numeric, $6::text, $7::text, $8::uuid, false, NULL)
        RETURNING id`,
-      [resolvedLeaseId, resolvedInvoiceId, resolvedTenantId, paymentDate, amount, method, reference, bankTransactionId],
+      [resolvedLeaseId, resolvedInvoiceId, tenantIdUuid, paymentDate, amount, method, reference, bankTransactionId],
     );
 
     const totalAmount = Number(invoice.total_amount || 0);
@@ -235,7 +250,7 @@ export async function POST(req: NextRequest) {
     const nextPaid = Number(Math.min(totalAmount, currentPaid + amount).toFixed(2));
     const nextStatus =
       nextPaid <= 0 ? "unpaid" : nextPaid >= totalAmount - 0.01 ? "paid" : "partially_paid";
-    await query(
+    await client.query(
       `UPDATE public.invoices
           SET amount_paid = $2,
               status = $3
@@ -243,7 +258,9 @@ export async function POST(req: NextRequest) {
       [resolvedInvoiceId, nextPaid, nextStatus],
     );
 
-    await query("COMMIT");
+    await client.query("COMMIT");
+    client.release();
+    client = null;
     return NextResponse.json(
       {
         ok: true,
@@ -251,7 +268,7 @@ export async function POST(req: NextRequest) {
           id: result.rows[0]?.id ?? null,
           invoice_id: resolvedInvoiceId,
           lease_id: resolvedLeaseId,
-          tenant_id: resolvedTenantId,
+          tenant_id: tenantIdUuid,
           amount_paid: nextPaid,
           status: nextStatus,
         },
@@ -259,10 +276,15 @@ export async function POST(req: NextRequest) {
       { status: 201 },
     );
   } catch (err) {
-    try {
-      await query("ROLLBACK");
-    } catch {
-      // ignore rollback errors
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore rollback errors
+      } finally {
+        client.release();
+        client = null;
+      }
     }
     console.error("❌ /api/payments POST failed:", err);
     return handleError(err);

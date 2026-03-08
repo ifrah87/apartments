@@ -17,23 +17,48 @@ type SearchParams = {
   propertyId?: string;
 };
 
-async function fetchLeaseSummary() {
+async function fetchLeaseSummary(propertyFilter?: string) {
   try {
-    const { rows } = await query(`
-      SELECT
-        COUNT(*)                  AS active_count,
-        COALESCE(SUM(l.rent), 0) AS total_rent,
-        COALESCE(SUM(
-          CASE u.unit_type
-            WHEN '3bed'  THEN 750
-            WHEN '2bed'  THEN 650
-            ELSE 0
-          END
-        ), 0)                     AS full_occupancy_rent
-      FROM public.leases l
-      JOIN public.units u ON u.id = l.unit_id
-      WHERE l.status = 'active'
-    `);
+    const normalizedProperty = String(propertyFilter || "").trim().toLowerCase();
+    const params: Array<string> = [];
+    const leasePropertyClause = normalizedProperty
+      ? `AND lower(coalesce(u.property_id::text, '')) = $1`
+      : "";
+    if (normalizedProperty) params.push(normalizedProperty);
+
+    const asOfDateKey = new Date().toISOString().slice(0, 10);
+    const asOfParam = `$${params.length + 1}`;
+    params.push(asOfDateKey);
+
+    const { rows } = await query(
+      `SELECT
+         (
+           SELECT COUNT(*)::int
+           FROM public.leases l
+           JOIN public.units u ON u.id = l.unit_id
+           WHERE lower(coalesce(l.status, '')) = 'active'
+             AND COALESCE(l.is_deleted, false) = false
+             AND l.start_date <= ${asOfParam}
+             AND (l.end_date IS NULL OR l.end_date >= ${asOfParam})
+             ${leasePropertyClause}
+         ) AS active_count,
+         (
+           SELECT COALESCE(SUM(COALESCE(l.rent, 0)), 0)::numeric
+           FROM public.leases l
+           JOIN public.units u ON u.id = l.unit_id
+           WHERE lower(coalesce(l.status, '')) = 'active'
+             AND COALESCE(l.is_deleted, false) = false
+             AND l.start_date <= ${asOfParam}
+             AND (l.end_date IS NULL OR l.end_date >= ${asOfParam})
+             ${leasePropertyClause}
+         ) AS total_rent,
+         (
+           SELECT COALESCE(SUM(COALESCE(u.rent, 0)), 0)::numeric
+           FROM public.units u
+           ${normalizedProperty ? "WHERE lower(coalesce(u.property_id::text, '')) = $1" : ""}
+         ) AS full_occupancy_rent`,
+      params,
+    );
     const row = rows[0] ?? {};
     return {
       activeCount:       Number(row.active_count ?? 0),
@@ -41,7 +66,7 @@ async function fetchLeaseSummary() {
       fullOccupancyRent: Number(row.full_occupancy_rent ?? 0),
     };
   } catch {
-    return { activeCount: 0, totalRent: 0, fullOccupancyRent: 37350 };
+    return { activeCount: 0, totalRent: 0, fullOccupancyRent: 0 };
   }
 }
 
@@ -58,6 +83,8 @@ async function fetchArrears() {
           EXTRACT(EPOCH FROM (NOW() - COALESCE(due_date, invoice_date))) / 86400 AS age_days
         FROM public.invoices
         WHERE GREATEST(0, COALESCE(total_amount, 0) - COALESCE(amount_paid, 0)) > 0
+          AND COALESCE(is_deleted, false) = false
+          AND lower(COALESCE(status, '')) <> 'void'
       ) sub
     `);
     const row = rows[0] ?? {};
@@ -96,7 +123,7 @@ export default async function DashboardPage({
     calculateOccupancySummary(propertyFilter),
     calculateBankSummary({ propertyId: propertyFilter }),
     fetchLedger({ propertyId: propertyFilter }),
-    fetchLeaseSummary(),
+    fetchLeaseSummary(propertyFilter),
     fetchArrears(),
   ]);
 
@@ -207,7 +234,7 @@ export default async function DashboardPage({
       <RevenueTargetWidget
         activeLeases={leaseSummary.activeCount}
         actualRent={leaseSummary.totalRent}
-        targetRent={leaseSummary.fullOccupancyRent || 37350}
+        targetRent={leaseSummary.fullOccupancyRent}
       />
 
       <ArrearsWidget

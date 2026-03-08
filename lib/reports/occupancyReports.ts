@@ -259,6 +259,7 @@ export async function calculateOccupancySummary(propertyId?: string): Promise<Oc
          FROM public.leases l
          WHERE l.unit_id = u.id
            AND lower(l.status) = 'active'
+           AND COALESCE(l.is_deleted, false) = false
            AND l.start_date <= ${asOfParam}
            AND (l.end_date IS NULL OR l.end_date >= ${asOfParam})
          ORDER BY l.start_date DESC
